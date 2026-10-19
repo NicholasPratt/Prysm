@@ -4,6 +4,8 @@
  *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, FX = FILTER, ENV = AMP, GLO = MIX)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
+ *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / INIT, KNOB1 = the slot, SAVE again = do it
+ *                    (twice over a used slot or unsaved changes); HOME or a page = back
  *
  * The screen, top to bottom: the header (the page and the row; the page number and the CPU), the page's graphic
  * (what the row being edited touches, lit), the legend (the row's four labels, over the knobs' cells), the rows (a
@@ -77,6 +79,10 @@ static const page_t PAGES[PG_N] = {
 };
 
 static patch_t edit;                            /* the sound being edited (engine_set() after each change) */
+static patch_t clean;                           /* the sound as last loaded or saved: edit differs = unsaved changes */
+static int32_t cur_slot = -1;                   /* the slot it came from or went to (-1: none) */
+static uint8_t slot_moved;                      /* cur_slot changed: the app keeps it for the next power-on */
+static int modified(void) { return memcmp(&edit, &clean, sizeof edit) != 0; }
 static uint32_t page, row[PG_N];
 static uint32_t dirty;                          /* what to redraw: D_... */
 enum { D_HDR = 1, D_GFX = 2, D_LEG = 4, D_ROWS = 8, D_ALL = 15 };
@@ -283,8 +289,13 @@ static void draw_hdr(void)
     e = put(s, PAGES[page].name);
     e = put(e, "  ");
     put(e, PAGES[page].rows[row[page]].name);
-    draw_text_box(4, HDR_Y, 150, &FONT_S, s, C_ACC, 0);
-    e = num(s, page + 1u);
+    draw_text_box(4, HDR_Y, 130, &FONT_S, s, C_ACC, 0);
+    e = s;
+    if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
+    else e = put(e, "-");
+    if (modified()) e = put(e, "*");            /* unsaved changes */
+    e = put(e, " ");
+    e = num(e, page + 1u);
     e = put(e, "/");
     e = num(e, PG_N);
 #ifndef DINGHY_HOST
@@ -293,7 +304,7 @@ static void draw_hdr(void)
     put(e, "%");
     cpu_max = 0;
 #endif
-    draw_text_box(154, HDR_Y, 82, &FONT_S, s, C_FAINT, 2);
+    draw_text_box(134, HDR_Y, 102, &FONT_S, s, C_FAINT, 2);
 }
 
 static void draw_legend(void)
@@ -339,10 +350,173 @@ static void draw_rows(void)
     cv_blit(0, ROW_Y);
 }
 
+/* ---- the PATCH screen (the SAVE button): the 8 slots as tiles, then SAVE / LOAD / INIT */
+#define PG_PATCH PG_N                           /* not in ALGORITHM's round: only SAVE leads here */
+enum { PA_SAVE, PA_LOAD, PA_INIT, PA_N };
+static uint32_t pa_row, pa_slot, pa_armed, pa_back = PG_OSC1;
+static const char *pa_msg = "";
+static char pa_msgbuf[32];
+
+static int32_t wave_sample(uint32_t b, uint32_t pos, uint32_t i)   /* a morphed wave, from flash (the thumbnails) */
+{
+    uint32_t q = (pos & 127u) * (PW_WAVES - 1u) * 256u / 127u, w = q >> 8, f = q & 255u;
+    if (b >= PW_BANKS) b = 0;
+    if (w >= PW_WAVES - 1u) { w = PW_WAVES - 2u; f = 256u; }
+    return PW_WAVE[b][w][i] + (((int32_t)PW_WAVE[b][w + 1u][i] - PW_WAVE[b][w][i]) * (int32_t)f >> 8);
+}
+
+static void pa_draw_gfx(void)
+{
+    uint32_t s, i;
+    cv_begin(240, G_H, C_BLACK);
+    for (s = 0; s < PATCH_SLOTS; s++) {
+        int32_t x = 2 + (int32_t)(s % 4u) * 59, y = 1 + (int32_t)(s / 4u) * 32, w = 56, h = 30, px = 0, py = 0;
+        uint16_t edge = s == pa_slot ? C_ACC : C_BOX;
+        char n[4];
+        cv_rect(x, y, w, 1, edge); cv_rect(x, y + h - 1, w, 1, edge);
+        cv_rect(x, y, 1, h, edge); cv_rect(x + w - 1, y, 1, h, edge);
+        if (s == pa_slot) {                     /* the selected slot: a double edge */
+            cv_rect(x + 1, y + 1, w - 2, 1, edge); cv_rect(x + 1, y + h - 2, w - 2, 1, edge);
+            cv_rect(x + 1, y + 1, 1, h - 2, edge); cv_rect(x + w - 2, y + 1, 1, h - 2, edge);
+        }
+        num(n, s + 1u);
+        cv_text(x + 5, y + 7, &FONT_S, n, bank.used[s] ? C_WHITE : C_FAINT);
+        if (bank.used[s])                       /* its sound: osc 1's carrier, as a thumbnail */
+            for (i = 0; i < 32u; i++) {
+                int32_t xx = x + 19 + (int32_t)i, yy = y + h / 2 -
+                             wave_sample(bank.p[s].osc[0].bank[0], bank.p[s].osc[0].pos[0], i * PW_N / 32u) * 10 / 32767;
+                if (i) cv_line(px, py, xx, yy, s == pa_slot ? C_WHITE : C_MID);
+                px = xx; py = yy;
+            }
+        else
+            cv_rect(x + 28, y + h / 2, 14, 1, C_FAINT);   /* empty */
+        if ((int32_t)s == cur_slot)             /* where the sound came from */
+            cv_circle(x + w - 7, y + 6, 2, C_ACC, 1);
+    }
+    cv_blit(0, G_Y);
+}
+
+static void pa_draw_text(void)                  /* the header, the legend, the three rows, the message */
+{
+    static const char *const NAME[PA_N] = {"SAVE", "LOAD", "INIT"};
+    char s[40], *e, n[4];
+    uint32_t r;
+    e = put(s, "PATCH  ");
+    put(e, NAME[pa_row]);
+    draw_text_box(4, HDR_Y, 130, &FONT_S, s, C_ACC, 0);
+    e = s;
+    if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
+    else e = put(e, "-");
+    if (modified()) put(e, "*");
+    draw_text_box(134, HDR_Y, 102, &FONT_S, s, C_FAINT, 2);
+    draw_text_box(0, LEG_Y, 240, &FONT_S, "KNOB1: SLOT", C_ACC, 1);
+    num(n, pa_slot + 1u);
+    cv_begin(240, PA_N * ROW_H, C_BLACK);
+    for (r = 0; r < PA_N; r++) {
+        int32_t y = (int32_t)(r * ROW_H), sel = r == pa_row;
+        if (sel)
+            cv_rect(0, y, 240, ROW_H - 2, C_SEL);
+        cv_circle(6, y + 9, sel ? 4 : 3, sel ? C_ACC : C_FAINT, sel);
+        cv_text(CELL_X + 6, y + 1, &FONT_S, NAME[r], sel ? C_WHITE : C_MID);
+        e = r == PA_SAVE ? put(s, "TO SLOT ") : r == PA_LOAD ? put(s, "SLOT ") : put(s, "THE DEFAULT SOUND");
+        if (r != PA_INIT) {
+            e = put(e, n);
+            if (r == PA_LOAD && !bank.used[pa_slot]) put(e, "  (EMPTY)");
+            if (r == PA_SAVE && bank.used[pa_slot]) put(e, "  (USED)");
+        }
+        cv_text(CELL_X + 60, y + 1, &FONT_S, s, sel ? C_WHITE : C_MID);
+    }
+    cv_blit(0, ROW_Y);
+    draw_text_box(0, ROW_Y + PA_N * ROW_H + 8u, 240, &FONT_S, pa_msg, pa_armed ? C_WHITE : C_ACC, 1);
+    draw_text_box(0, 222, 240, &FONT_S, "SAVE: DO IT    HOME: BACK", C_FAINT, 1);
+}
+
+static void pa_say(const char *a, uint32_t slot)   /* the message line: a, then the slot's number if slot > 0 */
+{
+    char *e = put(pa_msgbuf, a);
+    if (slot) num(e, slot);
+    pa_msg = pa_msgbuf;
+}
+
+static int pa_do(void)                          /* the SAVE button on the PATCH screen; 1 = the sound changed */
+{
+    patch_t p;
+    if (pa_row == PA_SAVE) {
+        if (bank.used[pa_slot] && (int32_t)pa_slot != cur_slot && !pa_armed) {
+            pa_armed = 1;
+            pa_say("SLOT USED: SAVE AGAIN", 0);
+            return 0;
+        }
+        pa_armed = 0;
+        if (patch_save(pa_slot, &edit) != 0) { pa_say("SAVE FAILED", 0); return 0; }
+        clean = edit;
+        cur_slot = (int32_t)pa_slot;
+        slot_moved = 1;
+        pa_say("SAVED TO ", pa_slot + 1u);
+        return 0;
+    }
+    if (pa_row == PA_LOAD && patch_get(pa_slot, &p) != 0) {
+        put(num(put(pa_msgbuf, "SLOT "), pa_slot + 1u), " IS EMPTY");
+        pa_msg = pa_msgbuf;
+        return 0;
+    }
+    if (modified() && !pa_armed) {              /* LOAD / INIT over unsaved changes: ask once more */
+        pa_armed = 1;
+        pa_say("UNSAVED: SAVE AGAIN", 0);
+        return 0;
+    }
+    pa_armed = 0;
+    if (pa_row == PA_LOAD) {
+        edit = p;
+        cur_slot = (int32_t)pa_slot;
+        pa_say("LOADED ", pa_slot + 1u);
+    } else {
+        edit = PATCH_INIT;
+        cur_slot = -1;
+        pa_say("DEFAULT SOUND LOADED", 0);
+    }
+    clean = edit;
+    slot_moved = 1;
+    return 1;
+}
+
+static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders and its SAVE; 1 = the sound changed */
+{
+    int32_t d;
+    uint32_t i, changed = 0;
+    if ((d = fm1_enc_take(ENC_SELECT)) != 0) {
+        int32_t n = (int32_t)pa_row + d;
+        pa_row = (uint32_t)(n < 0 ? 0 : n >= PA_N ? PA_N - 1 : n);
+        pa_armed = 0;
+        pa_msg = "";
+        dirty |= D_ALL;
+    }
+    for (i = 0; i < 4u; i++)                    /* KNOB1: the slot (the others do nothing here) */
+        if ((d = fm1_enc_take(ENC_KNOB1 + i)) != 0 && i == 0) {
+            pa_slot = (uint32_t)(((int32_t)pa_slot + d % 8 + 8) % 8);
+            pa_armed = 0;
+            pa_msg = "";
+            dirty |= D_ALL;
+        }
+    (void)fm1_enc_take(ENC_PRESETS);
+    if (buttons & (1u << BTN_SAVE)) {
+        changed = (uint32_t)pa_do();
+        dirty |= D_ALL;
+    }
+    return (int)changed;
+}
+
 static void ui_page(uint32_t pg)
 {
-    if (pg >= PG_N) return;
+    if (pg > PG_PATCH) return;
     if (pg != page) lcd_fill(0, G_Y, 240, 240 - G_Y, C_BLACK);   /* (row counts differ: clear what was below) */
+    if (pg == PG_PATCH && page != PG_PATCH) {   /* in: from where SAVE was pressed, the slot of the sound */
+        pa_back = page;
+        pa_armed = 0;
+        pa_msg = "";
+        pa_row = PA_SAVE;
+        if (cur_slot >= 0) pa_slot = (uint32_t)cur_slot;
+    }
     page = pg;
     dirty = D_ALL;
 }
@@ -355,6 +529,14 @@ static int ui_input(uint32_t buttons)
     const row_t *r;
     int32_t d;
     uint32_t i, changed = 0;
+    if (page == PG_PATCH) {                     /* the PATCH screen: HOME, a page button or ALGORITHM leave it */
+        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(pa_back); return 0; }
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_GLO)))
+            return pa_input(buttons);           /* (else a page button: on to that page, below) */
+    } else if (buttons & (1u << BTN_SAVE)) {
+        ui_page(PG_PATCH);
+        return 0;
+    }
     if (buttons & (1u << BTN_EDIT)) ui_page(page == PG_OSC1 ? PG_OSC2 : PG_OSC1);
     if (buttons & (1u << BTN_FX)) ui_page(PG_FILTER);
     if (buttons & (1u << BTN_ENV)) ui_page(PG_AMP);
@@ -385,16 +567,23 @@ static int ui_input(uint32_t buttons)
         last_turn[i] = fm1_ms;
         v = pval(page, p);
         x = (int32_t)*v + d;
-        *v = (uint8_t)(x < 0 ? 0 : x > p->max ? p->max : x);
+        x = x < 0 ? 0 : x > p->max ? p->max : x;
+        if (x == *v)
+            continue;                           /* at the end of its range: nothing changed */
+        *v = (uint8_t)x;
         changed = 1;
-        dirty |= D_GFX | D_ROWS;
+        dirty |= D_HDR | D_GFX | D_ROWS;        /* (the header: the unsaved-changes mark) */
     }
     return (int)changed;
 }
 
-static void ui_init(void)
+static void ui_init(int32_t slot)                /* the sound in that slot (the last one used), else the default */
 {
+    patches_load();
     edit = PATCH_INIT;
+    if (slot >= 0 && slot < (int32_t)PATCH_SLOTS && patch_get((uint32_t)slot, &edit) == 0)
+        cur_slot = slot;
+    clean = edit;
     engine_set(&edit);
     lcd_fill(0, 0, 240, 240, C_BLACK);
     page = PG_OSC1;
@@ -411,6 +600,12 @@ static void ui_draw(void)                       /* from the main loop: what chan
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;
+    if (page == PG_PATCH) {
+        if (dirty & D_GFX) pa_draw_gfx();
+        if (dirty & (D_ROWS | D_LEG)) pa_draw_text();   /* (not on the header's twice-a-second CPU refresh) */
+        dirty = 0;
+        return;
+    }
     if (dirty & D_HDR) draw_hdr();
     if (dirty & D_GFX) draw_gfx();
     if (dirty & D_LEG) draw_legend();

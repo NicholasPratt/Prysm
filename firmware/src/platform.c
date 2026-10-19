@@ -68,9 +68,13 @@ static volatile uint32_t fm1_ms;                /* milliseconds since power-on (
 #define FELUCCA_UART 0
 #include "usb.c"
 
-/* ---- flash: read anywhere; erase / program only the update's staging area and the settings sector */
+/* ---- flash: read anywhere; erase / program only the update's staging area, the settings sector and the store's
+ * two sectors (Prysm: store_load / store_save, below) */
 #define SETTINGS_AT 0x000FC000u                 /* one 4 KiB sector of Felucca's globals area */
-#define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u))
+#define STORE_A 0x000FA000u                     /* the store: two sectors, written in turn */
+#define STORE_B 0x000FB000u
+#define FL_RANGE_OK(off, n) (FL_IN(off, n, FL_OTA_LO, FL_OTA_HI) || FL_IN(off, n, SETTINGS_AT, SETTINGS_AT + 0x1000u) || \
+                             FL_IN(off, n, STORE_A, STORE_B + 0x1000u))
 #include "fm1_flash.h"
 static uint8_t flash_ok;
 static int st_read(uint32_t off, void *dst, uint32_t n)
@@ -170,6 +174,55 @@ static int settings_save(const void *p, uint32_t n)   /* p in RAM, n <= 256 */
     if ((rc = fl_write(SETTINGS_AT + sizeof h, p, n)) != 0)
         return rc;
     return fl_write(SETTINGS_AT, (const uint8_t *)h, sizeof h);   /* the header last: a cut save stays invalid */
+}
+
+/* ---- the store (Prysm): up to STORE_MAX bytes (the patches), in two sectors written in turn, each
+ * [magic][length][sequence][crc32] then the bytes. A save goes to the sector not holding the newest copy, so a cut
+ * save (the power gone mid-erase) loses that save only, never what was there. Save when nothing plays (an erase
+ * drops the sound for ~50 ms). */
+#define STORE_MAGIC 0x53595250u                 /* "PRYS" */
+#define STORE_MAX (0x1000u - 16u)
+static uint32_t store_seq, store_at;            /* the newest copy: its sequence and sector (0: none yet) */
+static int store_valid(uint32_t at, uint32_t n, uint32_t *seq)   /* the sector holds n good bytes: 1 */
+{
+    static uint8_t buf[STORE_MAX];
+    uint32_t h[4];
+    if (st_read(at, h, sizeof h) || h[0] != STORE_MAGIC || h[1] != n || n > STORE_MAX)
+        return 0;
+    if (st_read(at + sizeof h, buf, n) || crc32(buf, n) != h[3])
+        return 0;
+    *seq = h[2];
+    return 1;
+}
+static int store_load(void *p, uint32_t n)      /* 0: loaded the newest good copy; else p is untouched */
+{
+    uint32_t sa = 0, sb = 0, a, b;
+    if (!flash_ok || n > STORE_MAX)
+        return -1;
+    a = (uint32_t)store_valid(STORE_A, n, &sa);
+    b = (uint32_t)store_valid(STORE_B, n, &sb);
+    if (!a && !b)
+        return -1;
+    store_at = a && (!b || (int32_t)(sa - sb) > 0) ? STORE_A : STORE_B;
+    store_seq = store_at == STORE_A ? sa : sb;
+    return st_read(store_at + 16u, p, n) ? -1 : 0;
+}
+static int store_save(const void *p, uint32_t n)   /* p in RAM; 0 = saved */
+{
+    uint32_t at = store_at == STORE_A ? STORE_B : STORE_A, h[4] = {STORE_MAGIC, n, store_seq + 1u, 0}, took;
+    int rc;
+    if (!flash_ok || n > STORE_MAX)
+        return -1;
+    h[3] = crc32(p, n);
+    if ((rc = fl_erase4k(at, &took)) != 0)
+        return rc;
+    if ((rc = fl_write(at + sizeof h, p, n)) != 0)
+        return rc;
+    if ((rc = fl_write(at, (const uint8_t *)h, sizeof h)) != 0)   /* the header last: a cut save stays invalid */
+        return rc;
+    store_at = at;
+    store_seq = h[2];
+    return 0;
 }
 
 /* ---- MIDI over USB: 4-byte USB-MIDI packets, cable 0 */

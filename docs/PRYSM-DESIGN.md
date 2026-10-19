@@ -103,9 +103,23 @@ The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve 
 | --- | --- | --- | --- | --- |
 | OSC | osc 1 level | osc 2 level | osc 2 semitones | osc 2 fine |
 
+## Patches
+
+The **SAVE** button opens the PATCH screen:
+
+- **8 slots**, drawn as tiles: the slot's number and a thumbnail of osc 1's carrier wave (a dash: empty). The
+  selected slot has a double edge; a dot marks the slot the current sound came from.
+- **SELECT** picks SAVE, LOAD or INIT; **KNOB1** the slot; **SAVE** again does it. Saving over a used slot (other
+  than the current one), and loading or INIT over unsaved changes, ask for a second press.
+- **HOME**, ALGORITHM or a page button go back.
+- The header shows the current slot and `*` when there are unsaved changes, on every page.
+- The slot last saved or loaded is loaded at power-on.
+- Stored in two flash sectors written in turn (0xFA000, 0xFB000, `store_load` / `store_save` in platform.c), so
+  a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format.
+
 ## Not in the first version
 
-Velocity, presets (save / load), glide, LFOs, effects. The engine and the pages come first.
+Velocity, glide, LFOs, effects, patch names.
 
 ## Budget
 

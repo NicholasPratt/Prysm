@@ -72,6 +72,23 @@ static int settings_save(const void *p, uint32_t n)
     printf("%6u ms  settings saved (%u B)\n", fm1_ms, n);
     return 0;
 }
+#define STORE_MAX (0x1000u - 16u)                  /* the store (platform.c): here, in RAM */
+static uint8_t host_store2[STORE_MAX];
+static uint32_t host_store2_n;
+static int store_load(void *p, uint32_t n)
+{
+    if (!host_store2_n || n != host_store2_n) return -1;
+    memcpy(p, host_store2, n);
+    return 0;
+}
+static int store_save(const void *p, uint32_t n)
+{
+    if (n > STORE_MAX) return -1;
+    memcpy(host_store2, p, n);
+    host_store2_n = n;
+    printf("%6u ms  store saved (%u B)\n", fm1_ms, n);
+    return 0;
+}
 
 static uint8_t mq[64][3];
 static uint32_t mq_w, mq_r;

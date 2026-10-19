@@ -1,0 +1,45 @@
+# the PATCH screen: save the default to 3, change a knob, save over 3 (asks), load 3 back, init (tests/run_ui.sh)
+100 btn 9
+200 shot
+250 enc 2 2
+300 btn 9
+400 shot
+500 btn 9
+600 shot
+700 btn 8
+750 enc 2 30
+800 shot
+900 btn 9
+950 enc 2 1
+1000 btn 9
+1100 shot
+1200 btn 9
+1300 shot
+1400 enc 0 1
+1450 btn 9
+1500 shot
+1600 enc 0 1
+1650 btn 9
+1700 shot
+1800 btn 9
+1900 shot
+2000 btn 8
+2100 shot
+# the confirmations: save over a used slot that is not the current one; load over unsaved changes
+2200 enc 2 5
+2300 btn 9
+2350 enc 2 -1
+2400 btn 9
+2450 shot
+2500 btn 9
+2550 shot
+2600 btn 8
+2650 enc 3 5
+2700 btn 9
+2750 enc 0 1
+2760 enc 2 1
+2800 btn 9
+2850 shot
+2900 btn 9
+2950 shot
+3000 end

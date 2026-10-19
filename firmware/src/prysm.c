@@ -41,17 +41,18 @@ static void play(uint32_t note) { engine_note_on(note); }
 static void stop(uint32_t note) { engine_note_off(note); }
 
 #define KEY0 53u                                /* key 0 = F3 */
-#include "ui.c"                                 /* the pages */
+#include "patches.c"                            /* the 8 patch slots */
+#include "ui.c"                                 /* the pages, the PATCH screen */
 
 static void app_main(void)
 {
-    struct { int8_t oct; } set = {0};           /* what survives a power-off (add yours, up to 256 bytes) */
+    struct { int8_t oct, slot; } set = {0, -1}; /* what survives a power-off: the octave, the last patch slot */
     uint32_t prev = 0, k, t_change = 0, dirty = 0;
     uint8_t held[27] = {0};                     /* the note each key plays */
     settings_load(&set, sizeof set);
     if (set.oct < -2 || set.oct > 2) set.oct = 0;
     engine_init();
-    ui_init();
+    ui_init(set.slot);                          /* the sound of the slot last saved or loaded */
 
     for (;;) {
         uint32_t keys, down, up, rel, b, lit = 0, base = (uint32_t)(KEY0 + 12 * set.oct);
@@ -72,6 +73,12 @@ static void app_main(void)
         if (b & (1u << BTN_OCT_UP) && set.oct < 2) { set.oct++; dirty = 1; t_change = fm1_ms; }
         if (ui_input(b))                        /* the pages: the sound changed */
             engine_set(&edit);
+        if (slot_moved) {                       /* a patch saved or loaded: remember its slot */
+            slot_moved = 0;
+            set.slot = (int8_t)cur_slot;
+            dirty = 1;
+            t_change = fm1_ms;
+        }
 
         while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI in, any channel */
 #if DINGHY_USB_LOG

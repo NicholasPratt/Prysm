@@ -167,6 +167,17 @@ change of size or a broken save reads as "nothing saved": start from your defaul
 drops out. `dinghy.c` saves 2 s after the last change, once all voices are silent. Flash wears out after about
 100,000 erases of a sector: never save in a loop.
 
+### The store (Prysm)
+
+```c
+static int store_load(void *p, uint32_t n);            /* 0 = loaded the newest good copy */
+static int store_save(const void *p, uint32_t n);      /* 0 = saved */
+```
+
+Up to `STORE_MAX` (4 KiB - 16) bytes in two sectors (0xFA000, 0xFB000), written in turn with a sequence number
+and a CRC32: a save goes to the sector not holding the newest copy, so a save cut short loses only itself. The
+same rules as the settings: save when nothing sounds, never in a loop.
+
 ## Memory and flash
 
 | | | |
