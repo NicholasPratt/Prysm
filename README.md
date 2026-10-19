@@ -2,13 +2,15 @@
 
 **A 4-voice wavetable FM synthesizer firmware for the M-VAVE FM-1.**
 
+<p align="center"><img src="docs/screen.png" width="240" alt="Prysm's OSC 1 page: a VOCAL carrier modulated by a CMPLX wave"></p>
+
 Two oscillators per voice, each a chain of three wavetable operators (mod 2 -> mod 1 -> carrier) that modulate
 each other by FM, ring or mix; a resonant filter with drive; an LFO with six shapes and two destinations; a mod
 envelope that can loop and modulate the LFO's rate; stereo chorus, delay (with wow and pitch-shifting repeats) and
 a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; USB audio and MIDI.
 
-- **Install it**: the web installer (Chrome or Edge), or `tools/fm1_install.py` (below)
-- **Use it**: [the manual](docs/MANUAL.md)
+- **Install it**: [the web installer](https://nicholaspratt.github.io/Prysm/) (Chrome or Edge), or `tools/fm1_install.py` (below)
+- **Use it**: [the manual](docs/MANUAL.md) ([as a page](https://nicholaspratt.github.io/Prysm/manual.html))
 - **Build it**: [SETUP-MACOS.md](SETUP-MACOS.md), and below
 
 > Prysm is a community firmware, not made or supported by M-VAVE. Installing firmware is at your own risk. If an

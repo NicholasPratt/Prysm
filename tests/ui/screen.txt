@@ -1,0 +1,13 @@
+# docs/screen.png: the OSC page with a VOCAL carrier, a CMPLX mod 1, both modulators on (tools: tests/run_ui.sh)
+100 enc 2 3
+150 enc 3 30
+200 enc 4 5
+250 enc 5 20
+300 enc 0 3
+350 enc 3 1
+400 enc 0 2
+450 enc 3 25
+500 enc 2 10
+550 enc 0 -5
+700 shot
+800 end
