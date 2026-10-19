@@ -1,0 +1,23 @@
+# the SEQ page: REC, enter C3 E3 G3 (keys), an accent, a slide, a length of 12; PLAY; then REC off
+100 btn 11
+200 shot
+300 btn 13
+400 keys 0x80
+450 keys 0
+500 keys 0x800
+550 keys 0
+600 keys 0x4000
+650 keys 0
+700 shot
+800 enc 2 -3
+820 enc 4 3
+900 enc 2 1
+920 enc 5 2
+1000 shot
+1100 enc 0 1
+1120 enc 2 -4
+1200 btn 12
+1500 shot
+1600 btn 13
+1700 shot
+1800 end

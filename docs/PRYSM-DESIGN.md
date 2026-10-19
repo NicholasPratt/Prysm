@@ -122,6 +122,19 @@ time since, x 147 / 80000) and queues it (`engine_clock`). `arp_run` plays each 
 block: a constant 5.8 ms latency and no jitter. A step every 24 / steps-a-beat ticks; START from the top, STOP,
 CONTINUE; the tick length (smoothed; pauses left out) gives the gates, the swing and the BPM shown.
 
+### SEQ (the SEQ button; PLAY: run / stop; REC: step entry)
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| STEP | the cursor (1 .. 64) | its note | REST / NOTE / ACCENT | slide |
+| PATTERN | length 1 .. 64 | 1/4 .. 1/32 | gate | tempo (the arp's) |
+
+Up to 64 steps per patch (`seq_note`, `seq_trig`, `seq_slide`: patch format 7). It runs in the ISR beside the arp,
+on the same clock (its tempo, swing, the MIDI clock; START from step 1), one voice, block-accurate. ACCENT = velocity
+127 against 100 (AMP's VEL row shapes it). SLIDE holds the note into the next step and moves its pitch there
+(`islide`: no voice_start, a ~30 ms glide of its own, `voice.gk`). Step entry: with REC on the SEQ page, a key or a
+MIDI note writes its note at the cursor and moves it on. The page draws 64 squares (16 a row).
+
 ### SETUP (GLO twice)
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
@@ -219,11 +232,12 @@ The **SAVE** button opens the PATCH screen:
   a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format; older
   formats convert when read (format 1, before the LFO: the LFO comes in with no amount; format 2, before the
   effects: they come in off; format 3, before the mod envelope: it comes in with no amount; format 4, before velocity: it comes in as the
-  default sound has it; format 5, before glide and the arp: off).
+  default sound has it; format 5, before glide and the arp: off; format 6, before the sequencer: an empty
+  16-step pattern).
 
 ## Not in the first version
 
-A sequencer, MIDI clock out, a second LFO, patch names.
+MIDI clock out, song mode (chained patterns), a second LFO, patch names.
 
 ## Budget
 

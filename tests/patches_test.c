@@ -8,6 +8,7 @@
 #include <string.h>
 #include "../firmware/src/engine.c"
 
+#define STORE_MAX (0x1000u - 16u)                  /* (as platform.c) */
 static uint8_t store[4096];                     /* a fake store (platform.c's store_load / store_save) */
 static uint32_t store_n;
 static int store_load(void *p, uint32_t n) { if (n != store_n) return -1; memcpy(p, store, n); return 0; }
@@ -100,6 +101,22 @@ int main(void)
         CHECK(patch_get(6, &a) == 0 && !memcmp(&a, &c, PATCH_V5_SIZE) && bank.version == PATCH_VERSION,
               "format 5: slot 7's sound and velocity kept");
         CHECK(a.arp_on == 0 && a.glide == 0, "format 5: the arp comes in off, no glide");
+    }
+    {                                           /* format 6 (with the arp, before the sequencer) -> 7 */
+        struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V6_SIZE]; } v6;
+        patch_t c = PATCH_INIT;
+        c.arp_on = 1; c.arp_mode = ARP_UPDN; c.glide = 40;
+        memset(&v6, 0, sizeof v6);
+        v6.version = 6;
+        v6.used[1] = 1; memcpy(v6.p[1], &c, PATCH_V6_SIZE);
+        store_save(&v6, sizeof v6);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(1, &a) == 0 && !memcmp(&a, &c, PATCH_V6_SIZE) && bank.version == PATCH_VERSION,
+              "format 6: slot 2's sound and arp kept");
+        CHECK(a.seq_len == 16 && a.seq_trig[0] == SEQ_REST && a.seq_trig[63] == SEQ_REST,
+              "format 6: the sequencer comes in empty, 16 steps");
+        CHECK(sizeof bank <= STORE_MAX, "the bank fits the store (%u of %u bytes)", (unsigned)sizeof bank, (unsigned)STORE_MAX);
     }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;

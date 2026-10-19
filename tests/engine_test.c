@@ -265,6 +265,77 @@ int main(void)
         }
     }
 
+    {                                           /* the sequencer: 120 BPM, 1/16 (125 ms a step), its own clock */
+        static int16_t s[2u * 44100u * 3u];
+        static const uint8_t PAT[8] = {48, 52, 55, 0, 60, 0, 55, 52};   /* C3 E3 G3 - C4 - G3 E3 (0: a rest) */
+        uint32_t variant;
+        for (variant = 0; variant < 5u; variant++) {   /* plain, length 3, accents, slide, no slide */
+            patch_t q = solo();
+            uint32_t done = 0, total = 44100u * 3u / FRAMES * FRAMES, k;
+            static const char *const NAMES[5] = {"seq", "seq_len3", "seq_accent", "seq_slide", "seq_noslide"};
+            q.amp_r = 5; q.arp_bpm = 80; q.seq_div = DIV_16; q.seq_gate = 64; q.seq_len = 8;
+            q.vel_amp = 127;                    /* (accents: louder by velocity) */
+            for (k = 0; k < 8u; k++) {
+                q.seq_note[k] = PAT[k] ? PAT[k] : 48;
+                q.seq_trig[k] = PAT[k] ? SEQ_NOTE : SEQ_REST;
+                q.seq_slide[k] = 0;
+            }
+            if (variant == 1u) q.seq_len = 3;
+            if (variant == 2u) { q.seq_trig[0] = SEQ_ACCENT; q.seq_trig[4] = SEQ_ACCENT; }
+            if (variant >= 3u) {                /* two steps, C3 then G3, over and over; slide on the first */
+                q.seq_len = 2; q.seq_note[0] = 48; q.seq_note[1] = 55;
+                q.seq_trig[0] = q.seq_trig[1] = SEQ_NOTE;
+                q.seq_slide[0] = variant == 3u;
+            }
+            memset(voice, 0, sizeof voice);
+            engine_init(); engine_set(&q); engine_sync(0);
+            last_note = -1;
+            engine_seq_play(1);
+            while (done < total) {
+                int32_t blk[2u * FRAMES] = {0};
+                uint32_t i;
+                engine_render(blk, FRAMES);
+                for (i = 0; i < 2u * FRAMES; i++)
+                    s[2u * done + i] = (int16_t)(blk[i] > 32767 ? 32767 : blk[i] < -32767 ? -32767 : blk[i]);
+                done += FRAMES;
+            }
+            engine_seq_play(0);
+            {                                   /* (a render to let it stop) */
+                int32_t blk[2u * FRAMES] = {0};
+                engine_render(blk, FRAMES);
+            }
+            wav(NAMES[variant], s, total);
+        }
+    }
+
+    {                                           /* the sequencer on the MIDI clock: START at 0.5 s, 120 BPM */
+        static int16_t s[2u * 44100u * 2u];
+        patch_t q = solo();
+        uint32_t done = 0, total = 44100u * 2u / FRAMES * FRAMES, k;
+        double at = 22050.0 + 100.0;
+        int started = 0;
+        q.amp_r = 5; q.seq_div = DIV_16; q.seq_gate = 64; q.seq_len = 4;
+        for (k = 0; k < 4u; k++) { q.seq_note[k] = (uint8_t)(48 + 4 * k); q.seq_trig[k] = SEQ_NOTE; }
+        memset(voice, 0, sizeof voice);
+        engine_init(); engine_set(&q); engine_sync(1);
+        clk_r = clk.w; engine_frames = 0;
+        mc.last_at = 0; mc.period_q8 = 0; mc.count = -1; mc.running = 0; mc.wait = -1;
+        engine_seq_play(1);
+        while (done < total) {
+            int32_t blk[2u * FRAMES] = {0};
+            uint32_t i;
+            if (!started && 22050u < done) { engine_clock(0xFA, 22050u); started = 1; }
+            while (started && at < done) { engine_clock(0xF8, (uint32_t)at); at += 918.75; }
+            engine_render(blk, FRAMES);
+            for (i = 0; i < 2u * FRAMES; i++)
+                s[2u * done + i] = (int16_t)(blk[i] > 32767 ? 32767 : blk[i] < -32767 ? -32767 : blk[i]);
+            done += FRAMES;
+        }
+        engine_seq_play(0);
+        engine_sync(0);
+        wav("seq_clock", s, total);
+    }
+
     {                                           /* glide: C4 for 300 ms, then G4 (apart, or overlapping) */
         uint32_t mode;
         for (mode = 0; mode < 3u; mode++) {     /* ALWAYS apart; LEGATO apart; LEGATO overlapping */

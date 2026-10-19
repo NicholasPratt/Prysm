@@ -8,7 +8,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
 - [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
-  [MIX](#mix), [ARP](#arp), [FX](#fx), [SETUP](#setup)
+  [MIX](#mix), [ARP](#arp), [SEQ](#seq), [FX](#fx), [SETUP](#setup)
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
@@ -79,8 +79,10 @@ Every page works the same way:
 | **ENV** | AMP (press again: FILTER) |
 | **LFO** | LFO |
 | **GLO** | MIX (press again: SETUP) |
-| **ARP** | ARP |
-| **PLAY** | the arpeggiator on / off (from any page; its LED shows it) |
+| **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
+| **SEQ** | SEQ |
+| **PLAY** | the sequencer: run / stop (from any page; its LED shows it) |
+| **REC** | step entry on the SEQ page (its LED shows it) |
 | **FX** | FX |
 | **HOME** | the oscilloscope |
 | **SAVE** | the PATCH screen |
@@ -221,8 +223,9 @@ too: with a tied gate and LEGATO, an acid line.
 
 ### ARP
 
-The arpeggiator plays the notes you hold, one at a time, in time. **PLAY** turns it on or off from any page (its LED
-lights). While it is on, the keys and MIDI notes go to it instead of straight to the voices.
+The arpeggiator plays the notes you hold, one at a time, in time. **ARP** (pressed again on the ARP page) or the ARP
+cell turns it on or off (its LED lights). While it is on, the keys and MIDI notes go to it instead of straight to
+the voices.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
@@ -269,6 +272,33 @@ draws the chain, with a mix bar under each effect.
 - **Shimmer**: the tail climbs in octaves as it fades. It never runs away, at any setting.
 
 With every effect on, Prysm uses roughly twice the CPU: watch the header.
+
+### SEQ
+
+A step sequencer of up to **64 steps**, one note each, 303-style: notes, rests, **accents** and **slides**. It plays
+alongside the keys (and the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock.
+Each patch has its own pattern.
+
+The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a lilac one a note, a white one an
+accent; a little bar joins a sliding step to the next; past the length, dots. The cursor is ringed (white while
+recording); a mark under a square shows the step playing.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| STEP | the step (the cursor) | its note | its trigger: REST, NOTE, ACCENT | SLIDE ON / OFF |
+| PATTERN | length: 1 .. 64 | step: 1/4 .. 1/32 | gate | tempo (the arp's) |
+
+**Entering notes**: press **REC** (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or start at
+the first) and **play a key**: its note goes into the step (a rest becomes a note) and the cursor moves to the next,
+so you can type a line in. MIDI notes enter the same way. Press REC again to play the keys normally.
+
+- **PLAY** starts the sequence from its first step, and stops it.
+- **ACCENT** plays the step at full velocity, the others a little softer: how much louder, brighter and more
+  modulated an accent is comes from the AMP page's **VEL** row.
+- **SLIDE** holds the step's note into the next one and glides to its pitch in about 30 ms, **without a new attack**
+  (the 303 slide). A slide into a rest just ends.
+- **On the MIDI clock** (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
+  PLAY must be on.
 
 ### SETUP
 

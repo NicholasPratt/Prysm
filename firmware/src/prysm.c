@@ -9,7 +9,8 @@
  *   USB-MIDI   notes in (on the SETUP page's channel, or any) play the engine with their velocity; the keys' notes
  *              go out on its OUT channel; the MIDI clock can drive the arpeggiator (timed as it arrives: midi_rt)
  *   pages      ALGORITHM / EDIT ENV LFO GLO FX: the page; SELECT: the row; KNOB1..4: its parameters (ui.c)
- *   HOME       the oscilloscope; SAVE: the patches; PLAY: the arpeggiator on / off
+ *   HOME       the oscilloscope; SAVE: the patches; PLAY: the sequencer; REC: its step entry; ARP (on its page):
+ *              the arpeggiator on / off
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
  * tests/host.c runs this file on a computer: the screen as a PNG, the sound as a WAV.
@@ -134,7 +135,12 @@ static void app_main(void)
         up = prev & ~keys;
         prev = keys;
         for (k = 0; k < 27u; k++) {             /* (a key stops the note it started: the octave may change meanwhile) */
-            if (down >> k & 1u) { held[k] = (uint8_t)(base + k); play(held[k], 127); midi_send(0x90u | gset.midi_out, held[k], 100); }
+            if (down >> k & 1u) {
+                held[k] = (uint8_t)(base + k);
+                if (ui_seq_key(held[k])) engine_set(&edit);   /* (REC on the SEQ page: into the step, and heard) */
+                play(held[k], 127);
+                midi_send(0x90u | gset.midi_out, held[k], 100);
+            }
             if (up >> k & 1u) { stop(held[k]); midi_send(0x80u | gset.midi_out, held[k], 0); }
         }
 
@@ -156,7 +162,10 @@ static void app_main(void)
 #endif
             if (st < 0xF0u && gset.midi_in && (st & 0x0Fu) != gset.midi_in - 1u)
                 continue;                       /* (another channel than the SETUP page's) */
-            if ((st & 0xF0u) == 0x90u && d2) play(d1, d2);
+            if ((st & 0xF0u) == 0x90u && d2) {
+                if (ui_seq_key(d1)) engine_set(&edit);
+                play(d1, d2);
+            }
             else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) stop(d1);
         }
 #if DINGHY_USB_LOG
@@ -171,7 +180,9 @@ static void app_main(void)
             fm1_led_key(KEY_LED(k), lit >> k & 1u);
         fm1_led_key(BTN_OCT_DOWN, gset.oct < 0);
         fm1_led_key(BTN_OCT_UP, gset.oct > 0);
-        fm1_led_key(BTN_PLAY, eg.arp_on);       /* the arpeggiator is on */
+        fm1_led_key(BTN_PLAY, eg.seq_play);     /* the sequencer runs */
+        fm1_led_key(BTN_ARP, eg.arp_on);        /* the arpeggiator is on */
+        fm1_led_key(BTN_REC, seq_rec);          /* step entry */
 
         ui_draw();
 

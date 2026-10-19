@@ -6,7 +6,8 @@
  * modulators' pitch, cutoff, amp, the oscillators' mix. A mod envelope per voice (ADSR; LOOP: attack-decay again
  * and again until the key is let go) modulates one: the LFO's rate or depth, or any of the LFO's. Glide slides each
  * new note from the last one. The arpeggiator (in the ISR: its notes start and stop on the exact 16-frame block)
- * plays the held notes in turn.
+ * plays the held notes in turn; the sequencer (beside it, on the same clock) plays up to 64 steps, 303-style: a
+ * note, a rest or an accent each, and slides (the note held into the next, its pitch gliding, no new attack).
  *
  * Who runs what:
  *   main loop   engine_set(): the patch changed -> the derived values below; engine_note_on / _off.
@@ -99,7 +100,19 @@ typedef struct {
     uint8_t arp_gate;                           /* 0..127 = 5 .. 100 % of a step (127: tied) */
     uint8_t arp_latch;                          /* 1: the notes keep playing after the keys are let go */
     uint8_t arp_swing;                          /* 0..127 = none .. the even steps 3x the odd */
+    /* (added in patch format 7: the sequencer; its tempo, swing and clock are the arp's) */
+    uint8_t seq_len;                            /* 1..64 steps */
+    uint8_t seq_div;                            /* DIV_4 .. DIV_32 */
+    uint8_t seq_gate;                           /* 0..127 = 5 .. 100 % of a step */
+    uint8_t seq_pad;
+    uint8_t seq_note[64];                       /* the steps: a note, */
+    uint8_t seq_trig[64];                       /* SEQ_REST, SEQ_NOTE, SEQ_ACCENT, */
+    uint8_t seq_slide[64];                      /* 1: held into the next step, which it glides to (no new attack) */
 } patch_t;
+enum { SEQ_REST, SEQ_NOTE, SEQ_ACCENT, SEQ_TRIGS };
+static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT"};
+#define SEQ_VEL 100u                            /* a step's velocity (an accent: 127): AMP's VEL row makes the accent */
+#define SEQ_SLIDE_K 58u                         /* a slide's speed (PR_ENV_EXP: there in ~30 ms, as a 303) */
 
 static const patch_t PATCH_INIT = {
     .osc = {
@@ -125,6 +138,10 @@ static const patch_t PATCH_INIT = {
     .glide = 0, .glide_mode = GLIDE_ALWAYS,
     .arp_on = 0, .arp_mode = ARP_UP, .arp_div = DIV_16, .arp_oct = 0, .arp_bpm = 80, .arp_gate = 64,
     .arp_latch = 0, .arp_swing = 0,
+    .seq_len = 16, .seq_div = DIV_16, .seq_gate = 64,   /* an empty pattern: 16 rests (C3 waiting in each) */
+    .seq_note = {48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+                 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
+                 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48},
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -160,6 +177,9 @@ static volatile struct {
     uint32_t arp_len_q8;                        /* a step, frames Q8 */
     int32_t arp_gate;                           /* the note's share of its step, Q15 */
     int32_t arp_swing;                          /* 0 .. 16384: the even steps longer by it, the odd shorter */
+    uint32_t seq_len_q8, seq_spb, seq_steps;    /* the sequencer: a step (frames Q8), steps a beat, its length */
+    int32_t seq_gate;                           /* Q15 */
+    volatile uint8_t seq_play;                  /* running (PLAY; the main loop's) */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -195,8 +215,9 @@ static struct {
     volatile uint8_t vel;                       /* 1 .. 127 (main loop, before the gate) */
     uint32_t age;
     int32_t glide_q8;                           /* the pitch still to slide, 1/16 semitones Q8 (to 0) */
+    uint32_t gk;                                /* its speed (Q16 a block): the glide's, or a slide's */
     /* the arpeggiator's notes (ISR only): start / stop at block itrig / ioff of this render (0xFF: none) */
-    uint8_t itrig, ioff, inote, ivel;
+    uint8_t itrig, ioff, inote, ivel, islide;   /* (islide: the sequencer's legato move to inote, no new attack) */
     int32_t iglide;
 } voice[NV];
 
@@ -543,6 +564,93 @@ static void arp_step(uint32_t bi, const uint8_t *nt, const uint8_t *vl, uint32_t
     arp.steps++;
 }
 
+/* ---- the sequencer (ISR, beside the arp, on its clock): a step at a time from patch.seq_*; one voice */
+static struct {
+    uint32_t pos, was, phase_q8, odd, now, hold;    /* hold: the note slides into the next step */
+    int32_t v, gate_left, count, wait;              /* count: ticks since START (the MIDI clock) */
+    volatile uint32_t steps, playing;           /* (the page follows: steps played, the step playing) */
+} seq = {0, 0, 0, 0, 0, 0, -1, 0, -1, -1, 0, 0};
+
+static uint32_t seq_step_len(uint32_t odd)
+{
+    return (uint32_t)(((uint64_t)eg.seq_len_q8 * (uint32_t)(32768 + (odd ? -eg.arp_swing : eg.arp_swing))) >> 15);
+}
+
+static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
+{
+    uint32_t k = seq.pos, trig = patch.seq_trig[k] < SEQ_TRIGS ? patch.seq_trig[k] : SEQ_REST;
+    uint32_t note = patch.seq_note[k] & 127u, vel = trig == SEQ_ACCENT ? 127u : SEQ_VEL;
+    seq.playing = k;
+    seq.pos = k + 1u >= eg.seq_steps ? 0u : k + 1u;
+    if (seq.v >= 0 && seq.hold && trig != SEQ_REST && voice[seq.v].gate) {   /* the last one slides into it */
+        voice[seq.v].inote = (uint8_t)note;
+        voice[seq.v].ivel = (uint8_t)vel;
+        voice[seq.v].islide = (uint8_t)bi;
+        last_note = (int32_t)note;
+    } else {
+        if (seq.v >= 0) voice[seq.v].ioff = (uint8_t)bi;
+        seq.v = -1;
+        if (trig != SEQ_REST) {
+            uint32_t v = voice_pick(note);
+            voice[v].inote = (uint8_t)note;
+            voice[v].ivel = (uint8_t)vel;
+            voice[v].iglide = glide_from(note);
+            voice[v].itrig = (uint8_t)bi;
+            voice[v].age = ++ages;
+            seq.v = (int32_t)v;
+        }
+    }
+    seq.hold = trig != SEQ_REST && patch.seq_slide[k];
+    seq.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.seq_gate) >> 23);
+    seq.steps++;
+}
+
+static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; due: a step's tick came (MIDI clock) */
+{
+    if (!eg.seq_play) {                         /* stopped: its note goes */
+        if (seq.v >= 0) { voice[seq.v].ioff = (uint8_t)bi; seq.v = -1; }
+        seq.was = 0;
+        seq.hold = 0;
+        return;
+    }
+    if (!seq.was) {                             /* PLAY: from the first step */
+        seq.was = 1;
+        seq.pos = 0;
+        seq.now = 1;
+        seq.odd = 0;
+        seq.count = -1;
+        seq.wait = -1;
+    }
+    if (seq.v >= 0 && !seq.hold) {              /* the gate (a slide holds it into the next step) */
+        seq.gate_left -= (int32_t)BLK;
+        if (seq.gate_left <= 0) { voice[seq.v].ioff = (uint8_t)bi; seq.v = -1; }
+    }
+    if (eg.arp_midi) {                          /* on the MIDI clock: the step's tick (an odd one swung later) */
+        uint32_t slen = mc.period_q8 ? mc.period_q8 * (24u / (eg.seq_spb ? eg.seq_spb : 4u))
+                                     : eg.seq_len_q8;   /* (the first tick: no tick length yet, its own tempo's) */
+        if (due) {
+            uint32_t tps = 24u / (eg.seq_spb ? eg.seq_spb : 4u), odd = (uint32_t)(seq.count / (int32_t)tps) & 1u;
+            seq.wait = odd ? (int32_t)(((uint64_t)slen * (uint32_t)eg.arp_swing) >> 23) : 0;
+            seq.odd = odd;
+        }
+        if (seq.wait >= 0) {
+            if (seq.wait < (int32_t)BLK) {
+                seq.wait = -1;
+                seq_step(bi, (uint32_t)(((uint64_t)slen * (uint32_t)(32768 + (seq.odd ? -eg.arp_swing : eg.arp_swing))) >> 15));
+            } else
+                seq.wait -= (int32_t)BLK;
+        }
+        return;
+    }
+    seq.phase_q8 += BLK << 8;                   /* its own clock (the arp's tempo) */
+    if (seq.now || seq.phase_q8 >= seq_step_len(seq.odd)) {
+        if (seq.now) { seq.now = 0; seq.phase_q8 = 0; seq.odd = 1; }
+        else seq.phase_q8 -= seq_step_len(seq.odd);
+        seq.odd ^= 1u;
+        seq_step(bi, seq_step_len(seq.odd));
+    }
+}
+
 static void arp_run(uint32_t nb)
 {
     uint8_t nt[ARP_MAX], vl[ARP_MAX];
@@ -565,7 +673,7 @@ static void arp_run(uint32_t nb)
     if (mc.last_at && (int32_t)(start - mc.last_at) > 22050)
         mc_bpm10 = 0;                           /* no clock for half a second */
     for (bi = 0; bi < nb; bi++) {
-        uint32_t len = arp_step_len(arp.odd), due = 0;     /* (its own clock: the step running now) */
+        uint32_t len = arp_step_len(arp.odd), due = 0, sdue = 0;   /* (its own clock: the step running now) */
         while (clk_r != clk.w) {                /* MIDI clock: the events of this block (one render back) */
             uint32_t k = clk_r % CLK_N, at = clk.at[k], st = clk.st[k];
             int32_t rel = (int32_t)(at + nb * BLK - start), eb = rel < 0 ? 0 : rel / (int32_t)BLK;
@@ -585,18 +693,26 @@ static void arp_run(uint32_t nb)
                 if (mc.running && eg.arp_midi) {
                     mc.count++;
                     if (mc.count % (int32_t)tps == 0) due = 1;
+                    if (eg.seq_play) {          /* the sequencer's ticks */
+                        uint32_t st2 = 24u / (eg.seq_spb ? eg.seq_spb : 4u);
+                        seq.count++;
+                        if (seq.count % (int32_t)st2 == 0) sdue = 1;
+                    }
                 }
             } else if (st == 0xFAu) {           /* START: from the top, on the next tick */
                 mc.running = 1; mc.count = -1; mc.wait = -1;
                 mc.last_at = 0;                 /* (no tempo across the pause) */
                 arp.idx = 0;
+                seq.pos = 0; seq.count = -1; seq.wait = -1;   /* (the sequencer: from its first step) */
             } else if (st == 0xFBu) {           /* CONTINUE */
                 mc.running = 1;
             } else if (st == 0xFCu) {           /* STOP: and its note */
-                mc.running = 0; mc.wait = -1;
+                mc.running = 0; mc.wait = -1; seq.wait = -1;
                 if (eg.arp_midi && arp.v >= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
+                if (eg.arp_midi && seq.v >= 0) { voice[seq.v].ioff = (uint8_t)bi; seq.v = -1; seq.hold = 0; }
             }
         }
+        seq_block(bi, sdue);                    /* the sequencer, this block */
         if (arp.v >= 0 && !eg.arp_tie) {        /* the gate: the note ends inside its step */
             arp.gate_left -= (int32_t)BLK;
             if (arp.gate_left <= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
@@ -607,7 +723,7 @@ static void arp_run(uint32_t nb)
             continue;
         }
         if (eg.arp_midi) {                      /* on the MIDI clock: a step on its tick (an odd one: swung later) */
-            uint32_t slen = mc.period_q8 * tps;
+            uint32_t slen = mc.period_q8 ? mc.period_q8 * tps : eg.arp_len_q8;   /* (the first tick: its own) */
             if (due) {
                 uint32_t odd = (uint32_t)(mc.count / (int32_t)tps) & 1u;
                 mc.wait = odd ? (int32_t)(((uint64_t)slen * (uint32_t)eg.arp_swing) >> 23) : 0;
@@ -653,19 +769,30 @@ static void engine_render(int32_t *out, uint32_t n)
             voice[v].trig = 0;
             voice_start(v);
         }
-        if (!voice[v].amp.st && voice[v].itrig == 0xFFu)
+        if (!voice[v].amp.st && voice[v].itrig == 0xFFu) {
+            voice[v].islide = 0xFF;             /* (a slide into a voice gone quiet: nothing to slide) */
             continue;                           /* silent: costs nothing */
+        }
         for (b = 0; b < n; b += BLK) {
             uint32_t gate, bi = b / BLK < MAXBLK ? b / BLK : MAXBLK - 1u, ph;
             if (voice[v].ioff == b / BLK) {     /* the arpeggiator's: an end, then a start, on their blocks */
                 voice[v].ioff = 0xFF;
                 voice[v].gate = 0;
             }
+            if (voice[v].islide == b / BLK) {   /* a slide: the new note's pitch, gliding there, no new attack */
+                voice[v].islide = 0xFF;
+                voice[v].glide_q8 += ((int32_t)voice[v].note - (int32_t)voice[v].inote) * 16 * 256;
+                voice[v].gk = PR_ENV_EXP[SEQ_SLIDE_K];
+                voice[v].note = voice[v].inote;
+                voice[v].vel = voice[v].ivel;
+                voice_tune(v);
+            }
             if (voice[v].itrig == b / BLK) {
                 voice[v].itrig = 0xFF;
                 voice[v].note = voice[v].inote;
                 voice[v].vel = voice[v].ivel;
                 voice[v].glide_q8 = voice[v].iglide;
+                voice[v].gk = eg.glide_k;
                 voice_tune(v);
                 voice[v].gate = 1;
                 voice_start(v);
@@ -674,7 +801,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 continue;
             gate = voice[v].gate;
             if (voice[v].glide_q8) {            /* glide: the rest of the slide, exponentially */
-                voice[v].glide_q8 -= (int32_t)(((int64_t)voice[v].glide_q8 * eg.glide_k) >> 16);
+                voice[v].glide_q8 -= (int32_t)(((int64_t)voice[v].glide_q8 * voice[v].gk) >> 16);
                 if (voice[v].glide_q8 > -64 && voice[v].glide_q8 < 64) voice[v].glide_q8 = 0;
             }
             int32_t a_to = env_step(&voice[v].amp, gate, eg.a_att, eg.a_dec, eg.a_sus, eg.a_rel) >> 9;
@@ -957,6 +1084,11 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.arp_gate = 1638 + (int32_t)(patch.arp_gate & 127u) * (32768 - 1638) / 127;   /* 5 .. 100 % */
         eg.arp_swing = (int32_t)(patch.arp_swing & 127u) * 16384 / 127;
         eg.arp_on = patch.arp_on ? 1u : 0u;
+        spb = DIV_SPB[patch.seq_div < DIV_N ? patch.seq_div : DIV_16];   /* the sequencer: the arp's tempo, its step */
+        eg.seq_len_q8 = 44100u * 60u * 256u / (bpm * spb);
+        eg.seq_spb = spb;
+        eg.seq_steps = patch.seq_len >= 1u && patch.seq_len <= 64u ? patch.seq_len : 16u;
+        eg.seq_gate = 1638 + (int32_t)(patch.seq_gate & 127u) * (32768 - 1638) / 127;
     }
     fx_set(&patch);
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
@@ -973,7 +1105,7 @@ static void engine_init(void)
     uint32_t o, k, v;
     fx_init();
     for (v = 0; v < NV; v++)
-        voice[v].itrig = voice[v].ioff = 0xFF;
+        voice[v].itrig = voice[v].ioff = voice[v].islide = 0xFF;
     for (o = 0; o < NOSC; o++)                  /* force every table to be built */
         for (k = 0; k < NOP; k++)
             op_cur[o][k] = 0;
@@ -988,6 +1120,7 @@ static void engine_note_on_vel(uint32_t note, uint32_t vel)   /* vel 1 .. 127 */
         return;
     pick = voice_pick(note);
     voice[pick].glide_q8 = glide_from(note);
+    voice[pick].gk = eg.glide_k;
     voice[pick].note = (uint8_t)note;
     voice[pick].vel = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);
     voice[pick].age = ++ages;
@@ -1006,10 +1139,10 @@ static void engine_note_off(uint32_t note)
             voice[v].gate = 0;
 }
 
-static int engine_quiet(void)                   /* nothing sounds, not even a release, and the arp is not playing */
+static int engine_quiet(void)                   /* nothing sounds, not even a release; no arp or sequence playing */
 {
     uint32_t v;
-    if (eg.arp_on && held.n)
+    if ((eg.arp_on && held.n) || eg.seq_play)
         return 0;
     for (v = 0; v < NV; v++)
         if (voice[v].gate || voice[v].trig || voice[v].itrig != 0xFFu || voice[v].amp.st)
@@ -1057,6 +1190,8 @@ static void arp_key_up(uint32_t note)
             return;
         }
 }
+
+static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */
 
 static void engine_sync(uint32_t midi)          /* the arp's clock: its own (0) or the MIDI clock (1) */
 {

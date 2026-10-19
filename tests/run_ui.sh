@@ -14,10 +14,11 @@ build/ui/prysm build/ui/sc tests/ui/scope.txt >/dev/null
 build/ui/prysm build/ui/ar tests/ui/arp.txt >/dev/null
 build/ui/prysm build/ui/su tests/ui/setup.txt >/dev/null
 build/ui/prysm build/ui/pr tests/ui/presets.txt >/dev/null
+build/ui/prysm build/ui/sq tests/ui/seq.txt >/dev/null
 python3 - <<'PY'
 from pathlib import Path
 from PIL import Image
-for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp"), ("su", "setup"), ("pr", "presets")):
+for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp"), ("su", "setup"), ("pr", "presets"), ("sq", "seq")):
     shots = sorted(Path("build/ui").glob(prefix + "-*.ppm"), key=lambda p: int(p.stem.split("-")[1]))
     sheet = Image.new("RGB", (4 * 250, ((len(shots) + 3) // 4) * 250), (40, 40, 40))
     for i, p in enumerate(shots):

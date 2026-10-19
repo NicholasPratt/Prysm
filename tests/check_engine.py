@@ -316,6 +316,60 @@ d = np.diff(sw)
 ratio = np.median(d[0::2]) / np.median(d[1::2]) if len(d) > 4 else 0
 check("midi clock swing", 2.6 < ratio < 3.4, f"steps alternate {np.median(d[0::2]):.0f} / {np.median(d[1::2]):.0f} frames (want 3:1)")
 
+# ---- the sequencer
+NOTE.update({48: 130.81, 52: 164.81, 55: 196.0})
+
+
+def seq_notes(name, n, step=STEP, t0=0.0):
+    x = load(name)
+    out = []
+    for k in range(n):
+        a = t0 + k * step
+        if rms(x, a + 0.01, a + 0.05) < 0.005:
+            out.append(0); continue
+        f = peak_hz(*spectrum(x, a + 0.008, a + 0.058))
+        out.append(min(NOTE, key=lambda m: abs(NOTE[m] - f)))
+    return out
+
+
+want = [48, 52, 55, 0, 60, 0, 55, 52] * 2
+got = seq_notes("seq", 16)
+check("seq notes", got == want, f"{got}")
+check("seq length", seq_notes("seq_len3", 9) == [48, 52, 55] * 3, f"{seq_notes('seq_len3', 9)}")
+on = starts(load("seq"), 0, int(1.95 * FS))
+d = np.diff(on)
+check("seq timing", len(d) >= 8 and np.all(np.abs((d / (STEP * FS)) - np.round(d / (STEP * FS))) * STEP * FS <= 24),
+      f"{len(on)} notes, each on its 16th (5512.5 frames) to {np.max(np.abs((d / (STEP * FS)) - np.round(d / (STEP * FS))) * STEP * FS):.0f} frames")
+xa = load("seq_accent")
+acc, nrm = rms(xa, 0.01, 0.05), rms(xa, STEP + 0.01, STEP + 0.05)
+check("seq accent", acc > 1.4 * nrm, f"an accent {acc / nrm:.2f} x a plain step's level (127 vs 100: x {127 / 100:.2f}^2 = {(127 / 100) ** 2:.2f})")
+sl, ns = load("seq_slide"), load("seq_noslide")
+gap_s = min(rms(sl, t, t + 0.005) for t in np.arange(0.06, 0.13, 0.005))
+gap_n = min(rms(ns, t, t + 0.005) for t in np.arange(0.06, 0.13, 0.005))
+check("seq slide holds", gap_s > 0.05 and gap_n < 0.005, f"lowest level between steps 1 and 2: {gap_s:.3f} sliding, {gap_n:.4f} not")
+def cycles(x, t0, t1):
+    """(time, frequency) of each cycle: from one rising zero crossing to the next"""
+    s = x[int(t0 * FS):int(t1 * FS)]
+    z = np.where((s[:-1] <= 0) & (s[1:] > 0))[0]
+    z = z + s[z] / (s[z] - s[z + 1])
+    return [(t0 + (a + b) / 2 / FS, FS / (b - a)) for a, b in zip(z[:-1], z[1:])]
+
+
+cs = cycles(sl, STEP - 0.02, STEP + 0.06)
+before = [f for t, f in cs if t < STEP]
+during = [f for t, f in cs if STEP + 0.004 < t < STEP + 0.02]
+after = [f for t, f in cs if STEP + 0.045 < t]
+cn = [f for t, f in cycles(ns, STEP, STEP + 0.03)]
+check("seq slide glides", abs(before[-1] - 130.8) < 3 and all(140 < f < 194 for f in during) and abs(np.median(after) - 196) < 3
+      and abs(cn[1] - 196) < 4,
+      f"C3 {before[-1]:.0f} Hz, then {', '.join(f'{f:.0f}' for f in during)} sliding, G3 {np.median(after):.0f} Hz;"
+      f" without the slide {cn[1]:.0f} Hz at once")
+xs = load("seq_clock")
+quiet = rms(xs, 0.1, 0.45)
+first = seq_notes("seq_clock", 4, t0=0.5 + (100 + 248) / FS)
+check("seq midi clock", quiet < 0.001 and first == [48, 52, 56 if 56 in NOTE else first[2], 60],
+      f"silent before START ({quiet:.4f}); then {first} from step 1")
+
 # ---- glide
 def pitch_at(name, t):
     return peak_hz(*spectrum(load(name), t, t + 0.03))

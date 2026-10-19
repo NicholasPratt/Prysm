@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, ARP, FX, SETUP.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, ARP, SEQ, FX, SETUP.
  *
- *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX / SETUP, ARP = ARP,
- *                    FX = FX)
- *   PLAY             the arpeggiator on / off (anywhere; its LED shows it)
+ *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX / SETUP, ARP = ARP
+ *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = FX)
+ *   PLAY             the sequencer: run / stop (anywhere; its LED shows it)
+ *   REC              step entry on the SEQ page: a key writes its note at the cursor, which moves on
  *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
@@ -34,7 +35,8 @@
 
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
-       K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK };
+       K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN };   /* (the step kinds: the step under the cursor) */
 typedef struct { const char *label; uint8_t off, max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -97,6 +99,12 @@ static const row_t LFO_ROWS[] = {
     {"M.DST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
                {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_MENV | LIT_CURVE},
 };
+static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cursor) */
+    {"STEP", {{"STEP", 0, 63, K_CURSOR}, {"NOTE", PO(seq_note), 127, K_SNOTE},
+              {"TRIG", PO(seq_trig), SEQ_TRIGS - 1u, K_STRIG}, {"SLIDE", PO(seq_slide), 1, K_SSLIDE}}, LIT_CURVE},
+    {"PATTERN", {{"LENGTH", PO(seq_len), 64, K_SLEN}, {"DIV", PO(seq_div), DIV_N - 1u, K_DIV},
+                 {"GATE", PO(seq_gate), 127, K_GATE}, {"BPM", PO(arp_bpm), 200, K_BPM}}, LIT_ENV},
+};
 static const row_t SETUP_ROWS[] = {
     {"MIDI", {{"IN", GO(midi_in), 16, K_MCHI}, {"OUT", GO(midi_out), 15, K_MCHO},
               {"CLOCK", GO(clock), 1, K_CLK}, NOPRM}, LIT_ALL},
@@ -125,12 +133,12 @@ static const row_t ARP_ROWS[] = {
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_ARP, PG_FX, PG_SETUP, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_ARP, PG_SEQ, PG_FX, PG_SETUP, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
     {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
-    {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
+    {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0}, {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
     {"SETUP", SETUP_ROWS, NROWS(SETUP_ROWS), G},
 };
 
@@ -143,9 +151,16 @@ static uint32_t page, row[PG_N];
 static uint32_t dirty;                          /* what to redraw: D_... */
 enum { D_HDR = 1, D_GFX = 2, D_LEG = 4, D_ROWS = 8, D_ALL = 15 };
 
+static uint8_t seq_cursor;                      /* the SEQ page's step (0..63) */
+static uint8_t seq_rec;                         /* REC: keys write notes at the cursor */
+
 static uint8_t *pval(uint32_t pg, const prm_t *p)
 {
     uint32_t base;
+    if (p->kind == K_CURSOR)
+        return &seq_cursor;
+    if (p->kind == K_SNOTE || p->kind == K_STRIG || p->kind == K_SSLIDE)   /* the step under the cursor */
+        return (uint8_t *)&edit + p->off + seq_cursor;
     if (PAGES[pg].osc == G)
         return (uint8_t *)&gset + p->off;
     base = PAGES[pg].osc ? (PAGES[pg].osc - 1u) * (uint32_t)sizeof edit.osc[0] : 0u;
@@ -208,6 +223,15 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_MCHI: if (*v) num(s, *v); else put(s, "OMNI"); break;
     case K_MCHO: num(s, *v + 1u); break;
     case K_CLK: put(s, *v ? "MIDI" : "INT"); break;
+    case K_CURSOR: num(s, *v + 1u); break;
+    case K_SNOTE: {
+        static const char *const NM[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+        num(put(s, NM[*v % 12u]), *v / 12u ? *v / 12u - 1u : 0u);
+        break;
+    }
+    case K_STRIG: put(s, SEQ_TRIG_NAME[*v < SEQ_TRIGS ? *v : 0u]); break;
+    case K_SSLIDE: put(s, *v ? "ON" : "OFF"); break;
+    case K_SLEN: num(s, *v); break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
         uint32_t h = PR_LFO_HZ100[*v & 127u];
         char *e = num(s, h / 100u);
@@ -535,6 +559,39 @@ static void gfx_setup(void)                     /* the MIDI setup, in words */
     cv_text(8, 46, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
 }
 
+/* the sequencer: 64 squares, 16 a row: a rest empty, a note lilac, an accent white, a slide joined to the next;
+ * past the length a dot; the cursor ringed (lilac; white while REC), the step playing marked under */
+static uint32_t seq_drawn = 0xFFFFFFFFu;
+static void gfx_seq(uint32_t lit)
+{
+    uint32_t k, len = edit.seq_len >= 1u && edit.seq_len <= 64u ? edit.seq_len : 16u;
+    (void)lit;
+    seq_drawn = seq.steps;
+    for (k = 0; k < 64u; k++) {
+        int32_t x = 1 + (int32_t)(k % 16u) * 15, y = 1 + (int32_t)(k / 16u) * 15;
+        uint32_t tr = edit.seq_trig[k];
+        if (k >= len) {
+            cv_rect(x + 5, y + 5, 2, 2, C_BOX);
+            continue;
+        }
+        if (tr == SEQ_REST) {
+            cv_rect(x, y, 12, 1, C_BOX); cv_rect(x, y + 11, 12, 1, C_BOX);
+            cv_rect(x, y, 1, 12, C_BOX); cv_rect(x + 11, y, 1, 12, C_BOX);
+        } else {
+            cv_rect(x, y, 12, 12, tr == SEQ_ACCENT ? C_WHITE : C_ACC);
+            if (edit.seq_slide[k] && k + 1u < len && (k % 16u) != 15u)
+                cv_rect(x + 12, y + 5, 3, 2, tr == SEQ_ACCENT ? C_WHITE : C_ACC);   /* the slide: on to the next */
+        }
+        if (k == seq_cursor) {                  /* the cursor */
+            uint16_t c = seq_rec ? C_WHITE : C_ACC;
+            cv_rect(x - 1, y - 1, 14, 1, c); cv_rect(x - 1, y + 12, 14, 1, c);
+            cv_rect(x - 1, y - 1, 1, 14, c); cv_rect(x + 12, y - 1, 1, 14, c);
+        }
+        if (eg.seq_play && k == seq.playing)    /* the step playing */
+            cv_rect(x + 3, y + 13, 6, 1, C_WHITE);
+    }
+}
+
 static void gfx_mix(void)
 {
     char s[24], *e;
@@ -561,6 +618,7 @@ static void draw_gfx(void)
     case PG_FX: gfx_fx(lit); break;
     case PG_ARP: gfx_arp(lit); break;
     case PG_SETUP: gfx_setup(); break;
+    case PG_SEQ: gfx_seq(lit); break;
     default: gfx_mix();
     }
     cv_blit(0, G_Y);
@@ -574,9 +632,10 @@ static void draw_hdr(void)
 {
     char s[32], *e;
     e = put(s, PAGES[page].name);
+    if (page == PG_SEQ && seq_rec) e = put(e, " REC");
     e = put(e, "  ");
     put(e, PAGES[page].rows[row[page]].name);
-    draw_text_box(4, HDR_Y, 130, &FONT_S, s, C_ACC, 0);
+    draw_text_box(4, HDR_Y, 130, &FONT_S, s, page == PG_SEQ && seq_rec ? C_WHITE : C_ACC, 0);
     e = s;
     if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
     else e = put(e, "-");
@@ -914,10 +973,15 @@ static int ui_input(uint32_t buttons)
     const row_t *r;
     int32_t d;
     uint32_t i, changed = 0;
-    if (buttons & (1u << BTN_PLAY)) {           /* PLAY: the arpeggiator on / off, from anywhere */
-        edit.arp_on = !edit.arp_on;
-        changed = 1;
-        dirty |= D_HDR | D_GFX | D_ROWS;
+    if (buttons & (1u << BTN_PLAY)) {           /* PLAY: the sequencer runs / stops, from anywhere */
+        engine_seq_play(!eg.seq_play);
+        dirty |= D_GFX;
+    }
+    if (buttons & (1u << BTN_REC)) {            /* REC: step entry (and to the SEQ page) */
+        seq_rec = !seq_rec;
+        if (page != PG_SEQ) ui_page(PG_SEQ);
+        dirty |= D_ALL;
+        return (int)changed;
     }
     if (page != PG_PATCH && (d = fm1_enc_take(ENC_PRESETS)) != 0) {   /* PRESETS: the cutoff, from any page */
         static uint32_t last_cut;
@@ -942,7 +1006,8 @@ static int ui_input(uint32_t buttons)
         (void)fm1_enc_take(ENC_SELECT);
         if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
         if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return (int)changed; }
-        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP)))
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
+                         1u << BTN_SEQ)))
             return (int)changed;                /* (else a page button: on to that page, below) */
     } else if (buttons & (1u << BTN_HOME) && page != PG_PATCH) {
         ui_page(PG_SCOPE);
@@ -950,7 +1015,8 @@ static int ui_input(uint32_t buttons)
     }
     if (page == PG_PATCH) {                     /* the PATCH screen: HOME, a page button or ALGORITHM leave it */
         if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(pa_back); return (int)changed; }
-        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP)))
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
+                         1u << BTN_SEQ)))
             return pa_input(buttons) | (int)changed;   /* (else a page button: on to that page, below) */
     } else if (buttons & (1u << BTN_SAVE)) {
         ui_page(PG_PATCH);
@@ -960,7 +1026,15 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_FX)) ui_page(PG_FX);
     if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
     if (buttons & (1u << BTN_LFO)) ui_page(PG_LFO);
-    if (buttons & (1u << BTN_ARP)) ui_page(PG_ARP);
+    if (buttons & (1u << BTN_ARP)) {            /* ARP: its page; on its page, the arp on / off */
+        if (page == PG_ARP) {
+            edit.arp_on = !edit.arp_on;
+            changed = 1;
+            dirty |= D_HDR | D_GFX | D_ROWS;
+        } else
+            ui_page(PG_ARP);
+    }
+    if (buttons & (1u << BTN_SEQ)) ui_page(PG_SEQ);
     if (buttons & (1u << BTN_GLO)) ui_page(page == PG_MIX ? PG_SETUP : PG_MIX);
     if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0)
         ui_page((uint32_t)(((int32_t)page + d % (int32_t)PG_N + (int32_t)PG_N) % (int32_t)PG_N));
@@ -977,7 +1051,7 @@ static int ui_input(uint32_t buttons)
         if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE || (p->kind == K_BPM && gset.clock))
             continue;                           /* (on the MIDI clock the tempo is the clock's) */
         if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM ||
-            p->kind == K_CLK) {
+            p->kind == K_CLK || p->kind == K_STRIG || p->kind == K_SSLIDE) {
             /* one step per two detents: no flicker */
             slow[i] += d;
             if (slow[i] > -2 && slow[i] < 2) continue;
@@ -989,10 +1063,14 @@ static int ui_input(uint32_t buttons)
         last_turn[i] = fm1_ms;
         v = pval(page, p);
         x = (int32_t)*v + d;
-        x = x < 0 ? 0 : x > p->max ? p->max : x;
+        x = x < (p->kind == K_SLEN ? 1 : 0) ? (p->kind == K_SLEN ? 1 : 0) : x > p->max ? p->max : x;
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;
+        if (p->kind == K_CURSOR) {              /* the cursor: not the sound */
+            dirty |= D_GFX | D_ROWS;
+            continue;
+        }
         if (PAGES[page].osc == G) {             /* a setting, not the sound: saved; the clock to the engine */
             gset_dirty = 1;
             engine_sync(gset.clock);
@@ -1003,6 +1081,20 @@ static int ui_input(uint32_t buttons)
         dirty |= D_HDR | D_GFX | D_ROWS;        /* (the header: the unsaved-changes mark) */
     }
     return (int)changed;
+}
+
+/* step entry: on the SEQ page with REC on, a key (or MIDI note) writes its note at the cursor (a rest becomes a note;
+ * an accent stays one), and the cursor moves on (round within the length). 1: the sound changed */
+static int ui_seq_key(uint32_t note)
+{
+    uint32_t len = edit.seq_len >= 1u && edit.seq_len <= 64u ? edit.seq_len : 16u;
+    if (page != PG_SEQ || !seq_rec || note > 127u)
+        return 0;
+    edit.seq_note[seq_cursor] = (uint8_t)note;
+    if (edit.seq_trig[seq_cursor] == SEQ_REST) edit.seq_trig[seq_cursor] = SEQ_NOTE;
+    seq_cursor = (uint8_t)(seq_cursor + 1u >= len ? 0u : seq_cursor + 1u);
+    dirty |= D_HDR | D_GFX | D_ROWS;
+    return 1;
 }
 
 static void ui_init(int32_t slot)                /* the sound in that slot (the last one used), else the default */
@@ -1035,6 +1127,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
     }
     if (page == PG_ARP && arp_drawn != arp.steps)
         dirty |= D_GFX;                         /* (the arp's picture follows the playing step) */
+    if (page == PG_SEQ && seq_drawn != seq.steps)
+        dirty |= D_GFX;                         /* (and the sequencer's) */
     {
         static uint32_t bpm_drawn;
         if (gset.clock && (page == PG_ARP || page == PG_SETUP) && bpm_drawn != mc_bpm10 && fm1_ms - last_hdr < 5u) {

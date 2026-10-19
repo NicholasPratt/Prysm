@@ -29,7 +29,8 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Effects** | stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer |
 | **Velocity** | from MIDI, to level, cutoff and modulation (the FM-1's keys play at full velocity) |
 | **Glide** | portamento, always or legato |
-| **Arpeggiator** | UP, DOWN, UPDN, RAND, ORDER; 1/4 .. 1/32 with triplets; 1 .. 4 octaves; gate (to tied), swing, latch; 40 .. 240 BPM or the MIDI clock (START / STOP / CONTINUE); sample-accurate; PLAY turns it on |
+| **Arpeggiator** | UP, DOWN, UPDN, RAND, ORDER; 1/4 .. 1/32 with triplets; 1 .. 4 octaves; gate (to tied), swing, latch; 40 .. 240 BPM or the MIDI clock (START / STOP / CONTINUE); sample-accurate |
+| **Sequencer** | up to 64 steps, 303-style: notes, rests, accents, slides (legato glide, no new attack); step entry from the keys (REC); PLAY runs it; its own or the MIDI clock |
 | **Oscilloscope** | on HOME: left and right, locked to the newest note, auto-zoom |
 | **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on |
 | **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out, with channel select and clock |
@@ -52,7 +53,8 @@ envelopes, the LFO, the effects chain.
 | LFO | LFO | LFO, DEST, M.ENV, M.DST |
 | MIX | GLO | OSC, GLIDE |
 | SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK |
-| ARP | ARP (PLAY: on / off) | ARP, TIME |
+| ARP | ARP (again: on / off) | ARP, TIME |
+| SEQ | SEQ (PLAY: run, REC: step entry) | STEP, PATTERN |
 | FX | FX | CHORUS, DELAY, D.MOD, REVERB, R.MOD |
 | PATCH | SAVE | SAVE, LOAD, INIT over 8 slots |
 | SCOPE | HOME | the output, live (KNOB1: cycles) |
