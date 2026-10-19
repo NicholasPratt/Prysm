@@ -148,6 +148,23 @@ tail = float(np.abs(x[int(1.4 * FS):]).max())
 check("filter stable", np.isfinite(x).all() and full < 0.2 and tail < 0.01,
       f"{full * 100:.1f} % of samples at full scale, tail peak {tail:.4f}")
 
+x = load("cut_jump")                            # brightness in 2 ms windows after the jump at ~499 ms
+
+
+def hf(t0):
+    seg = x[int(t0 * FS):int((t0 + 0.002) * FS)]
+    return float(np.sqrt(np.mean(np.diff(seg) ** 2)))   # the slope's energy: rises with the cutoff
+
+
+t_jump = 499.0 / 1000
+steps = [hf(t_jump + 0.002 * k) for k in range(30)]   # 60 ms
+final, start = hf(0.8), hf(0.45)
+reached = [s >= start + 0.9 * (final - start) for s in steps]
+first = reached.index(True) if True in reached else None
+check("cutoff glides", first is not None and 3 <= first <= 25,
+      f"90 % of the change after {first * 2} ms (instant: 0-2 ms; want 6-50)" if first is not None
+      else "never reached 90 % within 60 ms")
+
 x = load("chord")
 pk = np.abs(x).max()
 check("chord headroom", pk < 0.999, f"peak {pk:.3f} of full scale")

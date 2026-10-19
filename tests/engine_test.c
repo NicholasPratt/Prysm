@@ -27,7 +27,10 @@ static void wav(const char *name, const int16_t *s, uint32_t n)
     fclose(f);
 }
 
-/* render: notes held from on_ms to off_ms, then until end_ms; clip = how many samples hit full scale */
+/* render: notes held from on_ms to off_ms, then until end_ms; clip = how many samples hit full scale.
+ * With p2: that patch from change_ms on (a knob turned while the notes sound) */
+static const patch_t *render_p2;
+static uint32_t render_change_ms;
 static void render(const char *name, const patch_t *p, const uint8_t *notes, uint32_t nn,
                    uint32_t off_ms, uint32_t end_ms)
 {
@@ -44,6 +47,8 @@ static void render(const char *name, const patch_t *p, const uint8_t *notes, uin
         if (done >= off_ms * (FS / 1000u))
             for (k = 0; k < nn; k++)
                 engine_note_off(notes[k]);
+        if (render_p2 && done == render_change_ms * (FS / 1000u) / FRAMES * FRAMES)
+            engine_set(render_p2);
         engine_render(blk, FRAMES);
         for (i = 0; i < 2u * FRAMES; i++) {
             int32_t v = blk[i];
@@ -145,6 +150,14 @@ int main(void)
         p = saw_through(10, 127);               /* the worst: full resonance, drive, the envelope sweeping it */
         p.drive = 127; p.fenv = 127; p.flt_d = 40; p.flt_s = 0; p.amp_r = 30;
         render("stable", &p, A5, 1, 700, 1500);
+        {                                       /* the cutoff knob jumps 30 -> 100 at 500 ms: it must glide */
+            patch_t q = saw_through(100, 0);
+            p = saw_through(30, 0);
+            render_p2 = &q;
+            render_change_ms = 500;
+            render("cut_jump", &p, A2, 1, 900, 1000);
+            render_p2 = 0;
+        }
     }
 
     p = PATCH_INIT;                             /* the default patch, a chord: four voices, no clipping */

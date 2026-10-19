@@ -61,7 +61,7 @@ static int test_knobs(patch_t *p)               /* 1: the patch changed */
     TURN(ENC_KNOB1, p->osc[0].pos[0], 0, 127, 2)
     TURN(ENC_KNOB2, p->osc[0].amt[0], 0, 127, 2)
     TURN(ENC_KNOB3, p->osc[0].ratio[1], 0, (int32_t)PR_RATIOS - 1, 1)
-    TURN(ENC_ALGORITHM, p->cut, 0, 127, 2)
+    TURN(ENC_ALGORITHM, p->cut, 0, 127, 1)
     TURN(ENC_PRESETS, p->res, 0, 127, 2)
 #undef TURN
     if ((d = fm1_enc_take(ENC_KNOB4)) != 0) {   /* the mode: one step per 3 detents, so it does not flicker */

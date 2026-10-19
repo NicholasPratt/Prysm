@@ -88,6 +88,9 @@ static struct {
     uint32_t ph[NOSC][NOP];
     env_t amp, flt, mod[NOSC][2];
     int32_t ic1, ic2;                           /* the filter's two integrator states */
+    int32_t f_cs;                               /* the cutoff knob, smoothed (quarter semitones, Q8) */
+    int32_t f_ks;                               /* the damping, smoothed (Q24) */
+    int32_t fc[3];                              /* the coefficients the last block ended on (Q28) */
     int32_t amp_q15, mod_q15[NOSC][2];          /* the levels now (per frame, gliding to each block's target) */
     uint8_t note;
     uint32_t age;
@@ -154,19 +157,29 @@ static inline int32_t saturate(int32_t x)
     return x - ((x3 * 4855) >> 15);             /* 4855 = 4/27 in Q15 */
 }
 
-/* ---- the filter's coefficients for a voice, once per block: the cutoff (knob, envelope, keytrack) -> g, then the
- * zero-delay-feedback SVF's a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2 (Q28) */
-static void filter_coefs(uint32_t note, int32_t env, int32_t *a1, int32_t *a2, int32_t *a3)
+/* ---- the filter's coefficients for a voice, once per block: the cutoff (the smoothed knob, the envelope, keytrack;
+ * quarter semitones, Q8) -> g, interpolated between the table's quarter semitones, then the zero-delay-feedback
+ * SVF's a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2 (Q28). The render glides from one block's to the next's. */
+#define CUT_MAX ((int32_t)(PR_FILT_N - 1u) << 8)
+static void filter_coefs(uint32_t note, int32_t env, int32_t cut_q8, uint32_t k, int32_t *f)
 {
-    int32_t c = eg.f_cut + (int32_t)(((int64_t)eg.f_env * env) >> 24) + ((((int32_t)note - 60) * eg.f_key) >> 6);
-    uint32_t g, den;
+    int32_t c = cut_q8 + (int32_t)(((int64_t)eg.f_env * env) >> 16) + ((((int32_t)note - 60) * eg.f_key) << 2);
+    uint32_t g, den, i, fr;
     if (c < 0) c = 0;
-    if (c > (int32_t)PR_FILT_N - 1) c = (int32_t)PR_FILT_N - 1;
-    g = PR_FILT_G[c];
-    den = (uint32_t)(((1u << 24) + (((uint64_t)g * (g + eg.f_k)) >> 24)) >> 8);   /* (1 + g (g + k)), Q16 */
-    *a1 = (int32_t)((0xFFFFFFFFu / den) << 12);                                  /* Q16 -> Q28 */
-    *a2 = (int32_t)(((int64_t)*a1 * g) >> 24);
-    *a3 = (int32_t)(((int64_t)*a2 * g) >> 24);
+    if (c > CUT_MAX - 1) c = CUT_MAX - 1;
+    i = (uint32_t)c >> 8;
+    fr = (uint32_t)c & 255u;
+    g = PR_FILT_G[i] + (((PR_FILT_G[i + 1u] - PR_FILT_G[i]) * fr) >> 8);
+    den = (uint32_t)(((1u << 24) + (((uint64_t)g * (g + k)) >> 24)) >> 8);   /* (1 + g (g + k)), Q16 */
+    f[0] = (int32_t)((0xFFFFFFFFu / den) << 12);                           /* Q16 -> Q28 */
+    f[1] = (int32_t)(((int64_t)f[0] * g) >> 24);
+    f[2] = (int32_t)(((int64_t)f[1] * g) >> 24);
+}
+
+static int32_t glide(int32_t now, int32_t to)   /* one block's step of a ~12 ms glide (32 blocks) */
+{
+    int32_t d = (to - now) >> 5;
+    return d ? now + d : to;
 }
 
 /* ---- the audio ISR: add n stereo frames (L R) to out */
@@ -180,6 +193,9 @@ static void engine_render(int32_t *out, uint32_t n)
                 for (o = 0; o < NOSC; o++)
                     voice[v].ph[o][0] = voice[v].ph[o][1] = voice[v].ph[o][2] = 0;
                 voice[v].ic1 = voice[v].ic2 = 0;
+                voice[v].f_cs = eg.f_cut << 8;  /* the knob as it is now; the first block starts on its own */
+                voice[v].f_ks = (int32_t)eg.f_k;
+                voice[v].fc[0] = -1;
             }
             voice[v].amp.st = 1;
             voice[v].flt.st = 1;
@@ -236,9 +252,18 @@ static void engine_render(int32_t *out, uint32_t n)
             }
             {                                   /* drive, the filter, the amp: the voice into both channels */
                 int32_t fe = env_step(&voice[v].flt, gate, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
-                int32_t a1, a2, a3, ic1 = voice[v].ic1, ic2 = voice[v].ic2, drive = eg.drive;
-                filter_coefs(voice[v].note, fe, &a1, &a2, &a3);
-                for (i = 0; i < BLK; i++, a += da) {
+                int32_t f[3], a1, a2, a3, d1, d2, d3, ic1 = voice[v].ic1, ic2 = voice[v].ic2, drive = eg.drive;
+                voice[v].f_cs = glide(voice[v].f_cs, eg.f_cut << 8);   /* knob moves glide, they do not step */
+                voice[v].f_ks = glide(voice[v].f_ks, (int32_t)eg.f_k);
+                filter_coefs(voice[v].note, fe, voice[v].f_cs, (uint32_t)voice[v].f_ks, f);
+                if (voice[v].fc[0] < 0) {       /* (a voice from silence: no previous block to glide from) */
+                    voice[v].fc[0] = f[0]; voice[v].fc[1] = f[1]; voice[v].fc[2] = f[2];
+                }
+                a1 = voice[v].fc[0]; a2 = voice[v].fc[1]; a3 = voice[v].fc[2];
+                d1 = (f[0] - a1) >> BLK_SHIFT;  /* the coefficients glide across the block, frame by frame */
+                d2 = (f[1] - a2) >> BLK_SHIFT;
+                d3 = (f[2] - a3) >> BLK_SHIFT;
+                for (i = 0; i < BLK; i++, a += da, a1 += d1, a2 += d2, a3 += d3) {
                     int32_t s = acc[i] > 32767 ? 32767 : acc[i] < -32767 ? -32767 : acc[i], v1, v2, v3;
                     if (drive)
                         s = saturate((s * drive) >> 12);
@@ -254,6 +279,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 }
                 voice[v].ic1 = ic1;
                 voice[v].ic2 = ic2;
+                voice[v].fc[0] = f[0]; voice[v].fc[1] = f[1]; voice[v].fc[2] = f[2];
             }
             voice[v].amp_q15 = a_to;
         }
