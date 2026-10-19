@@ -43,6 +43,31 @@ static void stop(uint32_t note) { engine_note_off(note); }
 #define KEY0 53u                                /* key 0 = F3 */
 #include "patches.c"                            /* the 8 patch slots */
 #include "ui.c"                                 /* the pages, the PATCH screen */
+#include "prysm_splash.h"                       /* the power-on picture (tools/gen_splash.py, assets/splash.jpg) */
+
+/* ---- the splash: the picture (from flash, through the canvas in strips), the name under it; until 2.5 s have
+ * passed or a key or button is pressed. (Host mode skips it unless built with -DPRYSM_SPLASH: the UI scripts
+ * time their screenshots from power-on.) */
+static void splash(void)
+{
+#if !defined(DINGHY_HOST) || defined(PRYSM_SPLASH)
+    uint32_t y, t0, rel, strip = CV_MAX / SPLASH_W;
+    lcd_fill(0, 0, 240, 240, C_BLACK);
+    for (y = 0; y < SPLASH_H; y += strip) {
+        uint32_t h = SPLASH_H - y < strip ? SPLASH_H - y : strip;
+        cv_begin(SPLASH_W, h, C_BLACK);
+        memcpy(cv_px, SPLASH + y * SPLASH_W, SPLASH_W * h * 2u);
+        cv_blit((240u - SPLASH_W) / 2u, 4u + y);
+    }
+    draw_text_box(0, 216, 240, &FONT_S, "PRYSM  v" APP_VER, C_ACC, 1);
+    t0 = fm1_ms;
+    while (fm1_ms - t0 < 2500u) {
+        platform_poll();
+        if (fm1_in.notes || fm1_input_edges(&rel))
+            break;                              /* a key or a button: straight on (a key then plays) */
+    }
+#endif
+}
 
 static void app_main(void)
 {
@@ -52,6 +77,7 @@ static void app_main(void)
     settings_load(&set, sizeof set);
     if (set.oct < -2 || set.oct > 2) set.oct = 0;
     engine_init();
+    splash();
     ui_init(set.slot);                          /* the sound of the slot last saved or loaded */
 
     for (;;) {
