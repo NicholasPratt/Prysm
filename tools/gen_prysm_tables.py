@@ -141,6 +141,20 @@ FINE = [round(2 ** (((p - 64) * 50 / 63) / 1200) * 65536) for p in range(128)]  
 SEMI = [round(2 ** ((s - 24) / 12) * 65536) for s in range(49)]                 # -24..+24 semitones, Q16
 CURVE = [round((p / 127) ** 2 * 32767) for p in range(128)]                      # amounts, levels: Q15, squared
 
+# ---- the filter (a zero-delay-feedback state-variable low-pass, engine.c)
+# cutoff as a pitch in quarter semitones: 0 .. FILT_N-1 = MIDI 0 .. 135.75 (8 Hz .. 20 kHz, held under 0.45 fs)
+FILT_N = 544
+
+
+def filt_hz(q):
+    return min(440 * 2 ** ((q / 4 - 69) / 12), 0.45 * FS)
+
+
+FILT_G = [round(np.tan(np.pi * filt_hz(q) / FS) * (1 << 24)) for q in range(FILT_N)]   # g = tan(pi fc / fs), Q24
+# resonance 0..127 -> damping k = 2 (none) .. 0.04 (near self-oscillation), Q24; eased so the top is usable
+RES_K = [round(max(0.04, 2 * (1 - (p / 127) ** 0.7)) * (1 << 24)) for p in range(128)]
+DRIVE = [round(8 ** (p / 127) * 4096) for p in range(128)]                       # drive gain 1 .. 8, Q12
+
 
 def c_array(name, ctype, values, per_line=12):
     lines = [", ".join(str(int(v)) for v in values[i:i + per_line]) for i in range(0, len(values), per_line)]
@@ -183,6 +197,12 @@ def main():
     out.append(c_array("PR_SEMI_Q16", "uint32_t", SEMI, 8))
     out.append("/* 0..127 -> Q15, squared: amounts and levels feel even across the knob */")
     out.append(c_array("PR_CURVE_Q15", "uint16_t", CURVE))
+    out.append(f"/* the filter: cutoff index 0..{FILT_N - 1} = MIDI 0..135.75 in quarter semitones (8 Hz .. 0.45 fs):")
+    out.append(" * g = tan(pi fc / fs) Q24; resonance 0..127 -> damping k Q24; drive 0..127 -> gain 1..8 Q12 */")
+    out.append(f"#define PR_FILT_N {FILT_N}u")
+    out.append(c_array("PR_FILT_G", "uint32_t", FILT_G, 8))
+    out.append(c_array("PR_RES_K", "uint32_t", RES_K, 8))
+    out.append(c_array("PR_DRIVE_Q12", "uint16_t", DRIVE))
     out.append("#endif")
     OUT.write_text("\n".join(out) + "\n")
     print(f"{OUT}: {len(BANKS)} banks x 8 waves, {OUT.stat().st_size} bytes")

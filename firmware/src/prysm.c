@@ -46,7 +46,7 @@ static void stop(uint32_t note) { engine_note_off(note); }
 
 /* ---- TEMPORARY test controls, until the pages: osc 1's carrier and mod 1 on the knobs, so the engine can be heard.
  *   SELECT  carrier bank     KNOB1  carrier position    KNOB2  mod 1 amount
- *   KNOB3   mod 1 ratio      KNOB4  mod 1 mode          ALGORITHM  mod 2 amount     PRESETS  osc 2 level */
+ *   KNOB3   mod 1 ratio      KNOB4  mod 1 mode          ALGORITHM  filter cutoff    PRESETS  filter resonance */
 static int32_t clampi(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
 static int test_knobs(patch_t *p)               /* 1: the patch changed */
 {
@@ -61,8 +61,8 @@ static int test_knobs(patch_t *p)               /* 1: the patch changed */
     TURN(ENC_KNOB1, p->osc[0].pos[0], 0, 127, 2)
     TURN(ENC_KNOB2, p->osc[0].amt[0], 0, 127, 2)
     TURN(ENC_KNOB3, p->osc[0].ratio[1], 0, (int32_t)PR_RATIOS - 1, 1)
-    TURN(ENC_ALGORITHM, p->osc[0].amt[1], 0, 127, 2)
-    TURN(ENC_PRESETS, p->lvl2, 0, 127, 2)
+    TURN(ENC_ALGORITHM, p->cut, 0, 127, 2)
+    TURN(ENC_PRESETS, p->res, 0, 127, 2)
 #undef TURN
     if ((d = fm1_enc_take(ENC_KNOB4)) != 0) {   /* the mode: one step per 3 detents, so it does not flicker */
         mode_acc += d;
@@ -101,10 +101,10 @@ static void draw_test(const patch_t *p)
     e = put(e, "  AMT ");
     num(e, p->osc[0].amt[0]);
     draw_text_box(0, 102, 240, &FONT_S, s, C_ACC, 1);
-    e = put(s, "MOD2 AMT ");
-    e = num(e, p->osc[0].amt[1]);
-    e = put(e, "  OSC2 ");
-    num(e, p->lvl2);
+    e = put(s, "CUT ");
+    e = num(e, p->cut);
+    e = put(e, "  RES ");
+    num(e, p->res);
     draw_text_box(0, 120, 240, &FONT_S, s, C_OFF, 1);
 }
 

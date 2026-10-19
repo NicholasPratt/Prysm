@@ -69,6 +69,16 @@ static patch_t solo(void)                       /* osc 1 carrier only, a sine; o
     p.lvl1 = 127;
     p.osc[1].level = 0;
     p.amp_a = 0; p.amp_d = 0; p.amp_s = 127; p.amp_r = 20;
+    p.cut = 127; p.res = 0; p.fenv = 64; p.key = 0; p.drive = 0;   /* the filter open, out of the way */
+    return p;
+}
+
+static patch_t saw_through(uint8_t cut, uint8_t res)   /* osc 1 a saw (BASIC, position 73), the filter as given */
+{
+    patch_t p = solo();
+    p.osc[0].pos[0] = 73;
+    p.cut = cut;
+    p.res = res;
     return p;
 }
 
@@ -118,6 +128,24 @@ int main(void)
     p.semi2 = 31;
     p.fine2 = 64;
     render("osc2", &p, A4, 1, 900, 1000);
+
+    {                                           /* the filter: cutoff 71 = 987 Hz; a saw on A2 (110 Hz) */
+        static const uint8_t A2[] = {45}, A5[] = {81};
+        p = saw_through(127, 0); render("lp_open", &p, A2, 1, 900, 1000);
+        p = saw_through(71, 0); render("lp_1k", &p, A2, 1, 900, 1000);
+        p = saw_through(71, 120); render("lp_res", &p, A2, 1, 900, 1000);
+        p = saw_through(127, 0); render("key_open_hi", &p, A5, 1, 900, 1000);
+        p = saw_through(71, 0); p.key = 127; render("key_on_lo", &p, A2, 1, 900, 1000);
+        p = saw_through(71, 0); p.key = 127; render("key_on_hi", &p, A5, 1, 900, 1000);
+        p = saw_through(71, 0); p.key = 0; render("key_off_hi", &p, A5, 1, 900, 1000);
+        p = saw_through(30, 0);                 /* filter envelope: +60 semitones, decaying to 0 */
+        p.fenv = 127; p.flt_a = 0; p.flt_d = 75; p.flt_s = 0; p.flt_r = 60;
+        render("fenv", &p, A2, 1, 900, 1000);
+        p = solo(); p.drive = 127; render("drive", &p, A4, 1, 900, 1000);
+        p = saw_through(10, 127);               /* the worst: full resonance, drive, the envelope sweeping it */
+        p.drive = 127; p.fenv = 127; p.flt_d = 40; p.flt_s = 0; p.amp_r = 30;
+        render("stable", &p, A5, 1, 700, 1500);
+    }
 
     p = PATCH_INIT;                             /* the default patch, a chord: four voices, no clipping */
     render("chord", &p, CHORD, 4, 1500, 2500);

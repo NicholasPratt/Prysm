@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Prysm's sound engine: 4 voices, each 2 oscillators, each a wavetable carrier modulated by a series chain of two
  * wavetable modulators (mod 2 -> mod 1 -> carrier), each modulator with its own AR envelope and a mode (FM, RING,
- * MIX); the two oscillators mixed, then the amp ADSR. (The filter and its envelope come next.)
+ * MIX); the two oscillators mixed, driven, through a 2-pole low-pass with its own ADSR, then the amp ADSR.
  *
  * Who runs what:
  *   main loop   engine_set(): the patch changed -> the derived values below; engine_note_on / _off.
@@ -33,6 +33,11 @@ typedef struct {
         uint8_t amt[2];                         /* mod 1, mod 2 amount */
         uint8_t level;                          /* the oscillator's level */
     } osc[NOSC];
+    uint8_t cut, res;                           /* filter cutoff (8 Hz .. 20 kHz), resonance */
+    uint8_t fenv;                               /* filter envelope amount: 64 = none, +-60 semitones */
+    uint8_t key;                                /* keytrack: 0 .. 127 = 0 .. 100 % */
+    uint8_t drive;                              /* into the filter: 0 = clean (bypassed), gain up to 8 */
+    uint8_t flt_a, flt_d, flt_s, flt_r;         /* filter ADSR */
     uint8_t amp_a, amp_d, amp_s, amp_r;         /* amp ADSR */
     uint8_t lvl1, lvl2;                         /* MIX page: the oscillators' levels */
     uint8_t semi2;                              /* osc 2: 0..48, 24 = in tune */
@@ -46,6 +51,8 @@ static const patch_t PATCH_INIT = {
         {.bank = {0, 0, 0}, .pos = {73, 0, 0}, .ratio = {1, 1, 1}, .fine = 64, .mode = {MODE_FM, MODE_FM},
          .att = {0, 0}, .rel = {60, 60}, .amt = {0, 0}, .level = 127},
     },
+    .cut = 92, .res = 40, .fenv = 88, .key = 64, .drive = 0,
+    .flt_a = 0, .flt_d = 75, .flt_s = 50, .flt_r = 65,
     .amp_a = 8, .amp_d = 70, .amp_s = 100, .amp_r = 60,
     .lvl1 = 110, .lvl2 = 70, .semi2 = 24, .fine2 = 70,
 };
@@ -58,6 +65,13 @@ static volatile struct {
     int32_t lvl[NOSC];                          /* oscillator output levels, Q15 */
     uint32_t a_att, a_dec, a_rel;               /* amp ADSR */
     int32_t a_sus;                              /* Q24 */
+    uint32_t f_att, f_dec, f_rel;               /* filter ADSR */
+    int32_t f_sus;
+    int32_t f_cut;                              /* cutoff, quarter semitones (PR_FILT_G index) */
+    int32_t f_env;                              /* envelope depth, quarter semitones at full envelope (+-) */
+    int32_t f_key;                              /* keytrack, Q8 (256 = 100 %: a semitone per semitone) */
+    uint32_t f_k;                               /* damping, Q24 */
+    int32_t drive;                              /* gain Q12; 0 = no drive stage */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -72,7 +86,8 @@ static struct {
     volatile uint8_t gate;                      /* the key is down (main loop) */
     volatile uint8_t trig;                      /* a new note: the ISR restarts the envelopes (main sets, ISR clears) */
     uint32_t ph[NOSC][NOP];
-    env_t amp, mod[NOSC][2];
+    env_t amp, flt, mod[NOSC][2];
+    int32_t ic1, ic2;                           /* the filter's two integrator states */
     int32_t amp_q15, mod_q15[NOSC][2];          /* the levels now (per frame, gliding to each block's target) */
     uint8_t note;
     uint32_t age;
@@ -128,6 +143,32 @@ static inline int32_t modulated(uint32_t mode, const int16_t *t, uint32_t ph, in
     return s > 32767 ? 32767 : s < -32767 ? -32767 : s;
 }
 
+/* ---- drive: a cubic soft clip, x - 4/27 x^3, flat (at full scale) from 1.5 x full scale on */
+static inline int32_t saturate(int32_t x)
+{
+    int32_t x2, x3;
+    if (x > 49151) return 32767;
+    if (x < -49151) return -32767;
+    x2 = ((x >> 1) * (x >> 1)) >> 13;           /* x^2 (halves first: 49151^2 overflows 32 bits) */
+    x3 = (x2 * (x >> 1)) >> 14;                 /* x^3 */
+    return x - ((x3 * 4855) >> 15);             /* 4855 = 4/27 in Q15 */
+}
+
+/* ---- the filter's coefficients for a voice, once per block: the cutoff (knob, envelope, keytrack) -> g, then the
+ * zero-delay-feedback SVF's a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2 (Q28) */
+static void filter_coefs(uint32_t note, int32_t env, int32_t *a1, int32_t *a2, int32_t *a3)
+{
+    int32_t c = eg.f_cut + (int32_t)(((int64_t)eg.f_env * env) >> 24) + ((((int32_t)note - 60) * eg.f_key) >> 6);
+    uint32_t g, den;
+    if (c < 0) c = 0;
+    if (c > (int32_t)PR_FILT_N - 1) c = (int32_t)PR_FILT_N - 1;
+    g = PR_FILT_G[c];
+    den = (uint32_t)(((1u << 24) + (((uint64_t)g * (g + eg.f_k)) >> 24)) >> 8);   /* (1 + g (g + k)), Q16 */
+    *a1 = (int32_t)((0xFFFFFFFFu / den) << 12);                                  /* Q16 -> Q28 */
+    *a2 = (int32_t)(((int64_t)*a1 * g) >> 24);
+    *a3 = (int32_t)(((int64_t)*a2 * g) >> 24);
+}
+
 /* ---- the audio ISR: add n stereo frames (L R) to out */
 static void engine_render(int32_t *out, uint32_t n)
 {
@@ -135,10 +176,13 @@ static void engine_render(int32_t *out, uint32_t n)
     for (v = 0; v < NV; v++) {
         if (voice[v].trig) {                    /* a new note: the envelopes (re)start from where they are */
             voice[v].trig = 0;
-            if (!voice[v].amp.st)               /* from silence: the phases from 0, the same attack every time */
+            if (!voice[v].amp.st) {             /* from silence: the phases from 0, the same attack every time */
                 for (o = 0; o < NOSC; o++)
                     voice[v].ph[o][0] = voice[v].ph[o][1] = voice[v].ph[o][2] = 0;
+                voice[v].ic1 = voice[v].ic2 = 0;
+            }
             voice[v].amp.st = 1;
+            voice[v].flt.st = 1;
             for (o = 0; o < NOSC; o++)
                 voice[v].mod[o][0].st = voice[v].mod[o][1].st = 1;
         }
@@ -190,11 +234,26 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].ph[o][1] = p1;
                 voice[v].ph[o][2] = p2;
             }
-            for (i = 0; i < BLK; i++, a += da) {   /* amp, then the voice into both channels */
-                int32_t s = acc[i] > 32767 ? 32767 : acc[i] < -32767 ? -32767 : acc[i];
-                s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
-                out[2u * (b + i)] += s;
-                out[2u * (b + i) + 1u] += s;
+            {                                   /* drive, the filter, the amp: the voice into both channels */
+                int32_t fe = env_step(&voice[v].flt, gate, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
+                int32_t a1, a2, a3, ic1 = voice[v].ic1, ic2 = voice[v].ic2, drive = eg.drive;
+                filter_coefs(voice[v].note, fe, &a1, &a2, &a3);
+                for (i = 0; i < BLK; i++, a += da) {
+                    int32_t s = acc[i] > 32767 ? 32767 : acc[i] < -32767 ? -32767 : acc[i], v1, v2, v3;
+                    if (drive)
+                        s = saturate((s * drive) >> 12);
+                    v3 = s - ic2;               /* the zero-delay-feedback SVF (Simper): stable at any cutoff */
+                    v1 = (int32_t)(((int64_t)a1 * ic1 + (int64_t)a2 * v3) >> 28);
+                    v2 = ic2 + (int32_t)(((int64_t)a2 * ic1 + (int64_t)a3 * v3) >> 28);
+                    ic1 = 2 * v1 - ic1;
+                    ic2 = 2 * v2 - ic2;
+                    s = v2 > 32767 ? 32767 : v2 < -32767 ? -32767 : v2;   /* the low-pass */
+                    s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
+                    out[2u * (b + i)] += s;
+                    out[2u * (b + i) + 1u] += s;
+                }
+                voice[v].ic1 = ic1;
+                voice[v].ic2 = ic2;
             }
             voice[v].amp_q15 = a_to;
         }
@@ -263,6 +322,15 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
             if (waves[o][k])
                 engine_tables(o, k);
     }
+    eg.f_att = PR_ENV_ATT[patch.flt_a & 127u];
+    eg.f_dec = PR_ENV_EXP[patch.flt_d & 127u];
+    eg.f_sus = (int32_t)((patch.flt_s & 127u) * (uint32_t)(ENV_FULL / 127));
+    eg.f_rel = PR_ENV_EXP[patch.flt_r & 127u];
+    eg.f_cut = 64 + (int32_t)(patch.cut & 127u) * ((int32_t)PR_FILT_N - 1 - 64) / 127;   /* MIDI 16 .. 135.75 */
+    eg.f_env = ((int32_t)(patch.fenv & 127u) - 64) * 240 / 63;                       /* +-60 semitones */
+    eg.f_key = (int32_t)(patch.key & 127u) * 256 / 127;
+    eg.f_k = PR_RES_K[patch.res & 127u];
+    eg.drive = patch.drive ? PR_DRIVE_Q12[patch.drive & 127u] : 0;
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
     eg.a_sus = (int32_t)((patch.amp_s & 127u) * (uint32_t)(ENV_FULL / 127));

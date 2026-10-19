@@ -104,6 +104,50 @@ f, s = spectrum(load("osc2"))
 a, b = level_db(f, s, 440), level_db(f, s, 659.26)
 check("osc2 a fifth", a > -3 and b > -3, f"440 Hz {a:.1f} dB, 659 Hz {b:.1f} dB")
 
+def harm_db(name, f0, k, t0=0.2, t1=0.8):
+    """harmonic k of f0 in the render, dB (absolute: relative to full scale over the window)"""
+    x = load(name)[int(t0 * FS):int(t1 * FS)]
+    s = np.abs(np.fft.rfft(x * np.hanning(len(x)))) / (len(x) / 4)
+    f = np.fft.rfftfreq(len(x), 1 / FS)
+    m = np.abs(f - f0 * k) <= 3
+    return 20 * np.log10(s[m].max() + 1e-12)
+
+
+def atten(name, ref, f0, k):
+    return harm_db(name, f0, k) - harm_db(ref, f0, k)
+
+
+# (the waves hold 48 harmonics: measure within them. Theory for k = 2 at 987 Hz: -1.5, -15.5, -26.4 dB)
+a4, a20, a40 = atten("lp_1k", "lp_open", 110, 4), atten("lp_1k", "lp_open", 110, 20), atten("lp_1k", "lp_open", 110, 40)
+check("filter passband", -3 < a4 < 0.5, f"440 Hz {a4:.1f} dB (want ~-1.5)")
+check("filter stopband", -32 < a40 < -21, f"4.4 kHz {a40:.1f} dB (want ~-26)")
+check("filter slope", -13 < a40 - a20 < -9, f"2.2 -> 4.4 kHz {a40 - a20:.1f} dB (want ~-11, -> 12 dB/oct)")
+r9 = atten("lp_res", "lp_open", 110, 9)
+check("filter resonance", r9 > 6, f"990 Hz {r9:+.1f} dB at high resonance")
+lo = atten("key_on_lo", "lp_open", 110, 8)
+hi = atten("key_on_hi", "key_open_hi", 880, 8)
+off = atten("key_off_hi", "key_open_hi", 880, 8)
+check("keytrack follows", abs(lo - hi) < 3, f"8th harmonic: {lo:.1f} dB on A2, {hi:.1f} dB on A5")
+check("keytrack off", off < hi - 10, f"A5 without keytrack {off:.1f} dB")
+x = load("fenv")
+
+
+def bright2(t0, t1):
+    f, s = spectrum(x, t0, t1)
+    return float((s[f > 1000] ** 2).sum() / (s ** 2).sum())
+
+
+e0, e1 = bright2(0.0, 0.06), bright2(0.6, 0.85)
+check("filter envelope", e0 > 5 * e1, f"energy above 1 kHz: {e0:.3f} at 0-60 ms, {e1:.4f} at 600-850 ms")
+f, s = spectrum(load("drive"))
+h3 = level_db(f, s, 1320)
+check("drive", h3 > -30, f"3rd harmonic {h3:.1f} dB with full drive (clean: < -50)")
+x = load("stable")
+full = float(np.mean(np.abs(x[:int(0.7 * FS)]) > 0.999))
+tail = float(np.abs(x[int(1.4 * FS):]).max())
+check("filter stable", np.isfinite(x).all() and full < 0.2 and tail < 0.01,
+      f"{full * 100:.1f} % of samples at full scale, tail peak {tail:.4f}")
+
 x = load("chord")
 pk = np.abs(x).max()
 check("chord headroom", pk < 0.999, f"peak {pk:.3f} of full scale")
