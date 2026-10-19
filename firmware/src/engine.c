@@ -57,6 +57,15 @@ typedef struct {
     uint8_t lfo_retrig;                         /* 1: each note starts its own LFO; 0: one LFO runs free for all */
     uint8_t lfo_dest[2];                        /* DEST_OFF .. DEST_MIX */
     uint8_t lfo_amt[2];                         /* 64 = none; bipolar */
+    /* (added in patch format 3: the effects, fx.c; a mix of 0 = off) */
+    uint8_t cho_rate, cho_depth, cho_mix;
+    uint8_t dly_time, dly_fb, dly_mix, dly_ping;
+    uint8_t dly_wrate, dly_wdepth;              /* wow: the delay time swept */
+    uint8_t dly_shift;                          /* each repeat: 0..24 = -12..+12 semitones (12 = none) */
+    uint8_t dly_tone;                           /* the repeats: 0 dark .. 127 bright */
+    uint8_t rev_size, rev_damp, rev_mix, rev_pre;
+    uint8_t rev_mrate, rev_mdepth;              /* the tank's sweep: the tail's wobble */
+    uint8_t rev_shimmer;                        /* the tail an octave up, back in */
 } patch_t;
 
 static const patch_t PATCH_INIT = {
@@ -72,6 +81,11 @@ static const patch_t PATCH_INIT = {
     .lvl1 = 110, .lvl2 = 70, .semi2 = 24, .fine2 = 70,
     .lfo_wave = LFO_SINE, .lfo_rate = 87, .lfo_delay = 0, .lfo_retrig = 1,   /* 5 Hz; no destination amount yet */
     .lfo_dest = {DEST_PITCH, DEST_CUTOFF}, .lfo_amt = {64, 64},
+    .cho_rate = 40, .cho_depth = 60, .cho_mix = 0,             /* the effects: all there, all off (mix 0) */
+    .dly_time = 50, .dly_fb = 60, .dly_mix = 0, .dly_ping = 1,
+    .dly_wrate = 45, .dly_wdepth = 0, .dly_shift = 12, .dly_tone = 80,
+    .rev_size = 85, .rev_damp = 50, .rev_mix = 0, .rev_pre = 15,
+    .rev_mrate = 40, .rev_mdepth = 50, .rev_shimmer = 0,
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -302,6 +316,8 @@ static uint32_t inc_moved(uint32_t inc, int32_t p16)   /* a phase step moved by 
     return r > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)r;
 }
 
+#include "fx.c"                                 /* the effects: chorus, delay, reverb */
+
 /* ---- the audio ISR: add n stereo frames (L R) to out */
 #define MAXBLK 32u                              /* blocks per render, at most (n <= 512) */
 static void engine_render(int32_t *out, uint32_t n)
@@ -461,6 +477,7 @@ static void engine_render(int32_t *out, uint32_t n)
             voice[v].amp_q15 = a_to;
         }
     }
+    fx_render(out, n);                          /* the effects, over all the voices */
 }
 
 /* ---- main loop: the patch -> the derived values */
@@ -556,6 +573,7 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.lfo_dest[k] = patch.lfo_dest[k] < DEST_N ? patch.lfo_dest[k] : DEST_OFF;
         eg.lfo_amt[k] = eg.lfo_dest[k] == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
+    fx_set(&patch);
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
     eg.a_sus = (int32_t)((patch.amp_s & 127u) * (uint32_t)(ENV_FULL / 127));
@@ -568,6 +586,7 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
 static void engine_init(void)
 {
     uint32_t o, k;
+    fx_init();
     for (o = 0; o < NOSC; o++)                  /* force every table to be built */
         for (k = 0; k < NOP; k++)
             op_cur[o][k] = 0;

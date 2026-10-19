@@ -5,11 +5,15 @@
  * New fields go at the end of patch_t; the older formats are converted when read (patches_load), with the new
  * fields as PATCH_INIT has them:
  *   1  up to fine2 (55 bytes)
- *   2  + the LFO (lfo_wave .. lfo_amt) */
+ *   2  + the LFO (lfo_wave .. lfo_amt: 63 bytes)
+ *   3  + the effects (cho_rate .. rev_shimmer) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 2u
+#define PATCH_VERSION 3u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
+#define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
+#define PATCH_OLD_MAX PATCH_V2_SIZE
 _Static_assert(__builtin_offsetof(patch_t, lfo_wave) == PATCH_V1_SIZE, "format 1 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, cho_rate) == PATCH_V2_SIZE, "format 2 is a prefix of patch_t");
 
 static struct {
     uint32_t version;
@@ -17,20 +21,19 @@ static struct {
     patch_t p[PATCH_SLOTS];
 } bank;
 
-static int patches_from_v1(void)                /* a format 1 bank -> bank; 0 = there was one */
+static int patches_from_old(uint32_t version, uint32_t size)   /* an older bank -> bank; 0 = there was one */
 {
-    static struct {
-        uint32_t version;
-        uint8_t used[PATCH_SLOTS];
-        uint8_t p[PATCH_SLOTS][PATCH_V1_SIZE];
-    } old;
-    uint32_t s;
-    if (store_load(&old, sizeof old) != 0 || old.version != 1u)
+    static uint8_t old[4u + PATCH_SLOTS + PATCH_SLOTS * PATCH_OLD_MAX];   /* version, used[], the patches */
+    uint32_t s, v;
+    if (store_load(old, 4u + PATCH_SLOTS + PATCH_SLOTS * size) != 0)
+        return -1;
+    memcpy(&v, old, 4);
+    if (v != version)
         return -1;
     for (s = 0; s < PATCH_SLOTS; s++) {
         bank.p[s] = PATCH_INIT;                 /* the new fields: as the default sound has them */
-        memcpy(&bank.p[s], old.p[s], PATCH_V1_SIZE);
-        bank.used[s] = old.used[s];
+        memcpy(&bank.p[s], old + 4u + PATCH_SLOTS + s * size, size);
+        bank.used[s] = old[4u + s];
     }
     return 0;
 }
@@ -40,7 +43,8 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     if (store_load(&bank, sizeof bank) == 0 && bank.version == PATCH_VERSION)
         return;
     memset(&bank, 0, sizeof bank);
-    patches_from_v1();                          /* (kept in RAM; written in the new format by the next save) */
+    if (patches_from_old(2u, PATCH_V2_SIZE) != 0)   /* (kept in RAM; written in the new format by the next save) */
+        patches_from_old(1u, PATCH_V1_SIZE);
     bank.version = PATCH_VERSION;
 }
 

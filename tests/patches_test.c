@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Prysm's patch bank on a computer: a format 1 bank (before the LFO) converts to format 2, keeping every sound
- * and giving the LFO no amount; format 2 saves and loads back as it was.
+ * and giving the LFO no amount; format 2 converts too (the effects off); the format saves and loads back.
  *   tests/run_engine.sh runs it */
 #include <stdint.h>
 #include <stdio.h>
@@ -40,11 +40,25 @@ int main(void)
     CHECK(got.lfo_amt[0] == 64 && got.lfo_amt[1] == 64 && got.lfo_rate == PATCH_INIT.lfo_rate,
           "the LFO: no amount, the default rate");
     got.lfo_amt[0] = 100; got.lfo_dest[0] = DEST_CUTOFF;
-    CHECK(patch_save(4, &got) == 0 && store_n == sizeof bank, "a save writes format 2 (%u bytes)", (unsigned)store_n);
+    CHECK(patch_save(4, &got) == 0 && store_n == sizeof bank, "a save writes format %u (%u bytes)", (unsigned)PATCH_VERSION, (unsigned)store_n);
     memset(&bank, 0, sizeof bank);
     patches_load();
-    CHECK(patch_get(4, &a) == 0 && !memcmp(&a, &got, sizeof a), "format 2 loads back as it was saved");
+    CHECK(patch_get(4, &a) == 0 && !memcmp(&a, &got, sizeof a), "the new format loads back as it was saved");
     CHECK(patch_get(2, &a) == 0 && patch_get(7, &a) == 0, "the converted slots stay");
+    {                                           /* format 2 (with the LFO, before the effects) -> format 3 */
+        struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V2_SIZE]; } v2;
+        patch_t c = PATCH_INIT;
+        c.lfo_dest[1] = DEST_MWAVE2; c.lfo_amt[1] = 20; c.osc[1].ratio[2] = 9;
+        memset(&v2, 0, sizeof v2);
+        v2.version = 2;
+        v2.used[5] = 1; memcpy(v2.p[5], &c, PATCH_V2_SIZE);
+        store_save(&v2, sizeof v2);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(5, &a) == 0 && !memcmp(&a, &c, PATCH_V2_SIZE) && bank.version == PATCH_VERSION,
+              "format 2: slot 6's sound and LFO kept");
+        CHECK(a.rev_mix == 0 && a.dly_mix == 0 && a.cho_mix == 0, "format 2: the effects come in off");
+    }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }

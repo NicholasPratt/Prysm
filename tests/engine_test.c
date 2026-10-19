@@ -190,6 +190,42 @@ int main(void)
         render_on_ms = 333; render("rt_off_333", &p, A4, 1, 1900, 2000); render_on_ms = 0;
     }
 
+    {                                           /* the effects: a short blip (A4, 60 ms) into each */
+        patch_t q;
+        p = solo(); p.amp_r = 5;
+        render("fx_dry", &p, A4, 1, 60, 1500);
+        q = p; q.cho_mix = 0; q.dly_mix = 0; q.rev_mix = 0; q.cho_rate = 99; q.rev_size = 1; q.dly_time = 3;
+        render("fx_bypass", &q, A4, 1, 60, 1500);   /* all mixes 0: the same as dry, whatever the rest */
+        q = p; q.dly_mix = 127; q.dly_time = 34; q.dly_fb = 80; q.dly_ping = 0; q.dly_tone = 127;   /* ~200 ms */
+        render("fx_dly", &q, A4, 1, 60, 1500);
+        q.dly_ping = 1;
+        render("fx_ping", &q, A4, 1, 60, 1500);
+        q.dly_ping = 0; q.dly_shift = 24; q.dly_fb = 110;   /* +12 st a repeat */
+        render("fx_shift", &q, A4, 1, 60, 1500);
+        q.dly_shift = 12; q.dly_wdepth = 127; q.dly_wrate = 77; q.dly_fb = 100;   /* wow: 3 Hz */
+        p.amp_r = 5;
+        {
+            patch_t w = q;                      /* a held note: its repeats wobble */
+            render("fx_wow", &w, A4, 1, 1400, 1500);
+        }
+        q = p; q.cho_mix = 127; q.cho_depth = 100; q.cho_rate = 60;
+        render("fx_cho", &q, A4, 1, 1400, 1500);
+        q = p; q.rev_mix = 127; q.rev_size = 40; q.rev_mdepth = 0;
+        render("fx_rev_small", &q, A4, 1, 60, 3000);
+        q.rev_size = 120;
+        render("fx_rev_big", &q, A4, 1, 60, 3000);
+        q.rev_mdepth = 0;
+        render("fx_rev_held", &q, A4, 1, 2900, 3000);   /* a held note: still, then swept */
+        q.rev_mdepth = 127; q.rev_mrate = 70;
+        render("fx_rev_held_mod", &q, A4, 1, 2900, 3000);
+        q.rev_mdepth = 0; q.rev_shimmer = 127; q.rev_size = 110;
+        render("fx_shimmer", &q, A4, 1, 60, 3000);
+        q = PATCH_INIT;                         /* everything at once, the worst: a chord into all of it */
+        q.cho_mix = q.dly_mix = q.rev_mix = 127; q.rev_size = 127; q.rev_shimmer = 127; q.dly_fb = 127;
+        q.dly_shift = 0; q.dly_wdepth = 127; q.rev_mdepth = 127;
+        render("fx_all", &q, CHORD, 4, 1500, 4000);
+    }
+
     p = PATCH_INIT;                             /* the default patch, a chord: four voices, no clipping */
     render("chord", &p, CHORD, 4, 1500, 2500);
 
@@ -227,6 +263,10 @@ int main(void)
         uint32_t r, reps = 4000;
         p = PATCH_INIT;
         p.osc[0].amt[0] = p.osc[0].amt[1] = p.osc[1].amt[0] = p.osc[1].amt[1] = 100;
+        if (getenv("PRYSM_FX")) {               /* (PRYSM_FX=1: the worst case with every effect on) */
+            p.cho_mix = p.dly_mix = p.rev_mix = 127; p.dly_shift = 0; p.rev_shimmer = 127;
+            p.dly_wdepth = p.rev_mdepth = 127;
+        }
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
         memset(voice, 0, sizeof voice);
         engine_init();

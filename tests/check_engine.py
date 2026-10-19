@@ -15,10 +15,14 @@ FS = 44100
 fails = []
 
 
-def load(name):
+def load2(name):                                 # both channels
     with wave.open(str(D / f"{name}.wav")) as w:
         x = np.frombuffer(w.readframes(w.getnframes()), np.int16).reshape(-1, 2)
-    return x[:, 0].astype(float) / 32768
+    return x.astype(float) / 32768
+
+
+def load(name):
+    return load2(name)[:, 0]
 
 
 def spectrum(x, t0=0.2, t1=0.8):
@@ -215,6 +219,68 @@ b0, b3 = load("rt_off_0"), load("rt_off_333")
 same_off = np.max(np.abs(b0[:n] - b3[o:o + n]))
 check("lfo retrig", same_on < 1e-3 and same_off > 0.01,
       f"a later note: {same_on:.5f} apart with retrig, {same_off:.3f} without (free-running)")
+
+# ---- the effects
+dry, byp = load2("fx_dry"), load2("fx_bypass")
+check("fx bypass", np.array_equal(dry, byp), "all mixes 0: the same samples as no effects")
+
+
+def env_ms(x, step=0.005):
+    return np.array([np.sqrt(np.mean(x[int(t * FS):int((t + step) * FS)] ** 2)) for t in np.arange(0, len(x) / FS - step, step)])
+
+
+d = load2("fx_dly")
+e = env_ms(d[:, 0])                             # the repeat spacing: the envelope's autocorrelation peak, 100..400 ms
+ac = np.correlate(e - e.mean(), e - e.mean(), "full")[len(e) - 1:]
+lag = (20 + int(np.argmax(ac[20:80]))) * 5
+check("delay time", 195 <= lag <= 210, f"repeats every {lag} ms (param 34: 202 ms)")
+lv = [e[(k * 202) // 5:(k * 202 + 60) // 5].max() for k in range(1, 5)]
+check("delay feedback", lv[1] < lv[0] and lv[2] < lv[1] and lv[3] < lv[2], "repeats " + ", ".join(f"{v:.3f}" for v in lv))
+pp = load2("fx_ping")
+el, er = env_ms(pp[:, 0]), env_ms(pp[:, 1])
+w1, w2 = slice(int(0.19 / 0.005), int(0.30 / 0.005)), slice(int(0.39 / 0.005), int(0.50 / 0.005))   # repeats 1, 2
+check("ping-pong", el[w1].max() > 3 * er[w1].max() and er[w2].max() > 3 * el[w2].max(),
+      f"repeat 1 L/R {el[w1].max():.3f}/{er[w1].max():.3f}, repeat 2 L/R {el[w2].max():.3f}/{er[w2].max():.3f}")
+sh = load("fx_shift")                          # (the shifter is in the feedback: repeat 1 is the note as played)
+f1, f2, f3 = (peak_hz(*spectrum(sh, k * 0.202 + 0.005, k * 0.202 + 0.055)) for k in (1, 2, 3))
+check("delay shift", abs(f1 - 440) < 25 and abs(f2 - 880) < 40 and abs(f3 - 1760) < 80,
+      f"repeats {f1:.0f}, {f2:.0f}, {f3:.0f} Hz (want 440, 880, 1760)")
+x = load("fx_wow")
+wet = x - load("fx_dry")[:len(x)] * 0                      # (the held note is in it too: look at the spread)
+f, s = spectrum(x, 0.4, 1.3)
+spread = np.sum(s[(np.abs(f - 440) > 3) & (np.abs(f - 440) < 30)] ** 2) / np.sum(s ** 2)
+check("delay wow", spread > 0.002, f"{spread * 100:.2f} % of the energy in sidebands around 440 Hz")
+c2 = load2("fx_cho")
+diff = np.sqrt(np.mean((c2[int(0.3 * FS):, 0] - c2[int(0.3 * FS):, 1]) ** 2)) / np.sqrt(np.mean(c2[int(0.3 * FS):, 0] ** 2))
+check("chorus stereo", diff > 0.1, f"L - R is {diff:.2f} of L (the dry note alone: 0)")
+
+
+def rt(x, t0=0.1):
+    e = env_ms(x, 0.01)
+    db = 20 * np.log10(e / e[int(t0 / 0.01):].max() + 1e-9)
+    i0 = int(t0 / 0.01) + np.argmax(e[int(t0 / 0.01):])
+    below = np.where(db[i0:] < -30)[0]
+    return (below[0] if len(below) else len(db) - i0) * 0.01
+
+
+rs, rb = rt(load("fx_rev_small")), rt(load("fx_rev_big"))
+check("reverb size", rb > 2 * rs and rb > 0.8, f"-30 dB after {rs:.2f} s (size 40), {rb:.2f} s (size 120)")
+rv = load2("fx_rev_big")
+seg = rv[int(0.3 * FS):int(1.2 * FS)]
+corr = np.corrcoef(seg[:, 0], seg[:, 1])[0, 1]
+check("reverb stereo", abs(corr) < 0.5, f"L/R correlation {corr:.2f} in the tail")
+fb_, sb = spectrum(load("fx_rev_held"), 1.0, 2.5)   # a held sine: a still reverb gives back a pure sine
+fm_, sm = spectrum(load("fx_rev_held_mod"), 1.0, 2.5)
+w_b = np.sum(sb[(np.abs(fb_ - 440) > 3) & (np.abs(fb_ - 440) < 40)] ** 2) / np.sum(sb ** 2)
+w_m = np.sum(sm[(np.abs(fm_ - 440) > 3) & (np.abs(fm_ - 440) < 40)] ** 2) / np.sum(sm ** 2)
+check("reverb wobble", w_m > 10 * w_b and w_m > 0.001, f"energy beside 440 Hz: {w_b * 100:.4f} % still, {w_m * 100:.3f} % swept")
+shm = load("fx_shimmer")
+o8 = level_db(*spectrum(shm, 1.0, 2.0), 880) - level_db(*spectrum(load("fx_rev_big"), 1.0, 2.0), 880)
+tail = np.abs(shm[int(2.5 * FS):]).max()
+check("shimmer", o8 > 6 and tail < 0.9, f"880 Hz in the tail {o8:+.1f} dB over plain; peak at 2.5 s {tail:.3f}")
+al = load2("fx_all")
+check("all effects stable", np.isfinite(al).all() and np.abs(al[int(3.5 * FS):]).max() < 0.99,
+      f"peak {np.abs(al).max():.3f}; at 3.5 s {np.abs(al[int(3.5 * FS):]).max():.3f}")
 
 x = load("chord")
 pk = np.abs(x).max()

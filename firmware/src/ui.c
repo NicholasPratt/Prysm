@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, FX.
  *
- *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, FX = FILTER, ENV = AMP, LFO = LFO, GLO = MIX)
+ *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX, FX = FX)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
  *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / INIT, KNOB1 = the slot, SAVE again = do it
@@ -29,7 +29,8 @@
 #define UI_FRAME_MS 30u
 
 /* ---- the parameters */
-enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST };
+enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
+       K_DMS, K_PMS, K_SHIFT };
 typedef struct { const char *label; uint8_t off, max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, or 0 = none */
@@ -72,16 +73,29 @@ static const row_t LFO_ROWS[] = {
     {"DEST", {{"DEST1", PO(lfo_dest[0]), DEST_N - 1u, K_DEST}, {"AMT1", PO(lfo_amt[0]), 127, K_BIP},
               {"DEST2", PO(lfo_dest[1]), DEST_N - 1u, K_DEST}, {"AMT2", PO(lfo_amt[1]), 127, K_BIP}}, LIT_ENV},
 };
+static const row_t FX_ROWS[] = {                /* lit: LIT_C = the chorus, LIT_M1 = the delay, LIT_M2 = the reverb */
+    {"CHORUS", {{"RATE", PO(cho_rate), 127, K_RATE}, {"DEPTH", PO(cho_depth), 127, K_NUM},
+                {"MIX", PO(cho_mix), 127, K_NUM}, NOPRM}, LIT_C},
+    {"DELAY", {{"TIME", PO(dly_time), 127, K_DMS}, {"FDBK", PO(dly_fb), 127, K_NUM},
+               {"MIX", PO(dly_mix), 127, K_NUM}, {"PING", PO(dly_ping), 1, K_ONOFF}}, LIT_M1},
+    {"D.MOD", {{"WOW", PO(dly_wrate), 127, K_RATE}, {"DEPTH", PO(dly_wdepth), 127, K_NUM},
+               {"SHIFT", PO(dly_shift), 24, K_SHIFT}, {"TONE", PO(dly_tone), 127, K_NUM}}, LIT_M1},
+    {"REVERB", {{"SIZE", PO(rev_size), 127, K_NUM}, {"DAMP", PO(rev_damp), 127, K_NUM},
+                {"MIX", PO(rev_mix), 127, K_NUM}, {"PRE", PO(rev_pre), 127, K_PMS}}, LIT_M2},
+    {"R.MOD", {{"RATE", PO(rev_mrate), 127, K_RATE}, {"DEPTH", PO(rev_mdepth), 127, K_NUM},
+               {"SHIMMR", PO(rev_shimmer), 127, K_NUM}, NOPRM}, LIT_M2},
+};
 static const row_t MIX_ROWS[] = {
     {"OSC", {{"OSC1", PO(lvl1), 127, K_NUM}, {"OSC2", PO(lvl2), 127, K_NUM},
              {"SEMI", PO(semi2), 48, K_SEMI}, {"FINE", PO(fine2), 127, K_CENT}}, LIT_ALL},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_FX, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
     {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
+    {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
 };
 
 static patch_t edit;                            /* the sound being edited (engine_set() after each change) */
@@ -135,6 +149,9 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_LFOW: put(s, LFO_NAME[*v < LFO_N ? *v : 0u]); break;
     case K_DEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
     case K_ONOFF: put(s, *v ? "ON" : "OFF"); break;
+    case K_DMS: put(num(s, (441u + (uint32_t)*v * (DLY_N - 1100u) / 127u) * 1000u / 44100u), "ms"); break;
+    case K_PMS: put(num(s, (1u + (uint32_t)*v * (PRE_N - 2u) / 127u) * 1000u / 44100u), "ms"); break;
+    case K_SHIFT: put(snum(s, (int32_t)*v - 12), "st"); break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
         uint32_t h = PR_LFO_HZ100[*v & 127u];
         char *e = num(s, h / 100u);
@@ -302,6 +319,71 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
         cv_rect(x0, 2, 2, G_H - 6, lit & LIT_CURVE ? C_ACC : C_MID);
 }
 
+static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a box each, a picture of it, its mix */
+{
+    static const int32_t X[3] = {4, 84, 164};
+    const int32_t W = 72, H = 46;
+    const uint32_t LITS[3] = {LIT_C, LIT_M1, LIT_M2};
+    const uint8_t MIX[3] = {edit.cho_mix, edit.dly_mix, edit.rev_mix};
+    uint32_t k;
+    int32_t i;
+    for (k = 0; k < 3u; k++) {
+        uint16_t edge = lit & LITS[k] ? C_ACC : C_BOX;
+        int32_t x0 = X[k];
+        cv_rect(x0, 0, W, 1, edge); cv_rect(x0, H - 1, W, 1, edge);
+        cv_rect(x0, 0, 1, H, edge); cv_rect(x0 + W - 1, 0, 1, H, edge);
+        cv_rect(x0, H + 4, (int32_t)MIX[k] * W / 127, 3, MIX[k] ? (lit & LITS[k] ? C_ACC : C_MID) : C_FAINT);
+        if (k < 2u) {                           /* the arrow on to the next */
+            cv_line(x0 + W + 1, H / 2, X[k + 1u] - 2, H / 2, C_FAINT);
+            cv_line(X[k + 1u] - 2, H / 2, X[k + 1u] - 5, H / 2 - 3, C_FAINT);
+            cv_line(X[k + 1u] - 2, H / 2, X[k + 1u] - 5, H / 2 + 3, C_FAINT);
+        }
+    }
+    {                                           /* the chorus: two lines swept against each other (left, right) */
+        int32_t a = 2 + (int32_t)edit.cho_depth * 12 / 127, py0 = 0, py1 = 0;
+        uint32_t cyc = 1u + (uint32_t)edit.cho_rate * 3u / 127u;
+        for (i = 0; i < W - 8; i++) {
+            uint32_t ph = (uint32_t)((uint64_t)i * cyc * 0x100000000ull / (uint64_t)(W - 8));
+            int32_t y0 = H / 2 - lfo_wave(LFO_SINE, ph, 0) * a / 32767;
+            int32_t y1 = H / 2 - lfo_wave(LFO_SINE, ph + 0x40000000u, 0) * a / 32767;
+            if (i) {
+                cv_line(X[0] + 3 + i, py0, X[0] + 4 + i, y0, lit & LIT_C ? C_WHITE : C_MID);
+                cv_line(X[0] + 3 + i, py1, X[0] + 4 + i, y1, lit & LIT_C ? C_ACC : C_FAINT);
+            }
+            py0 = y0; py1 = y1;
+        }
+    }
+    {                                           /* the delay: the note, then its repeats (time apart, fading by the
+                                                 * feedback; ping-pong: alternately up and down; shift: they move) */
+        int32_t gap = 4 + (int32_t)edit.dly_time * 28 / 127, h = 40, x = X[1] + 4, n = 0;
+        int32_t fb = (int32_t)edit.dly_fb * 31000 / 127;
+        while (x < X[1] + W - 3 && h > 1 && n < 20) {
+            int32_t up = !edit.dly_ping || !(n & 1), s = n ? ((int32_t)edit.dly_shift - 12) * n / 3 : 0, top;
+            int32_t len = h / 2;
+            top = up ? H / 2 - len - s : H / 2 + 1 - s;
+            if (top < 2) top = 2;
+            if (top + len > H - 2) top = H - 2 - len;
+            cv_rect(x, top, 2, len, n ? (lit & LIT_M1 ? C_ACC : C_MID) : (lit & LIT_M1 ? C_WHITE : C_MID));
+            x += gap;
+            if (n++) h = h * fb / 32767;
+        }
+    }
+    {                                           /* the reverb: the pre-delay, then the tail (longer with the size) */
+        int32_t pre = (int32_t)edit.rev_pre * 16 / 127, len = 8 + (int32_t)edit.rev_size * (W - 16 - pre) / 127;
+        int32_t x0 = X[2] + 4 + pre, px = x0, py = 6;
+        uint16_t c = lit & LIT_M2 ? C_ACC : C_MID;
+        cv_rect(X[2] + 4, H - 6, 1, 1, c);
+        cv_line(X[2] + 4, H - 6, x0, H - 6, C_FAINT);
+        cv_line(x0, H - 6, x0, 6, c);
+        for (i = 1; i <= len; i++) {            /* an exponential decay, drawn as a line and a few ticks under it */
+            int32_t y = 6 + (H - 12) - (H - 12) * (len - i) * (len - i) / (len * len);
+            cv_line(px, py, x0 + i, y, c);
+            if (!(i & 3)) cv_line(x0 + i, y, x0 + i, H - 6, lit & LIT_M2 ? C_SEL : C_FAINT);
+            px = x0 + i; py = y;
+        }
+    }
+}
+
 static void gfx_mix(void)
 {
     char s[24], *e;
@@ -325,6 +407,7 @@ static void draw_gfx(void)
     case PG_FILTER: gfx_filter(lit); break;
     case PG_AMP: cv_adsr(8, 4, 224, G_H - 10, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
     case PG_LFO: gfx_lfo(lit); break;
+    case PG_FX: gfx_fx(lit); break;
     default: gfx_mix();
     }
     cv_blit(0, G_Y);
@@ -586,8 +669,8 @@ static int ui_input(uint32_t buttons)
         return 0;
     }
     if (buttons & (1u << BTN_EDIT)) ui_page(page == PG_OSC1 ? PG_OSC2 : PG_OSC1);
-    if (buttons & (1u << BTN_FX)) ui_page(PG_FILTER);
-    if (buttons & (1u << BTN_ENV)) ui_page(PG_AMP);
+    if (buttons & (1u << BTN_FX)) ui_page(PG_FX);
+    if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
     if (buttons & (1u << BTN_LFO)) ui_page(PG_LFO);
     if (buttons & (1u << BTN_GLO)) ui_page(PG_MIX);
     if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0)

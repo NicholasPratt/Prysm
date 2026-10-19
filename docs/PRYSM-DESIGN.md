@@ -52,11 +52,12 @@ Status: the sound engine, the filter and a first version of the pages are built 
 
 - **SELECT** moves the row on the current page (a marker shows it).
 - **KNOB1–KNOB4** edit the row's (up to) 4 parameters, left to right.
-- **Pages** are stepped through with **ALGORITHM**, or reached directly with buttons *(default mapping)*:
+- **Pages** are stepped through with **ALGORITHM**, or reached directly with buttons:
   - **EDIT**: OSC 1, press again for OSC 2;
-  - **FX**: FILTER;
-  - **ENV**: AMP;
-  - **GLO**: MIX.
+  - **ENV**: AMP, press again for FILTER;
+  - **LFO**: LFO;
+  - **GLO**: MIX;
+  - **FX**: the effects.
 - **MASTER** stays the output volume (platform).
 - **OCT- / OCT+** set the keyboard octave (kept).
 
@@ -123,6 +124,33 @@ One LFO per voice (or one for all voices, free-running), on the **LFO** page (th
   a position destination has an amount.
 - The graphic draws the shape (more cycles at faster rates), the delay as a fade-in and the retrig point.
 
+## Effects
+
+After the voices, in stereo: **chorus -> delay -> reverb** (`firmware/src/fx.c`), saved with each patch. Each is
+off while its mix is 0 (the dry sound passes untouched, at no cost). The **FX** page (the FX button):
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| CHORUS | rate | depth | mix (full = half wet) | |
+| DELAY | time, 10 .. 735 ms | feedback, up to 0.95 | mix | ping-pong on / off |
+| D.MOD | wow rate | wow depth (the time swept, up to +-3 ms) | shift: each repeat -12 .. +12 st | tone (the repeats darken) |
+| REVERB | size (decay) | damping | mix | pre-delay, up to 93 ms |
+| R.MOD | rate | depth (the tank's allpasses swept) | shimmer | |
+
+- **Chorus**: a 7 ms line swept by a sine, left and right a quarter cycle apart.
+- **Delay**: two 743 ms lines; the feedback goes through the tone low-pass and, with SHIFT, a two-head pitch
+  shifter, so each repeat steps up or down (the first repeat is the note as played). Ping-pong: in on the left,
+  then across and back.
+- **Reverb**: Dattorro's plate (JAES 1997) scaled to 44.1 kHz: pre-delay, four input diffusers, a two-sided tank
+  with damping; its first allpasses are swept (the tail's wobble). **Shimmer** crossfades one side's feed with
+  itself an octave up, inside the tank: the tail climbs, and the loop gain stays the decay's (< 1), so it never
+  runs away.
+- The graphic: the chain as three boxes, a mix bar under each; the chorus's two swept lines, the delay's repeats
+  (spaced by the time, fading by the feedback, alternating for ping-pong, stepping with the shift), the reverb's
+  pre-delay and tail.
+- Memory: ~230 KB of lines in the pool (the pool is then 315 of 336 KB). CPU: every effect on roughly doubles the
+  render on a computer (16 -> 35 us); the header shows it on the FM-1.
+
 ## Patches
 
 The **SAVE** button opens the PATCH screen:
@@ -136,11 +164,12 @@ The **SAVE** button opens the PATCH screen:
 - The slot last saved or loaded is loaded at power-on.
 - Stored in two flash sectors written in turn (0xFA000, 0xFB000, `store_load` / `store_save` in platform.c), so
   a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format; older
-  formats convert when read (format 1, before the LFO: the LFO comes in with no amount).
+  formats convert when read (format 1, before the LFO: the LFO comes in with no amount; format 2, before the
+  effects: they come in off).
 
 ## Not in the first version
 
-Velocity, glide, a second LFO, effects, patch names.
+Velocity, glide, a second LFO, patch names.
 
 ## Budget
 
