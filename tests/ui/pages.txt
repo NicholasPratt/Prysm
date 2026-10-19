@@ -65,4 +65,13 @@
 3400 shot
 3500 btn 4
 3600 shot
-3700 end
+# the mod envelope on the LFO page: looping into the LFO's rate
+3700 btn 5
+3750 enc 0 1
+3760 enc 3 -10
+3800 shot
+3850 enc 0 1
+3860 enc 2 2
+3870 enc 4 60
+3900 shot
+4000 end

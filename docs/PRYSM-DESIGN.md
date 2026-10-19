@@ -112,6 +112,8 @@ One LFO per voice (or one for all voices, free-running), on the **LFO** page (th
 | --- | --- | --- | --- | --- |
 | LFO | wave: SINE, TRI, SAW UP, SAW DN, SQUARE, S&H | rate 0.05 .. 40 Hz | delay (fade-in, 1 ms .. 10 s) | retrig ON / OFF |
 | DEST | destination 1 | amount 1 (bipolar) | destination 2 | amount 2 (bipolar) |
+| M.ENV | mod envelope A | D | S | R |
+| M.DST | LOOP ON / OFF | destination | amount (bipolar) | |
 
 - **Retrig ON**: each note starts its voice's LFO from the beginning (and a new S&H value); **OFF**: one LFO runs
   free and the voices share it.
@@ -123,6 +125,18 @@ One LFO per voice (or one for all voices, free-running), on the **LFO** page (th
 - Wave positions move per voice: each operator's whole bank is copied to RAM and morphed as it plays, only while
   a position destination has an amount.
 - The graphic draws the shape (more cycles at faster rates), the delay as a fade-in and the retrig point.
+
+### The mod envelope
+
+An ADSR per voice (rows M.ENV, M.DST), started by each note:
+
+- **LOOP ON**: after the decay it attacks again, and again, until the key is let go (then the release): it cycles
+  between full and the sustain level (sustain 0: full sweeps).
+- **Destinations**: **LFORATE** (the LFO's rate, +-4 octaves at full amount: an envelope that speeds the LFO up
+  and down), **LFOAMT** (the LFO's depth, x 0 .. 2), or any of the LFO's own (pitch, waves, mod amounts, cutoff,
+  amp, mix). With retrig off, the shared LFO follows the newest note's envelope.
+- The graphic, on these two rows: 2 s with the key held 1.5 s, simulated with the engine's own steps: the
+  envelope, and with LFORATE / LFOAMT the LFO under it as the envelope moves it.
 
 ## Effects
 
@@ -165,7 +179,7 @@ The **SAVE** button opens the PATCH screen:
 - Stored in two flash sectors written in turn (0xFA000, 0xFB000, `store_load` / `store_save` in platform.c), so
   a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format; older
   formats convert when read (format 1, before the LFO: the LFO comes in with no amount; format 2, before the
-  effects: they come in off).
+  effects: they come in off; format 3, before the mod envelope: it comes in with no amount).
 
 ## Not in the first version
 

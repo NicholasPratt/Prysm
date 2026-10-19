@@ -59,6 +59,20 @@ int main(void)
               "format 2: slot 6's sound and LFO kept");
         CHECK(a.rev_mix == 0 && a.dly_mix == 0 && a.cho_mix == 0, "format 2: the effects come in off");
     }
+    {                                           /* format 3 (with the effects, before the mod envelope) -> 4 */
+        struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V3_SIZE]; } v3;
+        patch_t c = PATCH_INIT;
+        c.rev_mix = 90; c.dly_shift = 20; c.lfo_rate = 3;
+        memset(&v3, 0, sizeof v3);
+        v3.version = 3;
+        v3.used[0] = 1; memcpy(v3.p[0], &c, PATCH_V3_SIZE);
+        store_save(&v3, sizeof v3);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(0, &a) == 0 && !memcmp(&a, &c, PATCH_V3_SIZE) && bank.version == PATCH_VERSION,
+              "format 3: slot 1's sound and effects kept");
+        CHECK(a.menv_amt == 64, "format 3: the mod envelope comes in with no amount");
+    }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }

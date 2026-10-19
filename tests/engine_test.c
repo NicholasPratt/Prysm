@@ -190,6 +190,21 @@ int main(void)
         render_on_ms = 333; render("rt_off_333", &p, A4, 1, 1900, 2000); render_on_ms = 0;
     }
 
+    {                                           /* the mod envelope */
+        p = solo(); p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 83; p.lfo_rate = 50;   /* 0.7 Hz vibrato... */
+        p.menv_dest = DEST_LFORATE; p.menv_amt = 127; p.menv_a = 105; p.menv_s = 127;  /* ... rising 4 octaves */
+        render("menv_rate", &p, A4, 1, 2900, 3000);
+        p = solo(); p.menv_dest = DEST_PITCH; p.menv_amt = 100; p.menv_a = 50; p.menv_d = 60; p.menv_s = 0;
+        p.menv_r = 40; p.menv_loop = 1;         /* LOOP: attack-decay, again and again, until the release */
+        p.amp_r = 90;                           /* (a long amp release: the pitch can be read after it) */
+        render("menv_loop", &p, A4, 1, 1500, 2200);
+        p.menv_loop = 0;
+        render("menv_once", &p, A4, 1, 1500, 2200);
+        p = solo(); p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 83; p.lfo_rate = 87;   /* depth from the envelope */
+        p.menv_dest = DEST_LFOAMT; p.menv_amt = 0; p.menv_a = 100; p.menv_s = 127;   /* -full: x0 at the top */
+        render("menv_depth", &p, A4, 1, 2900, 3000);
+    }
+
     {                                           /* the effects: a short blip (A4, 60 ms) into each */
         patch_t q;
         p = solo(); p.amp_r = 5;

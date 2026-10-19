@@ -36,7 +36,8 @@ typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: w
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, or 0 = none */
 
 enum { LIT_C = 1, LIT_M1 = 2, LIT_M2 = 4, LIT_A1 = 8, LIT_A2 = 16, LIT_CURVE = 32, LIT_ENV = 64, LIT_ALL = 127,
-       LIT_AR = 128 };                          /* (OSC pages: the mods' AR shapes under their boxes, not the names) */
+       LIT_AR = 128,                            /* (OSC pages: the mods' AR shapes under their boxes, not the names) */
+       LIT_MENV = 256 };                        /* (the LFO page: the mod envelope's picture, not the LFO's) */
 #define OO(f) ((uint8_t)__builtin_offsetof(patch_t, osc[0].f))
 #define PO(f) ((uint8_t)__builtin_offsetof(patch_t, f))
 #define NOPRM {0, 0, 0, K_NONE}
@@ -70,8 +71,12 @@ static const row_t AMP_ROWS[] = {
 static const row_t LFO_ROWS[] = {
     {"LFO", {{"WAVE", PO(lfo_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo_rate), 127, K_RATE},
              {"DELAY", PO(lfo_delay), 127, K_NUM}, {"RETRIG", PO(lfo_retrig), 1, K_ONOFF}}, LIT_CURVE},
-    {"DEST", {{"DEST1", PO(lfo_dest[0]), DEST_N - 1u, K_DEST}, {"AMT1", PO(lfo_amt[0]), 127, K_BIP},
-              {"DEST2", PO(lfo_dest[1]), DEST_N - 1u, K_DEST}, {"AMT2", PO(lfo_amt[1]), 127, K_BIP}}, LIT_ENV},
+    {"DEST", {{"DEST1", PO(lfo_dest[0]), DEST_MIX, K_DEST}, {"AMT1", PO(lfo_amt[0]), 127, K_BIP},
+              {"DEST2", PO(lfo_dest[1]), DEST_MIX, K_DEST}, {"AMT2", PO(lfo_amt[1]), 127, K_BIP}}, LIT_ENV},
+    {"M.ENV", {{"A", PO(menv_a), 127, K_NUM}, {"D", PO(menv_d), 127, K_NUM},
+               {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_NUM}}, LIT_MENV | LIT_ENV},
+    {"M.DST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
+               {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_MENV | LIT_CURVE},
 };
 static const row_t FX_ROWS[] = {                /* lit: LIT_C = the chorus, LIT_M1 = the delay, LIT_M2 = the reverb */
     {"CHORUS", {{"RATE", PO(cho_rate), 127, K_RATE}, {"DEPTH", PO(cho_depth), 127, K_NUM},
@@ -292,8 +297,49 @@ static void gfx_filter(uint32_t lit)
     cv_adsr(172, 6, 64, G_H - 12, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, lit & LIT_ENV ? C_ACC : C_MID);
 }
 
+/* the mod envelope over 2 s (the key held 1.5 s), simulated block by block with the engine's own steps; with LFO
+ * RATE or LFO AMT, the LFO under it, as the envelope moves it */
+static void gfx_menv(uint32_t lit)
+{
+    const int32_t x0 = 4, w = 232, top = 3, h = G_H - 8;
+    const uint32_t blocks = 2000u * 44100u / 1000u / BLK, held = blocks * 3u / 4u;
+    uint32_t b, ph = 0, lfo = eg.me_dest == DEST_LFORATE || eg.me_dest == DEST_LFOAMT, rng = 12345u;
+    int32_t px = -1, pe = 0, pl = 0, sh = lfo_random(&rng);
+    env_t e = {0, 1};
+    for (b = 0; b < blocks; b++) {
+        int32_t me = menv_step(&e, b < held) >> 9, x = (int32_t)(b * (uint32_t)w / blocks);
+        int32_t mx = (me * eg.me_amt) >> 15, l, ye, yl;
+        {
+            uint32_t nx = ph + rate_moved(eg.lfo_inc, eg.me_dest == DEST_LFORATE ? (mx * 768) >> 15 : 0);
+            if (nx < ph) sh = lfo_random(&rng);  /* S&H: a new value each cycle */
+            ph = nx;
+        }
+        if (x == px)
+            continue;
+        l = lfo_wave(eg.lfo_wave, ph, sh);
+        if (eg.me_dest == DEST_LFOAMT) {
+            int32_t f = 32767 + mx;
+            l = (l * (f < 0 ? 0 : f)) >> 15;
+            l = l > 32767 ? 32767 : l < -32767 ? -32767 : l;
+        }
+        ye = top + h - me * h / 32767;
+        yl = top + h / 2 - l * (h / 2 - 2) / 32767;
+        if (px >= 0) {
+            if (lfo) cv_line(x0 + px, pl, x0 + x, yl, lit & LIT_CURVE ? C_WHITE : C_MID);
+            cv_line(x0 + px, pe, x0 + x, ye, lit & LIT_ENV ? C_ACC : C_MID);
+        }
+        px = x; pe = ye; pl = yl;
+    }
+    for (b = (uint32_t)top; b < (uint32_t)(top + h); b += 3u)   /* the key let go */
+        cv_pset(x0 + w * 3 / 4, (int32_t)b, C_FAINT);
+}
+
 static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at faster rates), the delay as a fade-in */
 {
+    if (lit & LIT_MENV) {
+        gfx_menv(lit);
+        return;
+    }
     const int32_t x0 = 4, w = 232, mid = G_H / 2 - 2, amp = G_H / 2 - 8;
     int32_t fade_w = (int32_t)edit.lfo_delay * 70 / 127, px, py = mid;
     uint32_t cycles = 1u + (uint32_t)edit.lfo_rate * 7u / 127u, rng = 12345u, wv = edit.lfo_wave < LFO_N ? edit.lfo_wave : 0u;

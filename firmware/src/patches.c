@@ -6,14 +6,17 @@
  * fields as PATCH_INIT has them:
  *   1  up to fine2 (55 bytes)
  *   2  + the LFO (lfo_wave .. lfo_amt: 63 bytes)
- *   3  + the effects (cho_rate .. rev_shimmer) */
+ *   3  + the effects (cho_rate .. rev_shimmer: 81 bytes)
+ *   4  + the mod envelope (menv_a .. menv_amt) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 3u
+#define PATCH_VERSION 4u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
-#define PATCH_OLD_MAX PATCH_V2_SIZE
+#define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
+#define PATCH_OLD_MAX PATCH_V3_SIZE
 _Static_assert(__builtin_offsetof(patch_t, lfo_wave) == PATCH_V1_SIZE, "format 1 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, cho_rate) == PATCH_V2_SIZE, "format 2 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, menv_a) == PATCH_V3_SIZE, "format 3 is a prefix of patch_t");
 
 static struct {
     uint32_t version;
@@ -43,7 +46,8 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     if (store_load(&bank, sizeof bank) == 0 && bank.version == PATCH_VERSION)
         return;
     memset(&bank, 0, sizeof bank);
-    if (patches_from_old(2u, PATCH_V2_SIZE) != 0)   /* (kept in RAM; written in the new format by the next save) */
+    if (patches_from_old(3u, PATCH_V3_SIZE) != 0 &&   /* (kept in RAM; written in the new format by the next save) */
+        patches_from_old(2u, PATCH_V2_SIZE) != 0)
         patches_from_old(1u, PATCH_V1_SIZE);
     bank.version = PATCH_VERSION;
 }

@@ -220,6 +220,36 @@ same_off = np.max(np.abs(b0[:n] - b3[o:o + n]))
 check("lfo retrig", same_on < 1e-3 and same_off > 0.01,
       f"a later note: {same_on:.5f} apart with retrig, {same_off:.3f} without (free-running)")
 
+# ---- the mod envelope
+f = cents(inst_freq(load("menv_rate"), 0.05, 2.85))
+
+
+def vib_rate(seg):
+    s = seg - np.nanmean(seg)
+    z = np.where(np.diff(np.sign(np.nan_to_num(s))) > 0)[0]
+    return (len(z) - 1) / ((z[-1] - z[0]) * 0.02) if len(z) > 2 else 0.0
+
+
+r0, r1 = vib_rate(f[:40]), vib_rate(f[100:])
+check("menv -> lfo rate", r1 > 3 * max(r0, 0.3), f"vibrato {r0:.1f} Hz in the first 0.8 s, {r1:.1f} Hz after 2 s")
+fl = cents(inst_freq(load("menv_loop"), 0.02, 1.48))
+fo = cents(inst_freq(load("menv_once"), 0.02, 1.48))
+
+
+def peaks(x, thr):
+    x = np.nan_to_num(x)
+    return int(np.sum((x[1:-1] > x[:-2]) & (x[1:-1] >= x[2:]) & (x[1:-1] > thr)))
+
+
+pl, po = peaks(fl, 200), peaks(fo, 200)
+check("menv loop", pl >= 8 and po <= 1, f"{pl} attack-decay cycles in 1.5 s with LOOP, {po} without")
+after = cents(inst_freq(load("menv_loop"), 1.7, 2.1))   # (the amp still releasing, the mod envelope done)
+check("menv loop ends", np.isfinite(after).sum() > 10 and np.nanmax(np.abs(after)) < 30,
+      f"{np.nanmax(np.abs(after)):.0f} cents from the note 0.2-0.6 s after the release")
+fd = cents(inst_freq(load("menv_depth"), 0.05, 2.85))
+d0, d1 = np.nanmax(np.abs(fd[2:20])), np.nanmax(np.abs(fd[110:]))
+check("menv -> lfo depth", d0 > 70 and d1 < 0.3 * d0, f"vibrato +-{d0:.0f} cents at first, +-{d1:.0f} once the envelope is up (amount -full)")
+
 # ---- the effects
 dry, byp = load2("fx_dry"), load2("fx_bypass")
 check("fx bypass", np.array_equal(dry, byp), "all mixes 0: the same samples as no effects")
