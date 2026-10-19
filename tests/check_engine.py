@@ -165,6 +165,57 @@ check("cutoff glides", first is not None and 3 <= first <= 25,
       f"90 % of the change after {first * 2} ms (instant: 0-2 ms; want 6-50)" if first is not None
       else "never reached 90 % within 60 ms")
 
+# ---- the LFO
+def inst_freq(x, t0, t1, win=0.02):
+    """frequency in 20 ms windows from zero crossings (rising), Hz"""
+    out = []
+    for ts in np.arange(t0, t1, win):
+        s = x[int(ts * FS):int((ts + win) * FS)]
+        z = np.where((s[:-1] <= 0) & (s[1:] > 0))[0]
+        if len(z) < 3:
+            out.append(np.nan); continue
+        fr = z + s[z] / (s[z] - s[z + 1])   # interpolated crossings
+        out.append((len(fr) - 1) / ((fr[-1] - fr[0]) / FS))
+    return np.array(out)
+
+
+def cents(f):
+    return 1200 * np.log2(f / 440)
+
+
+fv = cents(inst_freq(load("lfo_vib"), 0.1, 1.8))
+check("lfo vibrato depth", 80 < np.nanmax(fv) < 130 and -130 < np.nanmin(fv) < -80,
+      f"{np.nanmin(fv):+.0f} .. {np.nanmax(fv):+.0f} cents (want +-100)")
+z = np.where(np.diff(np.sign(fv - np.nanmean(fv))) > 0)[0]
+rate = (len(z) - 1) / ((z[-1] - z[0]) * 0.02) if len(z) > 2 else 0
+check("lfo vibrato rate", 4.5 < rate < 5.5, f"{rate:.2f} Hz (want 5.0)")
+fd = cents(inst_freq(load("lfo_delay"), 0.0, 1.8))
+early, late = np.nanmax(np.abs(fd[:5])), np.nanmax(np.abs(fd[60:]))
+check("lfo delay", early < 25 and late > 80, f"{early:.0f} cents in the first 100 ms, {late:.0f} after 1.2 s")
+fs_ = cents(inst_freq(load("lfo_sh"), 0.05, 1.85))
+levels = np.unique(np.round(fs_[np.isfinite(fs_)] / 25))
+steps = np.sum(np.abs(np.diff(fs_[np.isfinite(fs_)])) > 50)
+check("lfo s&h steps", 4 <= len(levels) and 2 <= steps <= 6, f"{steps} jumps over 1.8 s at 2 Hz, {len(levels)} levels")
+x = load("lfo_cut")
+br = [float((spectrum(x, t0, t0 + 0.05)[1][int(1500 / FS * 0.05 * FS):] ** 2).sum()) for t0 in np.arange(0.1, 1.8, 0.05)]
+check("lfo cutoff", max(br) > 5 * (min(br) + 1e-9), f"bright energy {min(br):.2f} .. {max(br):.2f} over the cycle")
+x = load("lfo_amp")
+env = np.array([rms(x, t0, t0 + 0.01) for t0 in np.arange(0.1, 1.8, 0.01)])
+check("lfo tremolo", env.min() < 0.1 * env.max(), f"level {env.min() / env.max():.3f} .. 1 of its peak")
+x = load("lfo_wave1")
+h = [level_db(*spectrum(x, t0, t0 + 0.1), 1320) for t0 in (0.05, 0.55, 1.05, 1.55)]   # 1.04 Hz square: + - + -
+check("lfo wave position", max(h) - min(h) > 30, "3rd harmonic " + ", ".join(f"{v:.0f}" for v in h) + " dB by half cycle")
+x = load("lfo_mod1")
+h = [level_db(*spectrum(x, t0, t0 + 0.1), 880) for t0 in (0.05, 0.55, 1.05, 1.55)]
+check("lfo mod amount", max(h) - min(h) > 10, "2nd harmonic " + ", ".join(f"{v:.0f}" for v in h) + " dB by half cycle")
+a0, a3 = load("rt_on_0"), load("rt_on_333")
+n = int(0.6 * FS); o = int(0.333 * FS) // 256 * 256
+same_on = np.max(np.abs(a0[:n] - a3[o:o + n]))
+b0, b3 = load("rt_off_0"), load("rt_off_333")
+same_off = np.max(np.abs(b0[:n] - b3[o:o + n]))
+check("lfo retrig", same_on < 1e-3 and same_off > 0.01,
+      f"a later note: {same_on:.5f} apart with retrig, {same_off:.3f} without (free-running)")
+
 x = load("chord")
 pk = np.abs(x).max()
 check("chord headroom", pk < 0.999, f"peak {pk:.3f} of full scale")

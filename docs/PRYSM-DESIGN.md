@@ -103,6 +103,26 @@ The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve 
 | --- | --- | --- | --- | --- |
 | OSC | osc 1 level | osc 2 level | osc 2 semitones | osc 2 fine |
 
+## LFO
+
+One LFO per voice (or one for all voices, free-running), on the **LFO** page (the LFO button):
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| LFO | wave: SINE, TRI, SAW UP, SAW DN, SQUARE, S&H | rate 0.05 .. 40 Hz | delay (fade-in, 1 ms .. 10 s) | retrig ON / OFF |
+| DEST | destination 1 | amount 1 (bipolar) | destination 2 | amount 2 (bipolar) |
+
+- **Retrig ON**: each note starts its voice's LFO from the beginning (and a new S&H value); **OFF**: one LFO runs
+  free and the voices share it.
+- **Delay**: the LFO fades in over that time from each note (0 = at once), with retrig on or off.
+- **Destinations**: PITCH (both oscillators, +-12 semitones), PITCH2 (osc 2 only), WAVE1 / WAVE2 (the carrier's
+  wave position, across the whole bank), MWAVE1 / MWAVE2 (both modulators' wave positions), MOD1 / MOD2 (both
+  modulators' amounts), MPITCH (the modulators' pitch: the FM sidebands move), CUTOFF (+-48 semitones), AMP
+  (tremolo), MIX (the balance of the two oscillators).
+- Wave positions move per voice: each operator's whole bank is copied to RAM and morphed as it plays, only while
+  a position destination has an amount.
+- The graphic draws the shape (more cycles at faster rates), the delay as a fade-in and the retrig point.
+
 ## Patches
 
 The **SAVE** button opens the PATCH screen:
@@ -115,11 +135,12 @@ The **SAVE** button opens the PATCH screen:
 - The header shows the current slot and `*` when there are unsaved changes, on every page.
 - The slot last saved or loaded is loaded at power-on.
 - Stored in two flash sectors written in turn (0xFA000, 0xFB000, `store_load` / `store_save` in platform.c), so
-  a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format.
+  a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format; older
+  formats convert when read (format 1, before the LFO: the LFO comes in with no amount).
 
 ## Not in the first version
 
-Velocity, glide, LFOs, effects, patch names.
+Velocity, glide, a second LFO, effects, patch names.
 
 ## Budget
 

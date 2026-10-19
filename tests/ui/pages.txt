@@ -30,4 +30,16 @@
 1800 shot
 1900 btn 7
 2000 shot
-2100 end
+# the LFO page: sine with a delay; S&H fast; the destinations
+2100 btn 5
+2150 enc 4 60
+2200 shot
+2300 enc 2 10
+2310 enc 3 20
+2400 shot
+2500 enc 0 1
+2550 enc 3 30
+2560 enc 4 3
+2570 enc 5 -20
+2600 shot
+2700 end

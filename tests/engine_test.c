@@ -30,7 +30,7 @@ static void wav(const char *name, const int16_t *s, uint32_t n)
 /* render: notes held from on_ms to off_ms, then until end_ms; clip = how many samples hit full scale.
  * With p2: that patch from change_ms on (a knob turned while the notes sound) */
 static const patch_t *render_p2;
-static uint32_t render_change_ms;
+static uint32_t render_change_ms, render_on_ms;   /* (render_on_ms: the notes start then, not at 0) */
 static void render(const char *name, const patch_t *p, const uint8_t *notes, uint32_t nn,
                    uint32_t off_ms, uint32_t end_ms)
 {
@@ -39,8 +39,9 @@ static void render(const char *name, const patch_t *p, const uint8_t *notes, uin
     memset(voice, 0, sizeof voice);
     engine_init();
     engine_set(p);
-    for (k = 0; k < nn; k++)
-        engine_note_on(notes[k]);
+    if (!render_on_ms)
+        for (k = 0; k < nn; k++)
+            engine_note_on(notes[k]);
     while (done < total) {
         int32_t blk[2u * FRAMES] = {0};
         uint32_t i;
@@ -49,6 +50,9 @@ static void render(const char *name, const patch_t *p, const uint8_t *notes, uin
                 engine_note_off(notes[k]);
         if (render_p2 && done == render_change_ms * (FS / 1000u) / FRAMES * FRAMES)
             engine_set(render_p2);
+        if (render_on_ms && done == render_on_ms * (FS / 1000u) / FRAMES * FRAMES)
+            for (k = 0; k < nn; k++)
+                engine_note_on(notes[k]);
         engine_render(blk, FRAMES);
         for (i = 0; i < 2u * FRAMES; i++) {
             int32_t v = blk[i];
@@ -158,6 +162,32 @@ int main(void)
             render("cut_jump", &p, A2, 1, 900, 1000);
             render_p2 = 0;
         }
+    }
+
+    {                                           /* the LFO (amount 83 = +-1 semitone on PITCH; 127 = the most) */
+        static const uint8_t A2[] = {45};
+        p = solo(); p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 83; p.lfo_rate = 87;   /* 5 Hz vibrato */
+        render("lfo_vib", &p, A4, 1, 1900, 2000);
+        p.lfo_delay = 90;                       /* fades in over ~0.7 s */
+        render("lfo_delay", &p, A4, 1, 1900, 2000);
+        p = solo(); p.lfo_wave = LFO_SH; p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 127; p.lfo_rate = 70;   /* 2 Hz */
+        render("lfo_sh", &p, A4, 1, 1900, 2000);
+        p = saw_through(60, 30); p.lfo_dest[0] = DEST_CUTOFF; p.lfo_amt[0] = 127; p.lfo_rate = 70;
+        render("lfo_cut", &p, A2, 1, 1900, 2000);
+        p = solo(); p.lfo_dest[0] = DEST_AMP; p.lfo_amt[0] = 127; p.lfo_rate = 77;   /* 3 Hz tremolo */
+        render("lfo_amp", &p, A4, 1, 1900, 2000);
+        p = solo(); p.lfo_wave = LFO_SQR; p.lfo_dest[0] = DEST_WAVE1; p.lfo_amt[0] = 127; p.lfo_rate = 57;   /* 1 Hz */
+        render("lfo_wave1", &p, A4, 1, 1900, 2000);
+        p = solo(); p.osc[0].amt[0] = 60; p.lfo_wave = LFO_SQR; p.lfo_dest[0] = DEST_MOD1; p.lfo_amt[0] = 127;
+        p.lfo_rate = 57;
+        render("lfo_mod1", &p, A4, 1, 1900, 2000);
+        p = solo(); p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 100; p.lfo_rate = 60;   /* retrig: the same from a */
+        p.lfo_retrig = 1;                       /* note at 0 ms and at 333 ms; not when it runs free */
+        render("rt_on_0", &p, A4, 1, 1900, 2000);
+        render_on_ms = 333; render("rt_on_333", &p, A4, 1, 1900, 2000); render_on_ms = 0;
+        p.lfo_retrig = 0;
+        render("rt_off_0", &p, A4, 1, 1900, 2000);
+        render_on_ms = 333; render("rt_off_333", &p, A4, 1, 1900, 2000); render_on_ms = 0;
     }
 
     p = PATCH_INIT;                             /* the default patch, a chord: four voices, no clipping */

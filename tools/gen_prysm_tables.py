@@ -155,6 +155,15 @@ FILT_G = [round(np.tan(np.pi * filt_hz(q) / FS) * (1 << 24)) for q in range(FILT
 RES_K = [round(max(0.04, 2 * (1 - (p / 127) ** 0.7)) * (1 << 24)) for p in range(128)]
 DRIVE = [round(8 ** (p / 127) * 4096) for p in range(128)]                       # drive gain 1 .. 8, Q12
 
+# ---- the LFO
+def lfo_hz(p):
+    return 0.05 * 800 ** (p / 127)                                              # 0.05 .. 40 Hz
+
+
+LFO_INC = [round(lfo_hz(p) * BLK / FS * 2 ** 32) for p in range(128)]            # phase step per block
+LFO_HZ100 = [round(lfo_hz(p) * 100) for p in range(128)]
+PITCH16 = [round(2 ** ((i - 192) / 16 / 12) * 65536) for i in range(385)]         # +-12 semitones, 1/16 steps
+
 
 def c_array(name, ctype, values, per_line=12):
     lines = [", ".join(str(int(v)) for v in values[i:i + per_line]) for i in range(0, len(values), per_line)]
@@ -203,6 +212,11 @@ def main():
     out.append(c_array("PR_FILT_G", "uint32_t", FILT_G, 8))
     out.append(c_array("PR_RES_K", "uint32_t", RES_K, 8))
     out.append(c_array("PR_DRIVE_Q12", "uint16_t", DRIVE))
+    out.append("/* the LFO: rate 0..127 = 0.05 .. 40 Hz (exponential): phase step per 16-frame block, and Hz x 100 (shown);")
+    out.append(" * pitch modulation: +-12 semitones in 1/16 semitone steps, index 192 = in tune, Q16 */")
+    out.append(c_array("PR_LFO_INC", "uint32_t", LFO_INC, 8))
+    out.append(c_array("PR_LFO_HZ100", "uint16_t", LFO_HZ100))
+    out.append(c_array("PR_PITCH16_Q16", "uint32_t", PITCH16, 8))
     out.append("/* the FILTER page's response curve: 2^(i/24), Q12 (x^2 for i quarter semitones from the cutoff) */")
     out.append(c_array("PR_EXP2_24_Q12", "uint16_t", [round(2 ** (i / 24) * 4096) for i in range(24)]))
     out.append("#endif")
