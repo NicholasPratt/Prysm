@@ -4,6 +4,7 @@
  *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX / SETUP, ARP = ARP,
  *                    FX = FX)
  *   PLAY             the arpeggiator on / off (anywhere; its LED shows it)
+ *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
  *   HOME             the oscilloscope (KNOB1: how many cycles); HOME again, ALGORITHM or a page button: back
@@ -566,6 +567,9 @@ static void draw_gfx(void)
 }
 
 /* ---- the header, the legend, the rows */
+static char hdr_note[20];                       /* a moment's note in the header's right (PRESETS: the cutoff) */
+static uint32_t hdr_note_until;
+
 static void draw_hdr(void)
 {
     char s[32], *e;
@@ -587,7 +591,10 @@ static void draw_hdr(void)
     put(e, "%");
     cpu_max = 0;
 #endif
-    draw_text_box(134, HDR_Y, 102, &FONT_S, s, C_FAINT, 2);
+    if (fm1_ms < hdr_note_until)                /* (instead, for a moment: what PRESETS just turned) */
+        draw_text_box(134, HDR_Y, 102, &FONT_S, hdr_note, C_ACC, 2);
+    else
+        draw_text_box(134, HDR_Y, 102, &FONT_S, s, C_FAINT, 2);
 }
 
 static void draw_legend(void)
@@ -912,6 +919,19 @@ static int ui_input(uint32_t buttons)
         changed = 1;
         dirty |= D_HDR | D_GFX | D_ROWS;
     }
+    if (page != PG_PATCH && (d = fm1_enc_take(ENC_PRESETS)) != 0) {   /* PRESETS: the cutoff, from any page */
+        static uint32_t last_cut;
+        int32_t x = (int32_t)edit.cut + (fm1_ms - last_cut < 60u ? d * 3 : d);   /* (fast: x 3) */
+        last_cut = fm1_ms;
+        x = x < 0 ? 0 : x > 127 ? 127 : x;
+        if (x != edit.cut) {
+            edit.cut = (uint8_t)x;
+            changed = 1;
+            put(num(put(hdr_note, "CUTOFF "), (uint32_t)x), "");
+            hdr_note_until = fm1_ms + 1200u;
+            dirty |= D_HDR | (page == PG_FILTER ? D_GFX | D_ROWS : 0u);
+        }
+    }
     if (page == PG_SCOPE) {                     /* the SCOPE: KNOB1 the cycles; HOME, ALGORITHM, SAVE or a page leave */
         if ((d = fm1_enc_take(ENC_KNOB1)) != 0) {
             int32_t c = (int32_t)sc_cycles + d;
@@ -920,7 +940,6 @@ static int ui_input(uint32_t buttons)
         }
         for (i = 1; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
         (void)fm1_enc_take(ENC_SELECT);
-        (void)fm1_enc_take(ENC_PRESETS);
         if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
         if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return (int)changed; }
         if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP)))
@@ -950,7 +969,6 @@ static int ui_input(uint32_t buttons)
         row[page] = (uint32_t)(n < 0 ? 0 : n > max ? max : n);
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
-    (void)fm1_enc_take(ENC_PRESETS);            /* (not used yet) */
     r = &PAGES[page].rows[row[page]];
     for (i = 0; i < 4u; i++) {
         const prm_t *p = &r->p[i];

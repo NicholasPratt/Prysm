@@ -58,6 +58,7 @@ Status: release 0.2 (site/: the web installer and the manual). User manual: docs
   - **LFO**: LFO;
   - **GLO**: MIX;
   - **FX**: the effects.
+- **PRESETS** is the filter's cutoff on every page but PATCH (the header shows it for 1.2 s).
 - **MASTER** stays the output volume (platform).
 - **OCT- / OCT+** set the keyboard octave (kept).
 

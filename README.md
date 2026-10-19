@@ -39,7 +39,8 @@ the sound takes.
 
 ## The pages
 
-ALGORITHM steps through the pages (or a button jumps to one), SELECT picks a row, KNOB1..4 edit its four values.
+ALGORITHM steps through the pages (or a button jumps to one), SELECT picks a row, KNOB1..4 edit its four values;
+PRESETS is the filter's cutoff on every page.
 Every page draws what it does: the oscillator chain with its live waves, the filter's response curve, the
 envelopes, the LFO, the effects chain.
 

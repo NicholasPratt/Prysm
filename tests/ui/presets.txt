@@ -1,0 +1,10 @@
+# PRESETS turns the cutoff from any page: on OSC 1 (the header says so), then on FILTER (the curve moves)
+100 keys 0x80
+200 enc 6 -30
+300 shot
+400 btn 4
+450 btn 4
+500 enc 6 20
+600 shot
+2300 shot
+2400 end

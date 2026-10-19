@@ -72,6 +72,7 @@ Every page works the same way:
 | Control | Does |
 | --- | --- |
 | **ALGORITHM** | the next / previous page |
+| **PRESETS** | the filter's cutoff, from any page (the header shows the value for a moment) |
 | **SELECT** | the row |
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
 | **EDIT** | OSC 1 (press again: OSC 2) |
