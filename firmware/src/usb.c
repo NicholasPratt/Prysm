@@ -101,6 +101,9 @@ static struct {
     uint8_t feed;                /* this render feeds the ring (sampled when it starts) */
     uint8_t wait;                /* polls the queued packet has waited */
     uint8_t e0_rx;               /* SET_CUR sampling frequency: data stage pending */
+    uint8_t e0_fu;               /* SET_CUR feature unit: data stage pending, the control (1 mute, 2 volume) */
+    uint8_t fu_mute;             /* feature unit 3, master: stored for the host (the stream is not scaled) */
+    int16_t fu_vol;              /* 1/256 dB, -60..0 */
     volatile uint32_t fill_min;  /* ring fill when the last render started */
     uint32_t acc;                /* 44.1 frames per ms: 0.1 frame steps */
     uint32_t last;               /* the last frame sent, repeated on an underrun */
@@ -168,17 +171,86 @@ static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
     }
 }
 
+/* ------------------------------------------------- setup request log --- */
+/* DEBUG (DINGHY_USB_LOG): the SETUP packets the host sent, in order, each with whether we stalled it, so the
+ * requests macOS makes while it brings up (or gives up on) the audio device can be read back over MIDI
+ * (usblog_dump, tools/usblog.py). Written from the TIMER5 ISR, read from the main loop: debug only.
+ * Repeats of the previous request are counted, not stored, so a long enumeration still fits. */
+#ifndef DINGHY_USB_LOG
+#ifdef FELUCCA_LOADER
+#define DINGHY_USB_LOG 0                                /* never in the update loader */
+#else
+#define DINGHY_USB_LOG 1
+#endif
+#endif
+#if DINGHY_USB_LOG
+#define USBLOG_N 64u
+static struct {
+    uint8_t pkt[USBLOG_N][8];
+    uint8_t stalled[USBLOG_N];
+    uint8_t reps[USBLOG_N];                             /* the same request again, right after */
+    volatile uint32_t n;                                /* entries written (stops at USBLOG_N) */
+    volatile uint32_t total, stalls;
+} usblog;
+static void usblog_add(const uint8_t *s)
+{
+    uint32_t i, n = usblog.n;
+    usblog.total++;
+    if (n && usblog.reps[n - 1u] < 255u) {
+        for (i = 0; i < 8u && usblog.pkt[n - 1u][i] == s[i]; i++)
+            ;
+        if (i == 8u) {
+            usblog.reps[n - 1u]++;
+            return;
+        }
+    }
+    if (n >= USBLOG_N)
+        return;                                         /* full: keep the first ones (the enumeration) */
+    for (i = 0; i < 8u; i++)
+        usblog.pkt[n][i] = s[i];
+    usblog.stalled[n] = 0;
+    usblog.reps[n] = 0;
+    usblog.n = n + 1u;
+}
+static void usblog_stalled(void)
+{
+    usblog.stalls++;
+    if (usblog.n)
+        usblog.stalled[usblog.n - 1u] = 1;
+}
+#endif
+
 /* ------------------------------------------------------- descriptors --- */
-/* interfaces: 0 audio control, 1 MIDI streaming, 2 audio streaming (FELUCCA_UAC), then CDC's two.
- * bcdDevice: 3.00 MIDI, +0.01 CDC, +0.10 the audio input, +0.20 more with 48 kHz (2.5) (hosts cache descriptors
- * per version) */
+/* interfaces: without FELUCCA_UAC 0 audio control, 1 MIDI streaming; with it 0 audio control, 1 audio streaming,
+ * 2 MIDI streaming (the order of the stock FM-1 firmware); then CDC's two.
+ * The audio function is laid out as the stock firmware's, which macOS 14 takes: line in (terminal 1) -> feature unit
+ * (unit 3: master mute + volume) -> USB streaming (terminal 2), the AC collection {audio streaming, MIDI}. Felucca's
+ * layout (MIDI interface 1, audio streaming 2, no feature unit) is matched by AppleUSBAudio on macOS 13 / 14 but
+ * never brought up: the host reads the descriptors, sets the configuration and sends no audio request at all
+ * (seen with DINGHY_USB_LOG; Felucca #67), whichever order the AC collection lists the two in.
+ * bcdDevice: 3.00 MIDI, +0.01 CDC, +0.10 the audio input, +0.20 more with 48 kHz (2.5), +0.0A this layout (hosts
+ * cache descriptors per version) */
+#define BCD_UAC (0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K) + 0x0A * FELUCCA_UAC)
+#define UAC_AS_IF 1u
+#define MIDI_IF (1 + FELUCCA_UAC)
 #define CDC_IF (2 + FELUCCA_UAC)
-#define UAC_AS_IF 2u
-#define CFG_LEN (101 + 74 * FELUCCA_CDC + 74 * FELUCCA_UAC + 3 * FELUCCA_UAC_48K)
+#define UAC_FU 3u                                       /* the feature unit's id */
+#define CFG_LEN (101 + 74 * FELUCCA_CDC + 84 * FELUCCA_UAC + 3 * FELUCCA_UAC_48K)
 #define USB_NIF (2 + FELUCCA_UAC + 2 * FELUCCA_CDC)
+#define D_MIDI                                                                                       \
+    9, 4, MIDI_IF, 0, 2, 1, 3, 0, 0,                                                                 \
+    7, 0x24, 1, 0x00, 0x01, 0x41, 0x00,                                                              \
+    6, 0x24, 2, 1, 1, 0,                                                                             \
+    6, 0x24, 2, 2, 2, 0,                                                                             \
+    9, 0x24, 3, 1, 3, 1, 2, 1, 0,                                                                    \
+    9, 0x24, 3, 2, 4, 1, 1, 1, 0,                                                                    \
+    9, 5, 0x01, 2, 64, 0, 0, 0, 0,                                                                   \
+    5, 0x25, 1, 1, 1,                                                                                \
+    9, 5, 0x81, 2, 64, 0, 0, 0, 0,                                                                   \
+    5, 0x25, 1, 1, 3,
 #if FELUCCA_CDC
 static const uint8_t DEV_DESC[18] = {18, 1, 0x00, 0x02, 0xEF, 0x02, 0x01, 64, 0x09, 0x12, 0x01, 0x00,
-                                     0x01 + 0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K), 0x03, 1, 2, 0, 1};   /* misc/IAD */
+                                     0x01 + BCD_UAC, 0x03, 1, 2, 0, 1};   /* misc/IAD */
 static const uint8_t CFG_DESC[] = {
     9, 2, CFG_LEN & 0xFF, CFG_LEN >> 8, USB_NIF, 1, 0, 0x80, 50,
     8, 0x0B, 0, 2 + FELUCCA_UAC, 1, 1, 0, 0,            /* IAD: audio + MIDI (IF 0-1, 0-2) */
@@ -187,31 +259,18 @@ static const uint8_t CFG_DESC[] = {
 #define FELUCCA_USB_PID 0x0001   /* the update loader is 0x0002 */
 #endif
 static const uint8_t DEV_DESC[18] = {18, 1, 0x10, 0x01, 0, 0, 0, 64, 0x09, 0x12, FELUCCA_USB_PID & 0xFF,
-                                     FELUCCA_USB_PID >> 8, 0x00 + 0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K), 0x03,
+                                     FELUCCA_USB_PID >> 8, 0x00 + BCD_UAC, 0x03,
                                      1, 2, 0, 1};
 static const uint8_t CFG_DESC[] = {
     9, 2, CFG_LEN & 0xFF, CFG_LEN >> 8, USB_NIF, 1, 0, 0x80, 50,
 #endif
     9, 4, 0, 0, 0, 1, 1, 0, 0,
 #if FELUCCA_UAC
-    10, 0x24, 1, 0x00, 0x01, 31, 0, 2, 1, UAC_AS_IF,    /* AC header 1.00: MIDI + audio streaming */
+    10, 0x24, 1, 0x00, 0x01, 41, 0, 2, UAC_AS_IF, MIDI_IF,   /* AC header 1.00: audio streaming, MIDI */
     12, 0x24, 2, 1, 0x03, 0x06, 0, 2, 0x03, 0x00, 0, 0, /* input terminal 1: line, 2 ch (L R) */
-    9, 0x24, 3, 2, 0x01, 0x01, 0, 1, 0,                 /* output terminal 2: USB streaming, from 1 */
-#else
-    9, 0x24, 1, 0x00, 0x01, 9, 0, 1, 1,
-#endif
-    9, 4, 1, 0, 2, 1, 3, 0, 0,
-    7, 0x24, 1, 0x00, 0x01, 0x41, 0x00,
-    6, 0x24, 2, 1, 1, 0,
-    6, 0x24, 2, 2, 2, 0,
-    9, 0x24, 3, 1, 3, 1, 2, 1, 0,
-    9, 0x24, 3, 2, 4, 1, 1, 1, 0,
-    9, 5, 0x01, 2, 64, 0, 0, 0, 0,
-    5, 0x25, 1, 1, 1,
-    9, 5, 0x81, 2, 64, 0, 0, 0, 0,
-    5, 0x25, 1, 1, 3,
-#if FELUCCA_UAC
-    9, 4, UAC_AS_IF, 0, 0, 1, 2, 0, 0,                  /* IF2 audio streaming, alt 0: no bandwidth */
+    10, 0x24, 6, UAC_FU, 1, 1, 0x03, 0x00, 0x00, 0,     /* feature unit 3, from 1: master mute + volume */
+    9, 0x24, 3, 2, 0x01, 0x01, 0, UAC_FU, 0,            /* output terminal 2: USB streaming, from 3 */
+    9, 4, UAC_AS_IF, 0, 0, 1, 2, 0, 0,                  /* IF1 audio streaming, alt 0: no bandwidth */
     9, 4, UAC_AS_IF, 1, 1, 1, 2, 0, 0,                  /* alt 1: the stream */
     7, 0x24, 1, 2, 1, 0x01, 0x00,                       /* AS general: terminal 2, delay 1, PCM */
 #if FELUCCA_UAC_48K
@@ -222,7 +281,10 @@ static const uint8_t CFG_DESC[] = {
 #endif
     9, 5, 0x84, 0x05, UAC_MAXP & 0xFF, UAC_MAXP >> 8, 1, 0, 0,   /* EP4 IN isochronous async, 1 ms */
     7, 0x25, 1, 0x01, 0, 0, 0,                          /* CS endpoint: sampling frequency control */
+#else
+    9, 0x24, 1, 0x00, 0x01, 9, 0, 1, 1,
 #endif
+    D_MIDI
 #if FELUCCA_CDC
     8, 0x0B, CDC_IF, 2, 2, 2, 1, 0,                     /* IAD: CDC ACM (IF 2-3, 3-4) */
     9, 4, CDC_IF, 0, 1, 2, 2, 1, 0,                     /* communication */
@@ -246,7 +308,7 @@ typedef char cfg_len_ok[sizeof CFG_DESC == CFG_LEN ? 1 : -1];
  * are loaded first), so the host sees one device from the start */
 static uint8_t usb_cdc_on;
 static const uint8_t DEV_DESC_PLAIN[18] = {18, 1, 0x10, 0x01, 0, 0, 0, 64, 0x09, 0x12, 0x01, 0x00,
-                                           0x00 + 0x10 * (FELUCCA_UAC + FELUCCA_UAC_48K), 0x03, 1, 2, 0, 1};
+                                           0x00 + BCD_UAC, 0x03, 1, 2, 0, 1};
 #define CFG_PLAIN_LEN (CFG_LEN - 74)                    /* without the audio IAD (8) and the CDC block (66) */
 static uint8_t cfg_plain[CFG_PLAIN_LEN];
 static const uint8_t *cfg_plain_get(void)
@@ -517,6 +579,15 @@ static void ep0_service(void)
     }
 #endif
 #if FELUCCA_UAC
+    if (uac.e0_fu) {                                    /* SET_CUR feature unit: mute 1 byte, volume 2 */
+        uint32_t n = sie_rd(S_COUNT0);
+        if (uac.e0_fu == 1u && n >= 1u)
+            uac.fu_mute = ep0buf[0] & 1u;
+        else if (uac.e0_fu == 2u && n >= 2u)
+            uac.fu_vol = (int16_t)(ep0buf[0] | ep0buf[1] << 8);
+        uac.e0_fu = 0;
+        goto ack;
+    }
     if (uac.e0_rx) {                                    /* SET_CUR sampling frequency: 3 bytes, Hz */
         uac.rate_sets++;
         if (sie_rd(S_COUNT0) >= 3u)
@@ -530,6 +601,9 @@ static void ep0_service(void)
     usb.setups++;
     wvalue = (uint16_t)(s[2] | s[3] << 8);
     wlength = (uint16_t)(s[6] | s[7] << 8);
+#if DINGHY_USB_LOG
+    usblog_add(s);
+#endif
     switch ((uint32_t)s[0] << 8 | s[1]) {
     case 0x0005:                                        /* SET_ADDRESS */
         usb.pend_addr = s[2] & 0x7Fu;
@@ -658,6 +732,39 @@ static void ep0_service(void)
         e0_send(RATE, 3, wlength);
         return;
     }
+    /* feature unit 3 on interface 0, master channel: mute (control 1, CUR only) and volume (control 2,
+     * -60..0 dB in 1 dB steps). Anything else (another unit, channel or control) stalls, as the spec asks */
+    case 0x2101:                                        /* SET_CUR, interface */
+        if (s[4] != 0 || s[5] != UAC_FU || s[2] != 0 || (s[3] != 1u && s[3] != 2u))
+            goto stall;
+        if (wlength) {
+            uac.e0_fu = s[3];
+            sie_wr(S_INDEX, 0);
+            sie_wr(S_CSR0, 0x40);                       /* the value follows */
+            return;
+        }
+        goto ack;
+    case 0xA181:                                        /* GET_CUR / MIN / MAX / RES, interface */
+    case 0xA182:
+    case 0xA183:
+    case 0xA184: {
+        static uint8_t v[2];
+        if (s[4] != 0 || s[5] != UAC_FU || s[2] != 0)
+            goto stall;
+        if (s[3] == 1u && s[1] == 0x81u) {              /* mute: CUR only */
+            v[0] = uac.fu_mute;
+            e0_send(v, 1, wlength);
+            return;
+        }
+        if (s[3] == 2u) {
+            int32_t x = s[1] == 0x81u ? uac.fu_vol : s[1] == 0x82u ? -60 * 256 : s[1] == 0x83u ? 0 : 256;
+            v[0] = (uint8_t)x;
+            v[1] = (uint8_t)(x >> 8);
+            e0_send(v, 2, wlength);
+            return;
+        }
+        goto stall;
+    }
 #endif
     default:
         goto stall;
@@ -667,6 +774,9 @@ ack:
     sie_wr(S_CSR0, 0x48);
     return;
 stall:
+#if DINGHY_USB_LOG
+    usblog_stalled();
+#endif
     sie_wr(S_INDEX, 0);
     sie_wr(S_CSR0, 0x60);
 }

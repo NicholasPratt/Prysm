@@ -188,6 +188,39 @@ static void midi_send(uint32_t st, uint32_t d1, uint32_t d2)   /* from the main 
     midi_out_event((st >> 4) | st << 8 | (d1 & 0x7Fu) << 16 | (d2 & 0x7Fu) << 24);
 }
 
+#if DINGHY_USB_LOG
+/* DEBUG: the USB setup log (usb.c) out as CCs on channel 16, a few per main-loop pass so the MIDI ring never
+ * overflows. 0x72 n: start (n entries) then total, stalls as 2 bytes each; 0x70 i: entry i, then its 8 setup
+ * bytes, stalled, repeats; 0x73: end. A byte b is CC (0x60 + b >> 7) = b & 0x7F. tools/usblog.py reads it. */
+static uint8_t ulog_buf[8 + USBLOG_N * 11u][2];
+static uint32_t ulog_len, ulog_pos;
+static void ulog_put(uint32_t cc, uint32_t v) { ulog_buf[ulog_len][0] = (uint8_t)cc; ulog_buf[ulog_len][1] = (uint8_t)v; ulog_len++; }
+static void ulog_byte(uint32_t b) { ulog_put(0x60u + (b >> 7 & 1u), b & 0x7Fu); }
+static void usblog_dump_start(void)
+{
+    uint32_t i, k, n = usblog.n;
+    ulog_len = ulog_pos = 0;
+    ulog_put(0x72, n);
+    ulog_byte(usblog.total & 0xFFu); ulog_byte(usblog.total >> 8 & 0xFFu);
+    ulog_byte(usblog.stalls & 0xFFu); ulog_byte(usblog.stalls >> 8 & 0xFFu);
+    for (i = 0; i < n; i++) {
+        ulog_put(0x70, i);
+        for (k = 0; k < 8u; k++)
+            ulog_byte(usblog.pkt[i][k]);
+        ulog_byte(usblog.stalled[i]);
+        ulog_byte(usblog.reps[i]);
+    }
+    ulog_put(0x73, 0);
+}
+static void usblog_pump(void)
+{
+    while (ulog_pos < ulog_len && mo_w - mo_r < MQ / 2u) {
+        midi_send(0xBF, ulog_buf[ulog_pos][0], ulog_buf[ulog_pos][1]);
+        ulog_pos++;
+    }
+}
+#endif
+
 /* ---- the timer: 10 kHz key scan, milliseconds, USB at 2 kHz. It outranks the audio ISR; nested in a
  * render it only scans, counts and feeds the USB audio stream (as sloopDX main.c) */
 static volatile uint8_t in_audio;

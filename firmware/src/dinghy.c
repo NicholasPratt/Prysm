@@ -168,9 +168,15 @@ static void app_main(void)
         if (b & (1u << BTN_OCT_UP) && set.oct < 2) { set.oct++; dirty = 1; t_change = fm1_ms; }
 
         while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI in, any channel */
+#if DINGHY_USB_LOG
+            if (st == 0x9Fu && d1 == 0 && d2) { usblog_dump_start(); continue; }   /* DEBUG: tools/usblog.py */
+#endif
             if ((st & 0xF0u) == 0x90u && d2) play(d1, d2);
             else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) stop(d1);
         }
+#if DINGHY_USB_LOG
+        usblog_pump();
+#endif
 
         base = (uint32_t)(KEY0 + 12 * set.oct);
         for (k = 0; k < NV; k++)                /* what sounds, on the keys of this octave */
