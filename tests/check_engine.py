@@ -277,6 +277,45 @@ check("arp swing", 2.6 < ratio < 3.4, f"steps alternate {np.median(sw[0::2]):.0f
 la, nl = rms(load("arp_latch"), 0.8, 1.3), rms(load("arp_nolatch"), 0.8, 1.3)
 check("arp latch", la > 0.02 and nl < 0.001, f"after the keys are let go: {la:.4f} latched, {nl:.5f} not")
 
+# ---- the arp on the MIDI clock
+def starts(x, lo=0, hi=None):
+    """note starts: the 64-frame envelope rising through 0.02 (the notes are gated 50 %: silence between)"""
+    hi = hi or len(x)
+    env = np.array([np.abs(x[i:i + 64]).max() for i in range(lo, hi, 64)])
+    out = []
+    for i in range(1, len(env)):
+        if env[i] > 0.02 and env[i - 1] <= 0.02:
+            j = lo + (i - 1) * 64                 # the exact frame: the first above in that window
+            seg = np.abs(x[j:j + 128])
+            out.append(j + int(np.argmax(seg > 0.02)))
+    return np.array(out)
+
+
+mcx = load("mclock")
+ticks, t, per = [], 1100.0, 918.75
+while t < 3.5 * FS:
+    ticks.append(t)
+    t += per
+    if t > 2.0 * FS and per < 1000: per = 1102.5
+want = np.array([ticks[k] + 248 for k in range(0, len(ticks), 6)])      # every 6th tick, one render later
+got = starts(mcx, 0, int(3.49 * FS))
+n = min(len(want), len(got))
+err = got[:n] - want[:n]
+check("midi clock steps", n >= 20 and np.all(np.abs(err) <= 24), f"{n} steps, each {err.min():+.0f}..{err.max():+.0f} frames from its tick (+ one render)")
+sp1 = np.median(np.diff(got[got < 1.9 * FS])); sp2 = np.median(np.diff(got[(got > 2.3 * FS) & (got < 3.4 * FS)]))
+check("midi clock tempo", abs(sp1 - 5512.5) < 20 and abs(sp2 - 6615) < 20, f"steps {sp1:.0f} frames at 120 BPM, {sp2:.0f} at 100 BPM")
+quiet = rms(mcx, 3.6, 3.95)
+after = arp_notes("mclock", 1) if False else None
+f_restart = peak_hz(*spectrum(mcx, 4.0 + (100 + 248) / FS + 0.01, 4.0 + (100 + 248) / FS + 0.05))
+check("midi clock stop / start", quiet < 0.001 and abs(f_restart - 261.6) < 8,
+      f"after STOP {quiet:.5f}; after START the first note {f_restart:.0f} Hz (C4, the pattern from the top)")
+bpm10 = int(open(D / "mclock.txt").read())
+check("midi clock bpm", 990 <= bpm10 <= 1010, f"the clock reads {bpm10 / 10:.1f} BPM (the last ticks: 100)")
+sw = starts(load("mclock_swing"), 0, int(1.9 * FS))
+d = np.diff(sw)
+ratio = np.median(d[0::2]) / np.median(d[1::2]) if len(d) > 4 else 0
+check("midi clock swing", 2.6 < ratio < 3.4, f"steps alternate {np.median(d[0::2]):.0f} / {np.median(d[1::2]):.0f} frames (want 3:1)")
+
 # ---- glide
 def pitch_at(name, t):
     return peak_hz(*spectrum(load(name), t, t + 0.03))

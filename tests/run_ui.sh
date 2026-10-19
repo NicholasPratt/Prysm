@@ -12,10 +12,11 @@ build/ui/prysm build/ui/pa tests/ui/patches.txt >/dev/null
 build/ui/prysm build/ui/screen tests/ui/screen.txt >/dev/null   # docs/screen.png (the hub's picture), below
 build/ui/prysm build/ui/sc tests/ui/scope.txt >/dev/null
 build/ui/prysm build/ui/ar tests/ui/arp.txt >/dev/null
+build/ui/prysm build/ui/su tests/ui/setup.txt >/dev/null
 python3 - <<'PY'
 from pathlib import Path
 from PIL import Image
-for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp")):
+for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp"), ("su", "setup")):
     shots = sorted(Path("build/ui").glob(prefix + "-*.ppm"), key=lambda p: int(p.stem.split("-")[1]))
     sheet = Image.new("RGB", (4 * 250, ((len(shots) + 3) // 4) * 250), (40, 40, 40))
     for i, p in enumerate(shots):

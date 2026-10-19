@@ -1,0 +1,11 @@
+# the SETUP page (GLO twice): MIDI in channel 2, out channel 3, the arp on the MIDI clock; then the ARP page (EXT)
+100 btn 7
+150 btn 7
+200 shot
+300 enc 2 2
+310 enc 3 2
+320 enc 4 2
+500 shot
+600 btn 10
+800 shot
+900 end

@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, ARP, FX.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, ARP, FX, SETUP.
  *
- *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX, ARP = ARP, FX = FX)
+ *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX / SETUP, ARP = ARP,
+ *                    FX = FX)
  *   PLAY             the arpeggiator on / off (anywhere; its LED shows it)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
@@ -32,10 +33,23 @@
 
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
-       K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM };
+       K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK };
 typedef struct { const char *label; uint8_t off, max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
-typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, or 0 = none */
+typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
+
+/* the global settings (not the sound: the SETUP page, the octave, the slot), kept in the settings sector by the app.
+ * Fields go at the end: an older, shorter record still loads (prysm.c) */
+typedef struct {
+    int8_t oct, slot;                           /* the octave (-2 .. 2), the last slot saved or loaded (-1: none) */
+    uint8_t midi_in;                            /* 0 = OMNI, 1 .. 16 */
+    uint8_t midi_out;                           /* 0 .. 15 = channel 1 .. 16 */
+    uint8_t clock;                              /* the arp: 0 its own, 1 the MIDI clock */
+} gset_t;
+static gset_t gset = {0, -1, 0, 0, 0};
+static uint8_t gset_dirty;                      /* changed: the app saves it (when quiet) */
+#define G 3u                                    /* (page_t.osc: the page edits gset) */
+#define GO(f) ((uint8_t)__builtin_offsetof(gset_t, f))
 
 enum { LIT_C = 1, LIT_M1 = 2, LIT_M2 = 4, LIT_A1 = 8, LIT_A2 = 16, LIT_CURVE = 32, LIT_ENV = 64, LIT_ALL = 127,
        LIT_AR = 128,                            /* (OSC pages: the mods' AR shapes under their boxes, not the names) */
@@ -82,6 +96,10 @@ static const row_t LFO_ROWS[] = {
     {"M.DST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
                {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_MENV | LIT_CURVE},
 };
+static const row_t SETUP_ROWS[] = {
+    {"MIDI", {{"IN", GO(midi_in), 16, K_MCHI}, {"OUT", GO(midi_out), 15, K_MCHO},
+              {"CLOCK", GO(clock), 1, K_CLK}, NOPRM}, LIT_ALL},
+};
 static const row_t FX_ROWS[] = {                /* lit: LIT_C = the chorus, LIT_M1 = the delay, LIT_M2 = the reverb */
     {"CHORUS", {{"RATE", PO(cho_rate), 127, K_RATE}, {"DEPTH", PO(cho_depth), 127, K_NUM},
                 {"MIX", PO(cho_mix), 127, K_NUM}, NOPRM}, LIT_C},
@@ -106,12 +124,13 @@ static const row_t ARP_ROWS[] = {
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_ARP, PG_FX, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_ARP, PG_FX, PG_SETUP, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
     {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
     {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
+    {"SETUP", SETUP_ROWS, NROWS(SETUP_ROWS), G},
 };
 
 static patch_t edit;                            /* the sound being edited (engine_set() after each change) */
@@ -125,7 +144,10 @@ enum { D_HDR = 1, D_GFX = 2, D_LEG = 4, D_ROWS = 8, D_ALL = 15 };
 
 static uint8_t *pval(uint32_t pg, const prm_t *p)
 {
-    uint32_t base = PAGES[pg].osc ? (PAGES[pg].osc - 1u) * (uint32_t)sizeof edit.osc[0] : 0u;
+    uint32_t base;
+    if (PAGES[pg].osc == G)
+        return (uint8_t *)&gset + p->off;
+    base = PAGES[pg].osc ? (PAGES[pg].osc - 1u) * (uint32_t)sizeof edit.osc[0] : 0u;
     return (uint8_t *)&edit + p->off + base;
 }
 
@@ -171,10 +193,20 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_ARPM: put(s, ARP_NAME[*v < ARP_N ? *v : 0u]); break;
     case K_DIV: put(s, DIV_NAME[*v < DIV_N ? *v : DIV_16]); break;
     case K_OCT: num(s, *v + 1u); break;
-    case K_BPM: num(s, *v + 40u); break;
+    case K_BPM:
+        if (gset.clock) {                       /* on the MIDI clock: its tempo, or EXT while none comes */
+            uint32_t b = mc_bpm10;
+            if (b) { char *e = num(s, b / 10u); *e++ = '.'; num(e, b % 10u); }
+            else put(s, "EXT");
+        } else
+            num(s, *v + 40u);
+        break;
     case K_GATE: if (*v >= 127u) put(s, "TIE"); else put(num(s, 5u + *v * 95u / 127u), "%"); break;
     case K_SWING: put(num(s, 50u + *v * 25u / 127u), "%"); break;   /* the even steps' share of a pair */
     case K_GLIDEM: put(s, GLIDE_NAME[*v < GLIDE_N ? *v : 0u]); break;
+    case K_MCHI: if (*v) num(s, *v); else put(s, "OMNI"); break;
+    case K_MCHO: num(s, *v + 1u); break;
+    case K_CLK: put(s, *v ? "MIDI" : "INT"); break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
         uint32_t h = PR_LFO_HZ100[*v & 127u];
         char *e = num(s, h / 100u);
@@ -485,6 +517,23 @@ static void gfx_arp(uint32_t lit)
     }
 }
 
+static void gfx_setup(void)                     /* the MIDI setup, in words */
+{
+    char s[40], *e;
+    e = put(s, "MIDI IN ");
+    if (gset.midi_in) e = num(put(e, "CH "), gset.midi_in); else e = put(e, "OMNI");
+    put(num(put(e, "   OUT CH "), gset.midi_out + 1u), "");
+    cv_text(8, 6, &FONT_S, s, C_MID);
+    e = put(s, gset.clock ? "ARP CLOCK: MIDI " : "ARP CLOCK: ITS OWN");
+    if (gset.clock) {
+        uint32_t b = mc_bpm10;
+        if (b) { e = num(e, b / 10u); *e++ = '.'; put(num(e, b % 10u), " BPM"); }
+        else put(e, "(NONE YET)");
+    }
+    cv_text(8, 26, &FONT_S, s, gset.clock ? C_ACC : C_MID);
+    cv_text(8, 46, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
+}
+
 static void gfx_mix(void)
 {
     char s[24], *e;
@@ -510,6 +559,7 @@ static void draw_gfx(void)
     case PG_LFO: gfx_lfo(lit); break;
     case PG_FX: gfx_fx(lit); break;
     case PG_ARP: gfx_arp(lit); break;
+    case PG_SETUP: gfx_setup(); break;
     default: gfx_mix();
     }
     cv_blit(0, G_Y);
@@ -892,7 +942,7 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
     if (buttons & (1u << BTN_LFO)) ui_page(PG_LFO);
     if (buttons & (1u << BTN_ARP)) ui_page(PG_ARP);
-    if (buttons & (1u << BTN_GLO)) ui_page(PG_MIX);
+    if (buttons & (1u << BTN_GLO)) ui_page(page == PG_MIX ? PG_SETUP : PG_MIX);
     if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0)
         ui_page((uint32_t)(((int32_t)page + d % (int32_t)PG_N + (int32_t)PG_N) % (int32_t)PG_N));
     if ((d = fm1_enc_take(ENC_SELECT)) != 0) {
@@ -906,9 +956,10 @@ static int ui_input(uint32_t buttons)
         const prm_t *p = &r->p[i];
         uint8_t *v;
         int32_t x;
-        if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE)
-            continue;
-        if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM) {
+        if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE || (p->kind == K_BPM && gset.clock))
+            continue;                           /* (on the MIDI clock the tempo is the clock's) */
+        if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM ||
+            p->kind == K_CLK) {
             /* one step per two detents: no flicker */
             slow[i] += d;
             if (slow[i] > -2 && slow[i] < 2) continue;
@@ -924,6 +975,12 @@ static int ui_input(uint32_t buttons)
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;
+        if (PAGES[page].osc == G) {             /* a setting, not the sound: saved; the clock to the engine */
+            gset_dirty = 1;
+            engine_sync(gset.clock);
+            dirty |= D_GFX | D_ROWS;
+            continue;
+        }
         changed = 1;
         dirty |= D_HDR | D_GFX | D_ROWS;        /* (the header: the unsaved-changes mark) */
     }
@@ -960,6 +1017,13 @@ static void ui_draw(void)                       /* from the main loop: what chan
     }
     if (page == PG_ARP && arp_drawn != arp.steps)
         dirty |= D_GFX;                         /* (the arp's picture follows the playing step) */
+    {
+        static uint32_t bpm_drawn;
+        if (gset.clock && (page == PG_ARP || page == PG_SETUP) && bpm_drawn != mc_bpm10 && fm1_ms - last_hdr < 5u) {
+            bpm_drawn = mc_bpm10;               /* (the clock's tempo, with the header's twice-a-second refresh) */
+            dirty |= D_GFX | D_ROWS;
+        }
+    }
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;

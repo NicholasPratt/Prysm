@@ -224,6 +224,47 @@ int main(void)
         render_arp = 0;
     }
 
+    {                                           /* the arp on the MIDI clock: START at frame 1000, ticks from 1100 at
+                                                 * 120 BPM (918.75 frames); at 2 s the tempo drops to 100 BPM; STOP at
+                                                 * 3.5 s, START again at 4 s. C4 E4 G4 held, 1/16 (6 ticks a step) */
+        static const uint8_t CEG[] = {60, 64, 67};
+        static int16_t s[2u * 44100u * 5u];
+        uint32_t sw;
+        for (sw = 0; sw < 2u; sw++) {
+            patch_t q = solo();
+            uint32_t done = 0, total = 44100u * 5u / FRAMES * FRAMES, k;
+            double at = 1100.0, period = 918.75;
+            int started = 0, stopped = 0, restarted = 0;
+            FILE *f;
+            q.amp_r = 5; q.arp_on = 1; q.arp_div = DIV_16; q.arp_gate = 64; q.arp_swing = sw ? 127 : 0;
+            memset(voice, 0, sizeof voice);
+            engine_init(); engine_set(&q); engine_sync(1);
+            clk_r = clk.w; engine_frames = 0;
+            mc.last_at = 0; mc.period_q8 = 0; mc.count = -1; mc.running = 0; mc.wait = -1;
+            for (k = 0; k < 3u; k++) arp_key_down(CEG[k], 127);
+            while (done < total) {
+                int32_t blk[2u * FRAMES] = {0};
+                uint32_t i;
+                /* the events of the frames before this render (as the USB poll would have timed them) */
+                if (!started && 1000u < done) { engine_clock(0xFA, 1000u); started = 1; }
+                if (!stopped && 3.5 * 44100 < done) { engine_clock(0xFC, (uint32_t)(3.5 * 44100)); stopped = 1; }
+                if (!restarted && 4.0 * 44100 < done) { engine_clock(0xFA, (uint32_t)(4.0 * 44100)); restarted = 1; at = 4.0 * 44100 + 100; }
+                while (at < done) {
+                    if (!(stopped && !restarted)) engine_clock(0xF8, (uint32_t)at);
+                    at += period;
+                    if (at > 2.0 * 44100 && period < 1000) period = 1102.5;   /* 100 BPM */
+                }
+                engine_render(blk, FRAMES);
+                for (i = 0; i < 2u * FRAMES; i++)
+                    s[2u * done + i] = (int16_t)(blk[i] > 32767 ? 32767 : blk[i] < -32767 ? -32767 : blk[i]);
+                done += FRAMES;
+            }
+            wav(sw ? "mclock_swing" : "mclock", s, total);
+            if (!sw && (f = fopen("build/engine/mclock.txt", "w"))) { fprintf(f, "%u\n", mc_bpm10); fclose(f); }
+            engine_sync(0);
+        }
+    }
+
     {                                           /* glide: C4 for 300 ms, then G4 (apart, or overlapping) */
         uint32_t mode;
         for (mode = 0; mode < 3u; mode++) {     /* ALWAYS apart; LEGATO apart; LEGATO overlapping */

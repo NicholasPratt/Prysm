@@ -155,6 +155,8 @@ static volatile struct {
     uint32_t glide_k;                           /* the slide's coefficient a block (Q16; 0: no glide) */
     uint8_t glide_legato;
     uint8_t arp_on, arp_mode, arp_oct, arp_latch, arp_tie;
+    uint8_t arp_midi;                           /* 1: the arp follows the MIDI clock (a global setting: engine_sync) */
+    uint32_t arp_spb;                           /* steps a beat (MIDI clock: 24 / it ticks a step) */
     uint32_t arp_len_q8;                        /* a step, frames Q8 */
     int32_t arp_gate;                           /* the note's share of its step, Q15 */
     int32_t arp_swing;                          /* 0 .. 16384: the even steps longer by it, the odd shorter */
@@ -501,55 +503,131 @@ static uint32_t arp_step_len(uint32_t odd)      /* a step, frames Q8: swing make
     return (uint32_t)(((uint64_t)eg.arp_len_q8 * (uint32_t)(32768 + (odd ? -eg.arp_swing : eg.arp_swing))) >> 15);
 }
 
+/* ---- MIDI clock (the arp's CLOCK = MIDI): clock and transport, each timed in audio frames as it arrives
+ * (engine_clock, from the USB poll), are played one render later at their own block: a constant latency of one
+ * render (5.8 ms) and no jitter, whatever the main loop does. 24 ticks a beat. */
+#define CLK_N 16u
+static volatile struct { uint8_t st[CLK_N]; uint32_t at[CLK_N]; uint32_t w; } clk;   /* written by the USB ISR */
+static uint32_t clk_r;                          /* read by the audio ISR */
+static volatile uint32_t engine_frames;         /* frames rendered: where the next render starts */
+static struct {
+    int32_t count;                              /* ticks since START (-1: the next one is the first) */
+    uint32_t running, last_at, period_q8;       /* a tick's length, frames Q8 (smoothed) */
+    int32_t wait;                               /* swing: frames until a held-back odd step */
+} mc = {-1, 0, 0, 0, -1};
+static volatile uint32_t mc_bpm10;              /* the tempo the clock gives, x 10 (0: none lately) */
+
+static void engine_clock(uint32_t st, uint32_t at_frame)   /* (the USB ISR) a clock / transport byte, its frame */
+{
+    uint32_t w = clk.w;
+    clk.st[w % CLK_N] = (uint8_t)st;
+    clk.at[w % CLK_N] = at_frame;
+    clk.w = w + 1u;
+}
+
+/* one arp step at block bi: the next note of the pattern, its gate from len (frames Q8) */
+static void arp_step(uint32_t bi, const uint8_t *nt, const uint8_t *vl, uint32_t n, uint32_t len)
+{
+    uint32_t vel, note, v;
+    int32_t old = arp.v;
+    note = arp_pick(nt, vl, n, arp.idx++, &vel, &arp.rng);
+    v = voice_pick(note);
+    voice[v].inote = (uint8_t)note;
+    voice[v].ivel = (uint8_t)(vel ? vel : 1u);
+    voice[v].iglide = glide_from(note);         /* (the old note still held: LEGATO slides at a tie) */
+    voice[v].itrig = (uint8_t)bi;
+    voice[v].age = ++ages;
+    if (old >= 0 && (uint32_t)old != v) voice[old].ioff = (uint8_t)bi;
+    arp.v = (int32_t)v;
+    arp.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.arp_gate) >> 23);   /* Q8 x Q15 -> frames */
+    arp.steps++;
+}
+
 static void arp_run(uint32_t nb)
 {
     uint8_t nt[ARP_MAX], vl[ARP_MAX];
-    uint32_t n, i, bi, s0;
-    if (!eg.arp_on) {                           /* off: let its note go */
-        if (arp.v >= 0) { voice[arp.v].ioff = 0; arp.v = -1; }
-        arp.n_was = 0;
-        return;
-    }
+    uint32_t n, i, bi, s0, start = engine_frames, tps = 24u / (eg.arp_spb ? eg.arp_spb : 4u);   /* ticks a step */
     s0 = held.seq;                              /* the held notes: a copy no change was half-way through */
     n = held.n;
     if (n > ARP_MAX) n = ARP_MAX;
     for (i = 0; i < n; i++) { nt[i] = held.note[i]; vl[i] = held.vel[i]; }
     if ((s0 & 1u) || held.seq != s0)
         n = arp.n_was;                          /* (mid-change: as last time; next render it is settled) */
-    if (n && !arp.n_was) {                      /* the first notes: the first step now */
+    if (!eg.arp_on) {                           /* off: let its note go (the clock still read: its tempo shows) */
+        if (arp.v >= 0) { voice[arp.v].ioff = 0; arp.v = -1; }
+        n = 0;
+    }
+    if (n && !arp.n_was && !eg.arp_midi) {      /* the first notes, on its own clock: the first step now */
         arp.now = 1;
         arp.idx = 0;
         arp.odd = 0;
     }
+    if (mc.last_at && (int32_t)(start - mc.last_at) > 22050)
+        mc_bpm10 = 0;                           /* no clock for half a second */
     for (bi = 0; bi < nb; bi++) {
-        uint32_t len = arp_step_len(arp.odd);     /* the step running now (swing: the even ones long) */
+        uint32_t len = arp_step_len(arp.odd), due = 0;     /* (its own clock: the step running now) */
+        while (clk_r != clk.w) {                /* MIDI clock: the events of this block (one render back) */
+            uint32_t k = clk_r % CLK_N, at = clk.at[k], st = clk.st[k];
+            int32_t rel = (int32_t)(at + nb * BLK - start), eb = rel < 0 ? 0 : rel / (int32_t)BLK;
+            if (eb > (int32_t)bi && eb < (int32_t)nb) break;   /* (a later block) */
+            clk_r++;
+            if (st == 0xF8u) {                  /* a tick: the tempo; a step every tps of them */
+                if (mc.last_at) {
+                    uint32_t d = at - mc.last_at;
+                    if (d > 0u && d < 44100u && (!mc.period_q8 || d < mc.period_q8 >> 7)) {   /* (the average of the
+                                                 * last few; not a pause: a gap over twice a tick) */
+                        int32_t now = (int32_t)(d << 8), was = (int32_t)mc.period_q8;
+                        mc.period_q8 = (uint32_t)(was ? was + (now - was) / 8 : now);
+                    }
+                }
+                mc.last_at = at;
+                if (mc.period_q8) mc_bpm10 = 1102500u * 256u / mc.period_q8;   /* 60 * 44100 * 10 / 24 / period */
+                if (mc.running && eg.arp_midi) {
+                    mc.count++;
+                    if (mc.count % (int32_t)tps == 0) due = 1;
+                }
+            } else if (st == 0xFAu) {           /* START: from the top, on the next tick */
+                mc.running = 1; mc.count = -1; mc.wait = -1;
+                mc.last_at = 0;                 /* (no tempo across the pause) */
+                arp.idx = 0;
+            } else if (st == 0xFBu) {           /* CONTINUE */
+                mc.running = 1;
+            } else if (st == 0xFCu) {           /* STOP: and its note */
+                mc.running = 0; mc.wait = -1;
+                if (eg.arp_midi && arp.v >= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
+            }
+        }
         if (arp.v >= 0 && !eg.arp_tie) {        /* the gate: the note ends inside its step */
             arp.gate_left -= (int32_t)BLK;
             if (arp.gate_left <= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
         }
         if (!n) {                               /* no notes: stop (the step clock waits for the next) */
             if (arp.v >= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
+            mc.wait = -1;
             continue;
         }
-        arp.phase_q8 += BLK << 8;
-        if (arp.now || arp.phase_q8 >= len) {   /* a step */
-            uint32_t vel, note, v;
-            int32_t old = arp.v;
+        if (eg.arp_midi) {                      /* on the MIDI clock: a step on its tick (an odd one: swung later) */
+            uint32_t slen = mc.period_q8 * tps;
+            if (due) {
+                uint32_t odd = (uint32_t)(mc.count / (int32_t)tps) & 1u;
+                mc.wait = odd ? (int32_t)(((uint64_t)slen * (uint32_t)eg.arp_swing) >> 23) : 0;
+                arp.odd = odd;
+            }
+            if (mc.wait >= 0) {
+                if (mc.wait < (int32_t)BLK) {
+                    mc.wait = -1;
+                    arp_step(bi, nt, vl, n, (uint32_t)(((uint64_t)slen * (uint32_t)(32768 + (arp.odd ? -eg.arp_swing : eg.arp_swing))) >> 15));
+                } else
+                    mc.wait -= (int32_t)BLK;
+            }
+            continue;
+        }
+        arp.phase_q8 += BLK << 8;               /* on its own clock: a step when the step's frames are done */
+        if (arp.now || arp.phase_q8 >= len) {
             if (arp.now) { arp.now = 0; arp.phase_q8 = 0; arp.odd = 1; }   /* (so the first step is an even one) */
             else arp.phase_q8 -= len;
             arp.odd ^= 1u;                      /* the step starting: its length sets the note's gate */
-            len = arp_step_len(arp.odd);
-            note = arp_pick(nt, vl, n, arp.idx++, &vel, &arp.rng);
-            v = voice_pick(note);
-            voice[v].inote = (uint8_t)note;
-            voice[v].ivel = (uint8_t)(vel ? vel : 1u);
-            voice[v].iglide = glide_from(note); /* (the old note still held: LEGATO slides at a tie) */
-            voice[v].itrig = (uint8_t)bi;
-            voice[v].age = ++ages;
-            if (old >= 0 && (uint32_t)old != v) voice[old].ioff = (uint8_t)bi;
-            arp.v = (int32_t)v;
-            arp.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.arp_gate) >> 23);   /* Q8 x Q15 -> frames */
-            arp.steps++;
+            arp_step(bi, nt, vl, n, arp_step_len(arp.odd));
         }
     }
     arp.n_was = n;
@@ -751,6 +829,7 @@ static void engine_render(int32_t *out, uint32_t n)
         lfo_rate16 = newest < NV ? voice[newest].rate16 : 0;
     }
     fx_render(out, n);                          /* the effects, over all the voices */
+    engine_frames += n;
 }
 
 /* ---- main loop: the patch -> the derived values */
@@ -869,6 +948,7 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
             engine_all_off();
         }
         eg.arp_len_q8 = 44100u * 60u * 256u / (bpm * spb);
+        eg.arp_spb = spb;
         eg.arp_mode = patch.arp_mode < ARP_N ? patch.arp_mode : ARP_UP;
         eg.arp_oct = patch.arp_oct <= 3u ? patch.arp_oct : 0u;
         eg.arp_latch = patch.arp_latch ? 1u : 0u;
@@ -976,6 +1056,16 @@ static void arp_key_up(uint32_t note)
             held_change();
             return;
         }
+}
+
+static void engine_sync(uint32_t midi)          /* the arp's clock: its own (0) or the MIDI clock (1) */
+{
+    if (eg.arp_midi != (midi ? 1u : 0u)) {
+        mc.running = 0;                         /* (the MIDI clock waits for START or CONTINUE) */
+        mc.wait = -1;
+        arp.n_was = 0;
+    }
+    eg.arp_midi = midi ? 1u : 0u;
 }
 
 static void engine_all_off(void)                /* every note let go (the arp switched on or off) */

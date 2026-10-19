@@ -8,7 +8,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
 - [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
-  [MIX](#mix), [ARP](#arp), [FX](#fx)
+  [MIX](#mix), [ARP](#arp), [FX](#fx), [SETUP](#setup)
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
@@ -50,7 +50,7 @@ When the FM-1 starts you see the splash picture for a moment (press any key or b
 | **Keys** | play; 4 voices. The key LEDs show what sounds. The notes also go out over USB-MIDI. |
 | **OCT- / OCT+** | the keyboard's octave (-2 .. +2; remembered when the FM-1 is switched off) |
 | **MASTER** | the volume |
-| **USB-MIDI in** | notes on any channel play Prysm, with their velocity (see AMP's VEL row) |
+| **USB-MIDI in** | notes play Prysm with their velocity (see AMP's VEL row), on any channel or the one set on SETUP |
 
 When a fifth note comes, the voice that is quietest (or, if all are held, the oldest) gives way.
 
@@ -77,7 +77,7 @@ Every page works the same way:
 | **EDIT** | OSC 1 (press again: OSC 2) |
 | **ENV** | AMP (press again: FILTER) |
 | **LFO** | LFO |
-| **GLO** | MIX |
+| **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP |
 | **PLAY** | the arpeggiator on / off (from any page; its LED shows it) |
 | **FX** | FX |
@@ -237,7 +237,11 @@ lights). While it is on, the keys and MIDI notes go to it instead of straight to
 - Its notes start and stop to within a third of a millisecond, whatever the screen is doing.
 - The picture shows the next 16 steps, as long and as far apart as they will be, the one playing in white.
 
-The arpeggiator keeps its own tempo (MIDI clock sync is not in yet).
+**On the MIDI clock** (SETUP: CLOCK = MIDI) the arpeggiator follows a DAW or another instrument instead of its own
+tempo: 24 clock ticks a beat, a step every 24, 12, 8, 6, 4 or 3 ticks for 1/4 .. 1/32. **START** plays the pattern
+from its first note, **STOP** stops it, **CONTINUE** goes on. Each step lands on its tick to within a third of a
+millisecond, one audio buffer (5.8 ms) later. The BPM cell then shows the clock's tempo (**EXT** while none comes);
+swing and gate still apply. With CLOCK = MIDI and no clock running, the arpeggiator waits.
 
 ### FX
 
@@ -264,6 +268,18 @@ draws the chain, with a mix bar under each effect.
 - **Shimmer**: the tail climbs in octaves as it fades. It never runs away, at any setting.
 
 With every effect on, Prysm uses roughly twice the CPU: watch the header.
+
+### SETUP
+
+Settings for your setup rather than a sound: they are kept with the octave, not in patches. **GLO** twice.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| MIDI | IN: OMNI or 1 .. 16 | OUT: 1 .. 16 | CLOCK: INT / MIDI | |
+
+- **IN**: the channel Prysm plays from (OMNI: all of them).
+- **OUT**: the channel the FM-1's keys send their notes on.
+- **CLOCK**: the arpeggiator's tempo: its own (**INT**, the BPM on the ARP page) or the **MIDI** clock.
 
 ---
 
@@ -310,7 +326,8 @@ Connected to a computer, the FM-1 shows up as **Prysm FM-1**:
 
 - a **2-in audio input** (16-bit stereo, 44.1 or 48 kHz): record Prysm straight into any DAW, no cable needed. It
   carries exactly what the speaker plays, effects included.
-- a **MIDI port**: notes in play Prysm (with their velocity); the keys' notes come out.
+- a **MIDI port**: notes in play Prysm (with their velocity, on the SETUP page's IN channel); the keys' notes come
+  out on its OUT channel; the MIDI clock can drive the arpeggiator.
 
 Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.
 

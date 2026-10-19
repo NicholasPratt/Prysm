@@ -162,6 +162,11 @@ static volatile uint32_t so_w, so_r;
 #define MQ 64u
 static uint32_t midi_in_q[MQ], midi_out_q[MQ];
 static volatile uint32_t mi_w, mi_r, mo_w, mo_r;
+/* an app's hook for MIDI clock and transport (0xF8, 0xFA, 0xFB, 0xFC), called as they arrive (in the USB poll, the
+ * TIMER5 ISR): for timing that the main loop's queue would blur */
+#ifndef FELUCCA_LOADER                          /* (not in the update loader: it stays as it was) */
+static void (*volatile midi_rt_hook)(uint32_t st);
+#endif
 static void midi_out_event(uint32_t pkt)            /* from the audio ISR */
 {
     if (usb.config && mo_w - mo_r < MQ) {
@@ -862,6 +867,10 @@ static void midi_in_event(uint32_t pkt)
 #endif
     }
     if (cin == 0xFu && (st == 0xF8u || st == 0xFAu || st == 0xFBu || st == 0xFCu)) {   /* clock, transport */
+#ifndef FELUCCA_LOADER
+        if (midi_rt_hook)                       /* (Prysm: timed here, as it arrives, for the arpeggiator) */
+            midi_rt_hook(st);
+#endif
         if (mi_w - mi_r < MQ) {
             midi_in_q[mi_w % MQ] = 0xFu | st << 8;
             RING_PUBLISH();

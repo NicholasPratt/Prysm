@@ -115,6 +115,21 @@ The held notes come from the main loop (`arp_key_down` / `_up`, the keys and MID
 sequence-counted copy. Patch format 6. Glide (MIX page): each new note slides from the last one's pitch,
 exponentially, ALWAYS or LEGATO (only while another note is held); arp notes too.
 
+**MIDI clock** (SETUP: CLOCK = MIDI): usb.c calls `midi_rt_hook` as each clock / transport byte arrives (in the
+USB poll, TIMER5); prysm.c's `midi_rt` turns the 24 MHz timer into an audio frame (the last render's start plus the
+time since, x 147 / 80000) and queues it (`engine_clock`). `arp_run` plays each event one render later at its own
+block: a constant 5.8 ms latency and no jitter. A step every 24 / steps-a-beat ticks; START from the top, STOP,
+CONTINUE; the tick length (smoothed; pauses left out) gives the gates, the swing and the BPM shown.
+
+### SETUP (GLO twice)
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| MIDI | in: OMNI, 1 .. 16 | out: 1 .. 16 | the arp's clock: INT / MIDI | |
+
+Global, not per patch: `gset` (ui.c), saved in the settings sector with the octave and the last slot (an older,
+2-byte record still loads).
+
 ### SCOPE (HOME)
 
 The output before MASTER, left (white) and right (lilac), captured by the ISR only while shown (2048 frames);
@@ -207,7 +222,7 @@ The **SAVE** button opens the PATCH screen:
 
 ## Not in the first version
 
-A sequencer, MIDI clock sync, a second LFO, patch names.
+A sequencer, MIDI clock out, a second LFO, patch names.
 
 ## Budget
 
