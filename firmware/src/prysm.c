@@ -7,12 +7,13 @@
  *   OCT- OCT+  the octave (kept in flash)
  *   MASTER     the volume (platform.c)
  *   USB-MIDI   notes in play the engine
- *   knobs      TEMPORARY test controls until the pages (test_knobs)
+ *   pages      ALGORITHM / EDIT FX ENV GLO: the page; SELECT: the row; KNOB1..4: its parameters (ui.c)
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
  * tests/host.c runs this file on a computer: the screen as a PNG, the sound as a WAV.
  * What platform.c offers: docs/API.md. The chip's rules: docs/RULES.md. */
 #define APP_NAME "PRYSM"          /* the home, rescue and crash screens say this */
+#define CV_MAX (240u * 132u)      /* the canvas: the OSC pages' six rows (ui.c) */
 #include "platform.c"
 
 #include "engine.c"                             /* the sound: voices, oscillators, modulators, envelopes */
@@ -39,106 +40,18 @@ static void app_audio(int32_t *out, uint32_t n)
 static void play(uint32_t note) { engine_note_on(note); }
 static void stop(uint32_t note) { engine_note_off(note); }
 
-/* ---- the screen: the test readouts, the octave and the CPU (the pages come later) */
-#define C_ACC RGB(180, 140, 255)                /* lilac, as the logo */
-#define C_OFF RGB(90, 90, 90)
 #define KEY0 53u                                /* key 0 = F3 */
-
-/* ---- TEMPORARY test controls, until the pages: osc 1's carrier and mod 1 on the knobs, so the engine can be heard.
- *   SELECT  carrier bank     KNOB1  carrier position    KNOB2  mod 1 amount
- *   KNOB3   mod 1 ratio      KNOB4  mod 1 mode          ALGORITHM  filter cutoff    PRESETS  filter resonance */
-static int32_t clampi(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
-static int test_knobs(patch_t *p)               /* 1: the patch changed */
-{
-    static int32_t mode_acc;
-    int32_t d, changed = 0;
-#define TURN(enc, field, lo, hi, step)                                                      \
-    if ((d = fm1_enc_take(enc)) != 0) {                                                     \
-        field = (uint8_t)clampi((int32_t)(field) + d * (step), lo, hi);                    \
-        changed = 1;                                                                        \
-    }
-    TURN(ENC_SELECT, p->osc[0].bank[0], 0, (int32_t)PW_BANKS - 1, 1)
-    TURN(ENC_KNOB1, p->osc[0].pos[0], 0, 127, 2)
-    TURN(ENC_KNOB2, p->osc[0].amt[0], 0, 127, 2)
-    TURN(ENC_KNOB3, p->osc[0].ratio[1], 0, (int32_t)PR_RATIOS - 1, 1)
-    TURN(ENC_ALGORITHM, p->cut, 0, 127, 1)
-    TURN(ENC_PRESETS, p->res, 0, 127, 2)
-#undef TURN
-    if ((d = fm1_enc_take(ENC_KNOB4)) != 0) {   /* the mode: one step per 3 detents, so it does not flicker */
-        mode_acc += d;
-        if (mode_acc >= 3 || mode_acc <= -3) {
-            p->osc[0].mode[0] = (uint8_t)((p->osc[0].mode[0] + (mode_acc > 0 ? 1u : MODE_N - 1u)) % MODE_N);
-            mode_acc = 0;
-            changed = 1;
-        }
-    }
-    return changed;
-}
-
-static char *put(char *s, const char *a) { while (*a) *s++ = *a++; *s = 0; return s; }
-static char *num(char *s, uint32_t v)
-{
-    char b[10];
-    uint32_t i = 0;
-    do b[i++] = (char)('0' + v % 10u); while (v /= 10u);
-    while (i) *s++ = b[--i];
-    *s = 0;
-    return s;
-}
-
-static void draw_test(const patch_t *p)
-{
-    char s[40], *e;
-    uint32_t q = (uint32_t)p->osc[0].pos[0] * (PW_WAVES - 1u) * 256u / 127u;
-    e = put(s, PW_BANK_NAME[p->osc[0].bank[0]]);
-    e = put(e, " ");
-    e = put(e, PW_WAVE_NAME[p->osc[0].bank[0]][(q + 128u) >> 8]);
-    draw_text_box(0, 84, 240, &FONT_S, s, C_WHITE, 1);
-    e = put(s, "MOD1 ");
-    e = put(e, MODE_NAME[p->osc[0].mode[0]]);
-    e = put(e, " x");
-    e = put(e, PR_RATIO_NAME[p->osc[0].ratio[1]]);
-    e = put(e, "  AMT ");
-    num(e, p->osc[0].amt[0]);
-    draw_text_box(0, 102, 240, &FONT_S, s, C_ACC, 1);
-    e = put(s, "CUT ");
-    e = num(e, p->cut);
-    e = put(e, "  RES ");
-    num(e, p->res);
-    draw_text_box(0, 120, 240, &FONT_S, s, C_OFF, 1);
-}
-
-static void draw_status(int32_t oct)
-{
-    char s[40] = "OCT +0", *e = s + 6;
-    s[4] = oct < 0 ? '-' : '+';
-    s[5] = (char)('0' + (oct < 0 ? -oct : oct));
-#ifndef DINGHY_HOST
-    e = put(e, "   CPU ");
-    e = num(e, cpu_now * 100u / RENDER_TICKS);
-    e = put(e, "% MAX ");
-    e = num(e, cpu_max * 100u / RENDER_TICKS);
-    put(e, "%");
-#else
-    (void)e;
-#endif
-    draw_text_box(0, 212, 240, &FONT_S, s, C_OFF, 1);
-}
+#include "ui.c"                                 /* the pages */
 
 static void app_main(void)
 {
     struct { int8_t oct; } set = {0};           /* what survives a power-off (add yours, up to 256 bytes) */
-    uint32_t prev = 0, k, t_change = 0, dirty = 0, t_status = 0;
-    int32_t oct_drawn = 99;
+    uint32_t prev = 0, k, t_change = 0, dirty = 0;
     uint8_t held[27] = {0};                     /* the note each key plays */
-    patch_t edit;
     settings_load(&set, sizeof set);
     if (set.oct < -2 || set.oct > 2) set.oct = 0;
     engine_init();
-    edit = PATCH_INIT;
-
-    lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_test(&edit);
+    ui_init();
 
     for (;;) {
         uint32_t keys, down, up, rel, b, lit = 0, base = (uint32_t)(KEY0 + 12 * set.oct);
@@ -157,6 +70,8 @@ static void app_main(void)
         b = fm1_input_edges(&rel);              /* buttons pressed since the last call (bit = button id) */
         if (b & (1u << BTN_OCT_DOWN) && set.oct > -2) { set.oct--; dirty = 1; t_change = fm1_ms; }
         if (b & (1u << BTN_OCT_UP) && set.oct < 2) { set.oct++; dirty = 1; t_change = fm1_ms; }
+        if (ui_input(b))                        /* the pages: the sound changed */
+            engine_set(&edit);
 
         while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI in, any channel */
 #if DINGHY_USB_LOG
@@ -169,13 +84,8 @@ static void app_main(void)
         usblog_pump();
 #endif
 
-        if (test_knobs(&edit)) {                /* TEMPORARY: until the pages */
-            engine_set(&edit);
-            draw_test(&edit);
-        }
-
         base = (uint32_t)(KEY0 + 12 * set.oct);
-        for (k = 0; k < NV; k++)                /* what sounds, on the keys of this octave */
+        for (k = 0; k < NV; k++)                /* the key LEDs: what sounds, on the keys of this octave */
             if (voice[k].gate && voice[k].note >= base && voice[k].note < base + 27u)
                 lit |= 1u << (voice[k].note - base);
         for (k = 0; k < 27u; k++)
@@ -183,11 +93,7 @@ static void app_main(void)
         fm1_led_key(BTN_OCT_DOWN, set.oct < 0);
         fm1_led_key(BTN_OCT_UP, set.oct > 0);
 
-        if (set.oct != oct_drawn || fm1_ms - t_status > 500u) {      /* the octave, the CPU twice a second */
-            oct_drawn = set.oct;
-            t_status = fm1_ms;
-            draw_status(set.oct);
-        }
+        ui_draw();
 
         if (dirty && engine_quiet() && fm1_ms - t_change > 2000u) {   /* 2 s after the change, when silent */
             settings_save(&set, sizeof set);

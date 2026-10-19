@@ -1,0 +1,33 @@
+# every page and row of Prysm's UI, a screenshot each (tests/run_ui.sh)
+100 keys 0x880
+300 shot
+350 enc 0 1
+400 shot
+450 enc 0 1
+500 shot
+550 enc 0 1
+600 shot
+650 enc 0 1
+700 shot
+750 enc 0 1
+800 shot
+900 enc 2 1
+905 enc 3 20
+910 enc 4 3
+915 enc 5 40
+1000 shot
+1100 btn 6
+1150 enc 0 -5
+1200 shot
+1300 btn 2
+1400 shot
+1450 enc 0 1
+1500 shot
+1550 enc 0 1
+1555 enc 2 30
+1600 shot
+1700 btn 4
+1800 shot
+1900 btn 7
+2000 shot
+2100 end

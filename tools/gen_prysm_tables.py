@@ -203,6 +203,8 @@ def main():
     out.append(c_array("PR_FILT_G", "uint32_t", FILT_G, 8))
     out.append(c_array("PR_RES_K", "uint32_t", RES_K, 8))
     out.append(c_array("PR_DRIVE_Q12", "uint16_t", DRIVE))
+    out.append("/* the FILTER page's response curve: 2^(i/24), Q12 (x^2 for i quarter semitones from the cutoff) */")
+    out.append(c_array("PR_EXP2_24_Q12", "uint16_t", [round(2 ** (i / 24) * 4096) for i in range(24)]))
     out.append("#endif")
     OUT.write_text("\n".join(out) + "\n")
     print(f"{OUT}: {len(BANKS)} banks x 8 waves, {OUT.stat().st_size} bytes")
