@@ -73,6 +73,20 @@ int main(void)
               "format 3: slot 1's sound and effects kept");
         CHECK(a.menv_amt == 64, "format 3: the mod envelope comes in with no amount");
     }
+    {                                           /* format 4 (with the mod envelope, before velocity) -> 5 */
+        struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V4_SIZE]; } v4;
+        patch_t c = PATCH_INIT;
+        c.menv_loop = 1; c.menv_amt = 100; c.rev_shimmer = 77;
+        memset(&v4, 0, sizeof v4);
+        v4.version = 4;
+        v4.used[3] = 1; memcpy(v4.p[3], &c, PATCH_V4_SIZE);
+        store_save(&v4, sizeof v4);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(3, &a) == 0 && !memcmp(&a, &c, PATCH_V4_SIZE) && bank.version == PATCH_VERSION,
+              "format 4: slot 4's sound and mod envelope kept");
+        CHECK(a.vel_amp == PATCH_INIT.vel_amp, "format 4: velocity comes in as the default sound has it");
+    }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }

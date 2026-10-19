@@ -10,6 +10,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.
 - [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
   [MIX](#mix), [FX](#fx)
 - [Patches](#patches)
+- [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
 - [If something goes wrong](#if-something-goes-wrong)
 - [Sound ideas](#sound-ideas)
@@ -49,7 +50,7 @@ When the FM-1 starts you see the splash picture for a moment (press any key or b
 | **Keys** | play; 4 voices. The key LEDs show what sounds. The notes also go out over USB-MIDI. |
 | **OCT- / OCT+** | the keyboard's octave (-2 .. +2; remembered when the FM-1 is switched off) |
 | **MASTER** | the volume |
-| **USB-MIDI in** | notes on any channel play Prysm |
+| **USB-MIDI in** | notes on any channel play Prysm, with their velocity (see AMP's VEL row) |
 
 When a fifth note comes, the voice that is quietest (or, if all are held, the oldest) gives way.
 
@@ -78,6 +79,7 @@ Every page works the same way:
 | **LFO** | LFO |
 | **GLO** | MIX |
 | **FX** | FX |
+| **HOME** | the oscilloscope |
 | **SAVE** | the PATCH screen |
 
 The header's **CPU** figure is how much of the FM-1's time the sound takes (its peak over the last half second).
@@ -153,8 +155,14 @@ note, so every key keeps the same brightness. A negative envelope amount closes 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | ENV | attack | decay | sustain | release |
+| VEL | velocity to level | velocity to cutoff | velocity to modulation | |
 
 Times go from 1 ms to 10 s.
+
+**Velocity** comes from MIDI: a keyboard or a DAW playing Prysm over USB. The FM-1's own keys have no velocity (they
+are on / off), so they always play at full velocity and these settings do not change them. Each sensitivity says how
+much a softer note is quieter (by the square of its velocity, as it sounds natural), darker (up to 36 semitones of
+cutoff) or less modulated (less FM brightness: the classic expressive FM touch). At 0, velocity changes nothing.
 
 ### LFO
 
@@ -254,13 +262,27 @@ osc 1 wave (a dash: empty). The selected slot has a double edge; a dot marks the
 
 ---
 
+## The oscilloscope
+
+Press **HOME** for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
+down): **left in white, right in lilac** (the chorus and a ping-pong delay show as the two apart).
+
+- It locks onto the **newest note**: the trace shows that many of its cycles, starting on a rising zero, so the
+  wave stands still whatever you play. **KNOB1** sets how many cycles (1 .. 8; it starts at 2).
+- It **zooms by itself** (x1 .. x8, shown under the trace), so a single quiet note fills the screen too.
+- **HOME** again, ALGORITHM, SAVE or a page button go back.
+
+The scope costs no sound processing while it is not shown.
+
+---
+
 ## USB: audio and MIDI
 
 Connected to a computer, the FM-1 shows up as **Prysm FM-1**:
 
 - a **2-in audio input** (16-bit stereo, 44.1 or 48 kHz): record Prysm straight into any DAW, no cable needed. It
   carries exactly what the speaker plays, effects included.
-- a **MIDI port**: notes in play Prysm; the keys' notes come out.
+- a **MIDI port**: notes in play Prysm (with their velocity); the keys' notes come out.
 
 Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.
 

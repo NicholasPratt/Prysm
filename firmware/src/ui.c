@@ -4,6 +4,7 @@
  *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX, FX = FX)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
+ *   HOME             the oscilloscope (KNOB1: how many cycles); HOME again, ALGORITHM or a page button: back
  *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / INIT, KNOB1 = the slot, SAVE again = do it
  *                    (twice over a used slot or unsaved changes); HOME or a page = back
  *
@@ -67,6 +68,8 @@ static const row_t FILTER_ROWS[] = {
 static const row_t AMP_ROWS[] = {
     {"ENV", {{"A", PO(amp_a), 127, K_NUM}, {"D", PO(amp_d), 127, K_NUM},
              {"S", PO(amp_s), 127, K_NUM}, {"R", PO(amp_r), 127, K_NUM}}, LIT_ENV},
+    {"VEL", {{"AMP", PO(vel_amp), 127, K_NUM}, {"CUTOFF", PO(vel_cut), 127, K_NUM},     /* MIDI velocity */
+             {"MOD", PO(vel_mod), 127, K_NUM}, NOPRM}, LIT_ENV},
 };
 static const row_t LFO_ROWS[] = {
     {"LFO", {{"WAVE", PO(lfo_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo_rate), 127, K_RATE},
@@ -683,10 +686,105 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
     return (int)changed;
 }
 
+/* ---- the SCOPE (the HOME button): the output, left (white) and right (lilac), triggered on a rising zero, over
+ * sc_cycles periods of the newest note (whatever the note, the wave stands still), redrawn every SC_FRAME_MS */
+#define PG_SCOPE (PG_N + 1u)
+#define SC_H 132
+#define SC_Y 40u
+#define SC_FRAME_MS 40u
+static uint32_t sc_back = PG_OSC1, sc_cycles = 2, sc_gain = 1, sc_shown = 0xFFFF;   /* gain: x1 .. x8 (auto) */
+
+static uint32_t sc_note(void)                   /* the newest sounding note (255: none) */
+{
+    uint32_t v, best = 0, note = 255;
+    for (v = 0; v < NV; v++)
+        if (voice[v].amp.st && voice[v].age >= best) { best = voice[v].age; note = voice[v].note; }
+    return note;
+}
+
+static uint32_t sc_period(void)                 /* the newest note's period in frames (0: nothing sounds) */
+{
+    uint32_t note = sc_note(), inc;
+    if (note > 127u) return 0;
+    inc = INC_C9[note % 12u] >> (10u - note / 12u);
+    return inc ? 0xFFFFFFFFu / inc : 0;
+}
+
+static void sc_draw(void)
+{
+    static int16_t snap[2][SCOPE_N];
+    uint32_t end = scope_w, p = sc_period(), w, s, k, ch, i;
+    int32_t x, py[2] = {0, 0};
+    w = p ? p * sc_cycles : 512u;               /* the window */
+    if (w < 32u) w = 32u;
+    if (w > SCOPE_N / 2u) w = SCOPE_N / 2u;
+    for (i = 0; i < SCOPE_N; i++) {             /* a snapshot: the ISR keeps writing */
+        snap[0][i] = scope_buf[0][i];
+        snap[1][i] = scope_buf[1][i];
+    }
+    s = end - w - 1u;                           /* the trigger: the latest rising zero with a window after it */
+    for (k = 0; k < (p ? p : 256u) + 1u && k < SCOPE_N / 2u - 2u; k++, s--)
+        if (snap[0][(s - 1u) & (SCOPE_N - 1u)] < 0 && snap[0][s & (SCOPE_N - 1u)] >= 0)
+            break;
+    {                                           /* auto gain: the window's peak to nine tenths of the height, x1 .. x8 */
+        int32_t pk = 1;
+        for (x = 0; x < 240; x++)
+            for (ch = 0; ch < 2u; ch++) {
+                int32_t v = snap[ch][(s + (uint32_t)x * w / 240u) & (SCOPE_N - 1u)];
+                if (v < 0) v = -v;
+                if (v > pk) pk = v;
+            }
+        sc_gain = (uint32_t)(29490 / pk);
+        sc_gain = sc_gain < 1u ? 1u : sc_gain > 8u ? 8u : sc_gain;
+    }
+    cv_begin(240, SC_H, C_BLACK);
+    for (x = 0; x < 240; x += 4) {              /* the graticule: the centre, the quarters, the cycles */
+        cv_pset(x, SC_H / 2, C_BOX);
+        cv_pset(x, SC_H / 4, C_SEL);
+        cv_pset(x, 3 * SC_H / 4, C_SEL);
+    }
+    for (k = 1; p && k < sc_cycles; k++)
+        for (i = 0; i < (uint32_t)SC_H; i += 4u)
+            cv_pset((int32_t)(k * 240u / sc_cycles), (int32_t)i, C_BOX);
+    for (ch = 2; ch-- > 0;)                     /* right under, left over */
+        for (x = 0; x < 240; x++) {
+            int32_t v = snap[ch][(s + (uint32_t)x * w / 240u) & (SCOPE_N - 1u)] * (int32_t)sc_gain;
+            int32_t y = SC_H / 2 - v * (SC_H / 2 - 2) / 32767;
+            if (x) cv_line(x - 1, py[ch], x, y, ch ? C_ACC : C_WHITE);
+            py[ch] = y;
+        }
+    cv_blit(0, SC_Y);
+}
+
+static void sc_text(void)                       /* the header: the note, the cycles; the zoom; the hints */
+{
+    char s[32], *e;
+    static const char *const NAME[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    uint32_t note = sc_note();
+    sc_shown = note << 8 | sc_cycles << 4 | sc_gain;
+    draw_text_box(4, HDR_Y, 130, &FONT_S, "SCOPE", C_ACC, 0);
+    e = s;
+    if (note < 128u) {
+        e = put(e, NAME[note % 12u]);
+        e = num(e, note / 12u - 1u);
+        e = put(e, "  ");
+    }
+    e = num(e, sc_cycles);
+    put(e, sc_cycles == 1u ? " CYCLE" : " CYCLES");
+    draw_text_box(110, HDR_Y, 126, &FONT_S, s, C_FAINT, 2);
+    e = put(s, "L WHITE   R LILAC   x");
+    num(e, sc_gain);
+    draw_text_box(0, SC_Y + SC_H + 12u, 240, &FONT_S, s, C_FAINT, 1);
+    draw_text_box(0, 222, 240, &FONT_S, "KNOB1: CYCLES   HOME: BACK", C_FAINT, 1);
+}
+
 static void ui_page(uint32_t pg)
 {
-    if (pg > PG_PATCH) return;
+    if (pg > PG_SCOPE) return;
     if (pg != page) lcd_fill(0, G_Y, 240, 240 - G_Y, C_BLACK);   /* (row counts differ: clear what was below) */
+    if (pg == PG_SCOPE && page != PG_SCOPE)    /* in: from where HOME was pressed */
+        sc_back = page == PG_PATCH ? pa_back : page;
+    scope_on = pg == PG_SCOPE;                  /* (the ISR fills the capture only while it is shown) */
     if (pg == PG_PATCH && page != PG_PATCH) {   /* in: from where SAVE was pressed, the slot of the sound */
         pa_back = page;
         pa_armed = 0;
@@ -706,6 +804,23 @@ static int ui_input(uint32_t buttons)
     const row_t *r;
     int32_t d;
     uint32_t i, changed = 0;
+    if (page == PG_SCOPE) {                     /* the SCOPE: KNOB1 the cycles; HOME, ALGORITHM, SAVE or a page leave */
+        if ((d = fm1_enc_take(ENC_KNOB1)) != 0) {
+            int32_t c = (int32_t)sc_cycles + d;
+            sc_cycles = (uint32_t)(c < 1 ? 1 : c > 8 ? 8 : c);
+            dirty |= D_ALL;
+        }
+        for (i = 1; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
+        (void)fm1_enc_take(ENC_SELECT);
+        (void)fm1_enc_take(ENC_PRESETS);
+        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return 0; }
+        if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return 0; }
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO)))
+            return 0;                           /* (else a page button: on to that page, below) */
+    } else if (buttons & (1u << BTN_HOME) && page != PG_PATCH) {
+        ui_page(PG_SCOPE);
+        return 0;
+    }
     if (page == PG_PATCH) {                     /* the PATCH screen: HOME, a page button or ALGORITHM leave it */
         if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(pa_back); return 0; }
         if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO)))
@@ -774,6 +889,14 @@ static void ui_draw(void)                       /* from the main loop: what chan
     if (fm1_ms - last_hdr >= 500u) {            /* the CPU in the header, twice a second */
         last_hdr = fm1_ms;
         dirty |= D_HDR;
+    }
+    if (page == PG_SCOPE) {                     /* the scope: the trace every SC_FRAME_MS, the text when it changes */
+        static uint32_t last_sc;
+        if (fm1_ms - last_sc >= SC_FRAME_MS) { last_sc = fm1_ms; sc_draw(); }
+        if (dirty & (D_ROWS | D_LEG) || sc_shown != (sc_note() << 8 | sc_cycles << 4 | sc_gain))
+            sc_text();                          /* (the note, the cycles or the zoom changed) */
+        dirty = 0;
+        return;
     }
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;

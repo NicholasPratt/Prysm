@@ -74,6 +74,11 @@ typedef struct {
     uint8_t menv_loop;                          /* 1: attack-decay over and over until the key is let go */
     uint8_t menv_dest;                          /* DEST_OFF .. DEST_LFOAMT */
     uint8_t menv_amt;                           /* 64 = none; bipolar */
+    /* (added in patch format 5: velocity, from MIDI; the FM-1's own keys play at full velocity, so these change
+     * nothing for them) */
+    uint8_t vel_amp;                            /* how much softer notes are quieter */
+    uint8_t vel_cut;                            /* how much softer notes are darker (up to 36 semitones) */
+    uint8_t vel_mod;                            /* how much softer notes have less modulation (FM brightness) */
 } patch_t;
 
 static const patch_t PATCH_INIT = {
@@ -96,6 +101,7 @@ static const patch_t PATCH_INIT = {
     .rev_mrate = 40, .rev_mdepth = 50, .rev_shimmer = 0,
     .menv_a = 60, .menv_d = 70, .menv_s = 0, .menv_r = 60, .menv_loop = 0,   /* no amount yet */
     .menv_dest = DEST_LFORATE, .menv_amt = 64,
+    .vel_amp = 80, .vel_cut = 40, .vel_mod = 50,   /* (MIDI only: the keys play at full velocity) */
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -121,6 +127,8 @@ static volatile struct {
     int32_t me_sus;
     uint8_t me_loop, me_dest;
     int32_t me_amt;                             /* Q15, signed */
+    int32_t vel_amp, vel_mod;                   /* velocity sensitivities, Q15 */
+    int32_t vel_cut;                            /* the cutoff at velocity 0, quarter semitones below (0 .. 144) */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -153,6 +161,7 @@ static struct {
     int32_t lfo_sh, lfo_fade;                   /* the S&H value held; the fade-in (Q24) */
     int32_t rate16;                             /* the mod envelope's move of its LFO's rate, 1/16 semitones */
     uint8_t note;
+    volatile uint8_t vel;                       /* 1 .. 127 (main loop, before the gate) */
     uint32_t age;
 } voice[NV];
 
@@ -290,6 +299,7 @@ typedef struct {
     int32_t cut;                                /* cutoff: quarter semitones */
     int32_t amp;                                /* amp: a factor, Q15 */
     int32_t mix;                                /* towards osc 2 (+) or osc 1 (-), Q15 */
+    int32_t vmod;                               /* velocity's factor on the mod amounts, Q15 */
 } lfo_mod_t;
 
 /* one source into m: s its value now (the LFO: -32767..32767; the mod envelope: 0..32767, uni), a the amount */
@@ -428,6 +438,15 @@ static void engine_render(int32_t *out, uint32_t n)
             lfo_mods(l, &m);
             if (eg.me_dest < DEST_LFORATE)      /* any of the LFO's destinations */
                 mod_add(&m, eg.me_dest, eg.me_amt, me, 1);
+            m.vmod = 32767;                     /* velocity: softer notes quieter (by its square), darker, less bright */
+            if (voice[v].vel < 127u) {          /* (127, the keys: exactly as without velocity) */
+                int32_t vel = voice[v].vel, vf = vel * 258, soft = 32767 - vf;   /* vf: 0 .. 32508 */
+                if (eg.vel_amp)                 /* (each only with a sensitivity: x 32767 / 32768 is not x 1) */
+                    m.amp = (m.amp * (32767 - ((eg.vel_amp * (32767 - ((vf * vf) >> 15))) >> 15))) >> 15;
+                m.cut -= eg.vel_cut * (127 - vel) / 127;
+                if (eg.vel_mod)
+                    m.vmod = 32767 - ((eg.vel_mod * soft) >> 15);
+            }
             a_to = (a_to * m.amp) >> 15;
             a = voice[v].amp_q15;
             da = (a_to - a) >> BLK_SHIFT;
@@ -448,6 +467,10 @@ static void engine_render(int32_t *out, uint32_t n)
                 am2 = eg.m_amt[o][1] + m.amt[o];
                 am1 = am1 < 0 ? 0 : am1 > 32767 ? 32767 : am1;
                 am2 = am2 < 0 ? 0 : am2 > 32767 ? 32767 : am2;
+                if (m.vmod != 32767) {          /* velocity */
+                    am1 = (am1 * m.vmod) >> 15;
+                    am2 = (am2 * m.vmod) >> 15;
+                }
                 e1_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][0], gate, eg.m_att[o][0], 0, ENV_FULL,
                                                      eg.m_rel[o][0]) * am1) >> 24);
                 e2_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][1], gate, eg.m_att[o][1], 0, ENV_FULL,
@@ -643,6 +666,9 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.me_dest = patch.menv_dest < DEST_N ? patch.menv_dest : DEST_OFF;
         eg.me_amt = eg.me_dest == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
+    eg.vel_amp = (int32_t)(patch.vel_amp & 127u) * 32767 / 127;
+    eg.vel_mod = (int32_t)(patch.vel_mod & 127u) * 32767 / 127;
+    eg.vel_cut = (int32_t)(patch.vel_cut & 127u) * 144 / 127;
     fx_set(&patch);
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
@@ -664,7 +690,7 @@ static void engine_init(void)
 }
 
 /* ---- notes (main loop) */
-static void engine_note_on(uint32_t note)
+static void engine_note_on_vel(uint32_t note, uint32_t vel)   /* vel 1 .. 127 */
 {
     uint32_t v, pick = 0, best = 0xFFFFFFFFu;
     if (note > 127u)
@@ -678,11 +704,14 @@ static void engine_note_on(uint32_t note)
         if (score < best) { best = score; pick = v; }
     }
     voice[pick].note = (uint8_t)note;
+    voice[pick].vel = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);
     voice[pick].age = ++ages;
     voice_tune(pick);                           /* the pitch before the gate: the ISR may run between */
     voice[pick].gate = 1;
     voice[pick].trig = 1;
 }
+
+static void engine_note_on(uint32_t note) { engine_note_on_vel(note, 127); }   /* the keys: full velocity */
 
 static void engine_note_off(uint32_t note)
 {

@@ -27,6 +27,8 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch, cutoff, amp, mix) |
 | **Mod envelope** | ADSR with LOOP (attack-decay until release); into the LFO's rate or depth, or any LFO destination |
 | **Effects** | stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer |
+| **Velocity** | from MIDI, to level, cutoff and modulation (the FM-1's keys play at full velocity) |
+| **Oscilloscope** | on HOME: left and right, locked to the newest note, auto-zoom |
 | **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on |
 | **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out |
 
@@ -43,11 +45,12 @@ envelopes, the LFO, the effects chain.
 | --- | --- | --- |
 | OSC 1, OSC 2 | EDIT | WAVE, WAVE2, RATIO, MODE, ENV, MIX |
 | FILTER | ENV (twice) | FILTER, ENV, DRIVE |
-| AMP | ENV | ENV |
+| AMP | ENV | ENV, VEL |
 | LFO | LFO | LFO, DEST, M.ENV, M.DST |
 | MIX | GLO | OSC |
 | FX | FX | CHORUS, DELAY, D.MOD, REVERB, R.MOD |
 | PATCH | SAVE | SAVE, LOAD, INIT over 8 slots |
+| SCOPE | HOME | the output, live (KNOB1: cycles) |
 
 ## Installing from the command line
 

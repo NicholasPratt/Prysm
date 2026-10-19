@@ -1,0 +1,11 @@
+# the SCOPE (HOME): a chord with FM, then KNOB1 to 4 cycles; HOME back (tests/run_ui.sh)
+100 keys 0x80
+300 btn 8
+600 shot
+700 enc 2 2
+900 shot
+950 keys 0x4880
+1200 shot
+1300 btn 8
+1400 shot
+1500 end

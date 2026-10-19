@@ -97,6 +97,16 @@ The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | ENV | A | D | S | R |
+| VEL | velocity to level | to cutoff | to modulation | |
+
+Velocity comes from MIDI only (the FM-1's keys are on / off: they play at 127, where velocity changes nothing):
+level by the square of velocity, cutoff down to 36 semitones, both mod amounts. Patch format 5.
+
+### SCOPE (HOME)
+
+The output before MASTER, left (white) and right (lilac), captured by the ISR only while shown (2048 frames);
+triggered on a rising zero over 1 .. 8 cycles (KNOB1) of the newest note's period; auto-zoom x1 .. x8; redrawn
+every 40 ms.
 
 ### MIX
 
@@ -179,11 +189,12 @@ The **SAVE** button opens the PATCH screen:
 - Stored in two flash sectors written in turn (0xFA000, 0xFB000, `store_load` / `store_save` in platform.c), so
   a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format; older
   formats convert when read (format 1, before the LFO: the LFO comes in with no amount; format 2, before the
-  effects: they come in off; format 3, before the mod envelope: it comes in with no amount).
+  effects: they come in off; format 3, before the mod envelope: it comes in with no amount; format 4, before velocity: it comes in as the
+  default sound has it).
 
 ## Not in the first version
 
-Velocity, glide, a second LFO, patch names.
+Glide, a second LFO, patch names.
 
 ## Budget
 

@@ -31,6 +31,7 @@ static void wav(const char *name, const int16_t *s, uint32_t n)
  * With p2: that patch from change_ms on (a knob turned while the notes sound) */
 static const patch_t *render_p2;
 static uint32_t render_change_ms, render_on_ms;   /* (render_on_ms: the notes start then, not at 0) */
+static uint32_t render_vel = 127;               /* the notes' velocity */
 static void render(const char *name, const patch_t *p, const uint8_t *notes, uint32_t nn,
                    uint32_t off_ms, uint32_t end_ms)
 {
@@ -41,7 +42,7 @@ static void render(const char *name, const patch_t *p, const uint8_t *notes, uin
     engine_set(p);
     if (!render_on_ms)
         for (k = 0; k < nn; k++)
-            engine_note_on(notes[k]);
+            engine_note_on_vel(notes[k], render_vel);
     while (done < total) {
         int32_t blk[2u * FRAMES] = {0};
         uint32_t i;
@@ -188,6 +189,18 @@ int main(void)
         p.lfo_retrig = 0;
         render("rt_off_0", &p, A4, 1, 1900, 2000);
         render_on_ms = 333; render("rt_off_333", &p, A4, 1, 1900, 2000); render_on_ms = 0;
+    }
+
+    {                                           /* velocity (MIDI): the same note at 127 and at 40 */
+        patch_t q = solo();
+        q.osc[0].amt[0] = 55;                   /* some FM (moderate: less is then clearly darker) */
+        q.cut = 110; q.vel_amp = 127; q.vel_cut = 0; q.vel_mod = 127;
+        memset(voice, 0, sizeof voice); engine_init(); engine_set(&q);
+        render_vel = 127; render("vel_127", &q, A4, 1, 900, 1000);
+        render_vel = 40; render("vel_40", &q, A4, 1, 900, 1000);
+        q.vel_amp = 0; q.vel_mod = 0;           /* no sensitivity: velocity changes nothing */
+        render_vel = 40; render("vel_40_off", &q, A4, 1, 900, 1000);
+        render_vel = 127;
     }
 
     {                                           /* the mod envelope */

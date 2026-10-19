@@ -220,6 +220,19 @@ same_off = np.max(np.abs(b0[:n] - b3[o:o + n]))
 check("lfo retrig", same_on < 1e-3 and same_off > 0.01,
       f"a later note: {same_on:.5f} apart with retrig, {same_off:.3f} without (free-running)")
 
+# ---- velocity
+v127, v40, voff = load("vel_127"), load("vel_40"), load("vel_40_off")
+lv = rms(v40, 0.2, 0.8) / rms(v127, 0.2, 0.8)
+check("velocity level", 0.05 < lv < 0.2, f"velocity 40 is {lv:.3f} of 127's level (sensitivity full: (40/127)^2 = 0.099)")
+def centroid(x):
+    f, s = spectrum(x)
+    return float((f * s ** 2).sum() / (s ** 2).sum())
+
+
+c127, c40 = centroid(v127), centroid(v40)
+check("velocity brightness", c40 < 0.8 * c127, f"spectral centroid {c127:.0f} Hz at 127, {c40:.0f} Hz at 40")
+check("velocity off", np.array_equal(voff, v127), "no sensitivity: velocity 40 gives the same samples as 127")
+
 # ---- the mod envelope
 f = cents(inst_freq(load("menv_rate"), 0.05, 2.85))
 
