@@ -4,7 +4,9 @@
  * MIX); the two oscillators mixed, driven, through a 2-pole low-pass with its own ADSR, then the amp ADSR. An LFO
  * per voice (or one for all, free-running) modulates two destinations: pitch, wave positions, mod amounts, the
  * modulators' pitch, cutoff, amp, the oscillators' mix. A mod envelope per voice (ADSR; LOOP: attack-decay again
- * and again until the key is let go) modulates one: the LFO's rate or depth, or any of the LFO's.
+ * and again until the key is let go) modulates one: the LFO's rate or depth, or any of the LFO's. Glide slides each
+ * new note from the last one. The arpeggiator (in the ISR: its notes start and stop on the exact 16-frame block)
+ * plays the held notes in turn.
  *
  * Who runs what:
  *   main loop   engine_set(): the patch changed -> the derived values below; engine_note_on / _off.
@@ -30,6 +32,13 @@ enum { DEST_OFF, DEST_PITCH, DEST_PITCH2, DEST_WAVE1, DEST_WAVE2, DEST_MWAVE1, D
        DEST_MPITCH, DEST_CUTOFF, DEST_AMP, DEST_MIX,
        DEST_LFORATE, DEST_LFOAMT,               /* (the mod envelope's only: the LFO itself) */
        DEST_N };
+enum { ARP_UP, ARP_DOWN, ARP_UPDN, ARP_RAND, ARP_ORDER, ARP_N };
+static const char *const ARP_NAME[ARP_N] = {"UP", "DOWN", "UPDN", "RAND", "ORDER"};
+enum { DIV_4, DIV_8, DIV_8T, DIV_16, DIV_16T, DIV_32, DIV_N };
+static const char *const DIV_NAME[DIV_N] = {"1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
+static const uint8_t DIV_SPB[DIV_N] = {1, 2, 3, 4, 6, 8};   /* steps per beat */
+enum { GLIDE_ALWAYS, GLIDE_LEGATO, GLIDE_N };
+static const char *const GLIDE_NAME[GLIDE_N] = {"ALWAYS", "LEGATO"};
 static const char *const DEST_NAME[DEST_N] = {"OFF", "PITCH", "PITCH2", "WAVE1", "WAVE2", "MWAVE1", "MWAVE2",
                                               "MOD1", "MOD2", "MPITCH", "CUTOFF", "AMP", "MIX", "LFORATE", "LFOAMT"};
 
@@ -79,6 +88,17 @@ typedef struct {
     uint8_t vel_amp;                            /* how much softer notes are quieter */
     uint8_t vel_cut;                            /* how much softer notes are darker (up to 36 semitones) */
     uint8_t vel_mod;                            /* how much softer notes have less modulation (FM brightness) */
+    /* (added in patch format 6: glide and the arpeggiator) */
+    uint8_t glide;                              /* 0 = off; else the slide's time, 1 ms .. 10 s */
+    uint8_t glide_mode;                         /* GLIDE_ALWAYS, GLIDE_LEGATO (only while another note is held) */
+    uint8_t arp_on;
+    uint8_t arp_mode;                           /* ARP_UP .. ARP_ORDER */
+    uint8_t arp_div;                            /* DIV_4 .. DIV_32 */
+    uint8_t arp_oct;                            /* 0..3 = 1..4 octaves */
+    uint8_t arp_bpm;                            /* 0..200 = 40..240 BPM */
+    uint8_t arp_gate;                           /* 0..127 = 5 .. 100 % of a step (127: tied) */
+    uint8_t arp_latch;                          /* 1: the notes keep playing after the keys are let go */
+    uint8_t arp_swing;                          /* 0..127 = none .. the even steps 3x the odd */
 } patch_t;
 
 static const patch_t PATCH_INIT = {
@@ -102,6 +122,9 @@ static const patch_t PATCH_INIT = {
     .menv_a = 60, .menv_d = 70, .menv_s = 0, .menv_r = 60, .menv_loop = 0,   /* no amount yet */
     .menv_dest = DEST_LFORATE, .menv_amt = 64,
     .vel_amp = 80, .vel_cut = 40, .vel_mod = 50,   /* (MIDI only: the keys play at full velocity) */
+    .glide = 0, .glide_mode = GLIDE_ALWAYS,
+    .arp_on = 0, .arp_mode = ARP_UP, .arp_div = DIV_16, .arp_oct = 0, .arp_bpm = 80, .arp_gate = 64,
+    .arp_latch = 0, .arp_swing = 0,
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -129,6 +152,12 @@ static volatile struct {
     int32_t me_amt;                             /* Q15, signed */
     int32_t vel_amp, vel_mod;                   /* velocity sensitivities, Q15 */
     int32_t vel_cut;                            /* the cutoff at velocity 0, quarter semitones below (0 .. 144) */
+    uint32_t glide_k;                           /* the slide's coefficient a block (Q16; 0: no glide) */
+    uint8_t glide_legato;
+    uint8_t arp_on, arp_mode, arp_oct, arp_latch, arp_tie;
+    uint32_t arp_len_q8;                        /* a step, frames Q8 */
+    int32_t arp_gate;                           /* the note's share of its step, Q15 */
+    int32_t arp_swing;                          /* 0 .. 16384: the even steps longer by it, the odd shorter */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -163,6 +192,10 @@ static struct {
     uint8_t note;
     volatile uint8_t vel;                       /* 1 .. 127 (main loop, before the gate) */
     uint32_t age;
+    int32_t glide_q8;                           /* the pitch still to slide, 1/16 semitones Q8 (to 0) */
+    /* the arpeggiator's notes (ISR only): start / stop at block itrig / ioff of this render (0xFF: none) */
+    uint8_t itrig, ioff, inote, ivel;
+    int32_t iglide;
 } voice[NV];
 
 _Static_assert(BLK == 1u << BLK_SHIFT, "BLK is a power of two");
@@ -171,6 +204,22 @@ static uint32_t ages;
 static uint32_t lfo_ph, lfo_rng = 0x2545F491u;  /* the free-running LFO (retrig off) */
 static int32_t lfo_sh;
 static int32_t lfo_rate16;                      /* its rate moved by the newest note's mod envelope (last render) */
+static int32_t last_note = -1;                  /* glide: the note the next one slides from */
+
+/* ---- the arpeggiator: the held notes (the main loop's: arp_key_down / _up), read by the ISR each step */
+#define ARP_MAX 16u
+static volatile struct {
+    uint8_t note[ARP_MAX], vel[ARP_MAX];        /* in the order they were pressed */
+    uint32_t n;
+    uint32_t seq;                               /* odd while the main loop changes them */
+} held;
+static uint32_t held_down;                      /* keys physically down (latch) */
+static struct {
+    uint32_t phase_q8, idx, n_was, odd, rng, now;   /* now: the next step at once (the first notes) */
+    int32_t v;                                  /* its voice (-1: none) */
+    int32_t gate_left;                          /* frames */
+    volatile uint32_t steps;                    /* steps played (the page's picture follows it) */
+} arp = {0, 0, 0, 0, 0x1234567u, 0, -1, 0, 0};
 
 /* ---- envelopes (once per block) */
 static int32_t env_step(env_t *e, uint32_t gate, uint32_t att, uint32_t dec, int32_t sus, uint32_t rel)
@@ -360,16 +409,151 @@ static int32_t menv_step(env_t *e, uint32_t gate)   /* the mod envelope; LOOP: b
     return l;
 }
 
-static uint32_t inc_moved(uint32_t inc, int32_t p16)   /* a phase step moved by p16 / 16 semitones */
+#include "fx.c"                                 /* the effects: chorus, delay, reverb */
+
+static void voice_tune(uint32_t v);
+static void arp_clear(void);
+static void engine_all_off(void);
+
+/* ---- a voice starts (its note and pitch set): the envelopes (re)start from where they are */
+static void voice_start(uint32_t v)
 {
-    uint64_t r;
-    if (!p16) return inc;
-    p16 = p16 < -192 ? -192 : p16 > 192 ? 192 : p16;
-    r = ((uint64_t)inc * PR_PITCH16_Q16[192 + p16]) >> 16;
-    return r > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)r;
+    uint32_t o;
+    if (!voice[v].amp.st) {                     /* from silence: the phases from 0, the same attack every time */
+        for (o = 0; o < NOSC; o++)
+            voice[v].ph[o][0] = voice[v].ph[o][1] = voice[v].ph[o][2] = 0;
+        voice[v].ic1 = voice[v].ic2 = 0;
+        voice[v].f_cs = eg.f_cut << 8;          /* the knob as it is now; the first block starts on its own */
+        voice[v].f_ks = (int32_t)eg.f_k;
+        voice[v].fc[0] = -1;
+    }
+    voice[v].amp.st = 1;
+    voice[v].flt.st = 1;
+    for (o = 0; o < NOSC; o++)
+        voice[v].mod[o][0].st = voice[v].mod[o][1].st = 1;
+    voice[v].lfo_ph = 0;                        /* (used when the LFO retriggers) */
+    voice[v].lfo_rng += 0x9E3779B9u + v;
+    voice[v].lfo_sh = lfo_random(&voice[v].lfo_rng);
+    voice[v].lfo_fade = 0;                      /* the delay: it fades in from the note */
+    voice[v].menv.st = 1;
 }
 
-#include "fx.c"                                 /* the effects: chorus, delay, reverb */
+/* ---- which voice a new note takes: the same note, else a silent voice, else the quietest release, else the oldest
+ * held; and where its glide starts (from the last note: always, or with LEGATO only while another note is held) */
+static uint32_t voice_pick(uint32_t note)
+{
+    uint32_t v, pick = 0, best = 0xFFFFFFFFu;
+    for (v = 0; v < NV; v++) {
+        uint32_t busy = voice[v].gate || voice[v].trig || voice[v].itrig != 0xFFu;
+        uint32_t score = voice[v].note == note && voice[v].gate ? 0u
+                       : !voice[v].amp.st && !busy ? 1u
+                       : !voice[v].gate && !busy ? 2u + ((uint32_t)voice[v].amp.lvl >> 8)
+                       : 0x80000000u + voice[v].age;
+        if (score < best) { best = score; pick = v; }
+    }
+    return pick;
+}
+static int32_t glide_from(uint32_t note)        /* the new note's slide (1/16 semitones Q8), then it is the last */
+{
+    uint32_t v, held_any = 0;
+    int32_t g = 0;
+    for (v = 0; v < NV; v++)
+        held_any |= voice[v].gate;
+    if (eg.glide_k && last_note >= 0 && (!eg.glide_legato || held_any))
+        g = (last_note - (int32_t)note) * 16 * 256;
+    last_note = (int32_t)note;
+    return g;
+}
+
+/* ---- the arpeggiator (ISR) */
+static uint32_t arp_pick(const uint8_t *nt, const uint8_t *vl, uint32_t n, uint32_t idx, uint32_t *vel, uint32_t *rng)
+{                                               /* (rng: RAND's sequence; the page draws with its own) */
+    uint8_t s[ARP_MAX], sv[ARP_MAX];
+    uint32_t i, j, len = n * (eg.arp_oct + 1u), k, note;
+    for (i = 0; i < n; i++) { s[i] = nt[i]; sv[i] = vl[i]; }
+    if (eg.arp_mode != ARP_ORDER)               /* by pitch (insertion sort: a handful of notes) */
+        for (i = 1; i < n; i++)
+            for (j = i; j > 0 && s[j - 1] > s[j]; j--) {
+                uint8_t a = s[j]; s[j] = s[j - 1]; s[j - 1] = a;
+                a = sv[j]; sv[j] = sv[j - 1]; sv[j - 1] = a;
+            }
+    switch (eg.arp_mode) {
+    case ARP_DOWN: k = len - 1u - idx % len; break;
+    case ARP_UPDN: {                            /* up, then down, the ends once */
+        uint32_t l2 = len > 1u ? 2u * len - 2u : 1u;
+        k = idx % l2;
+        if (k >= len) k = l2 - k;
+        break;
+    }
+    case ARP_RAND:
+        *rng = *rng * 1664525u + 1013904223u;
+        k = (*rng >> 8) % len;
+        break;
+    default: k = idx % len;                     /* UP, ORDER */
+    }
+    note = s[k % n] + 12u * (k / n);
+    *vel = sv[k % n];
+    return note > 127u ? 127u : note;
+}
+
+static uint32_t arp_step_len(uint32_t odd)      /* a step, frames Q8: swing makes the even ones longer */
+{
+    return (uint32_t)(((uint64_t)eg.arp_len_q8 * (uint32_t)(32768 + (odd ? -eg.arp_swing : eg.arp_swing))) >> 15);
+}
+
+static void arp_run(uint32_t nb)
+{
+    uint8_t nt[ARP_MAX], vl[ARP_MAX];
+    uint32_t n, i, bi, s0;
+    if (!eg.arp_on) {                           /* off: let its note go */
+        if (arp.v >= 0) { voice[arp.v].ioff = 0; arp.v = -1; }
+        arp.n_was = 0;
+        return;
+    }
+    s0 = held.seq;                              /* the held notes: a copy no change was half-way through */
+    n = held.n;
+    if (n > ARP_MAX) n = ARP_MAX;
+    for (i = 0; i < n; i++) { nt[i] = held.note[i]; vl[i] = held.vel[i]; }
+    if ((s0 & 1u) || held.seq != s0)
+        n = arp.n_was;                          /* (mid-change: as last time; next render it is settled) */
+    if (n && !arp.n_was) {                      /* the first notes: the first step now */
+        arp.now = 1;
+        arp.idx = 0;
+        arp.odd = 0;
+    }
+    for (bi = 0; bi < nb; bi++) {
+        uint32_t len = arp_step_len(arp.odd);     /* the step running now (swing: the even ones long) */
+        if (arp.v >= 0 && !eg.arp_tie) {        /* the gate: the note ends inside its step */
+            arp.gate_left -= (int32_t)BLK;
+            if (arp.gate_left <= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
+        }
+        if (!n) {                               /* no notes: stop (the step clock waits for the next) */
+            if (arp.v >= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
+            continue;
+        }
+        arp.phase_q8 += BLK << 8;
+        if (arp.now || arp.phase_q8 >= len) {   /* a step */
+            uint32_t vel, note, v;
+            int32_t old = arp.v;
+            if (arp.now) { arp.now = 0; arp.phase_q8 = 0; arp.odd = 1; }   /* (so the first step is an even one) */
+            else arp.phase_q8 -= len;
+            arp.odd ^= 1u;                      /* the step starting: its length sets the note's gate */
+            len = arp_step_len(arp.odd);
+            note = arp_pick(nt, vl, n, arp.idx++, &vel, &arp.rng);
+            v = voice_pick(note);
+            voice[v].inote = (uint8_t)note;
+            voice[v].ivel = (uint8_t)(vel ? vel : 1u);
+            voice[v].iglide = glide_from(note); /* (the old note still held: LEGATO slides at a tie) */
+            voice[v].itrig = (uint8_t)bi;
+            voice[v].age = ++ages;
+            if (old >= 0 && (uint32_t)old != v) voice[old].ioff = (uint8_t)bi;
+            arp.v = (int32_t)v;
+            arp.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.arp_gate) >> 23);   /* Q8 x Q15 -> frames */
+            arp.steps++;
+        }
+    }
+    arp.n_was = n;
+}
 
 /* ---- the audio ISR: add n stereo frames (L R) to out */
 #define MAXBLK 32u                              /* blocks per render, at most (n <= 512) */
@@ -385,31 +569,36 @@ static void engine_render(int32_t *out, uint32_t n)
         g_ph[b] = lfo_ph;
         g_sh[b] = lfo_sh;
     }
+    arp_run(nb);                                /* the arpeggiator: its notes for this render, block by block */
     for (v = 0; v < NV; v++) {
-        if (voice[v].trig) {                    /* a new note: the envelopes (re)start from where they are */
+        if (voice[v].trig) {                    /* a note from the main loop: from the first block */
             voice[v].trig = 0;
-            if (!voice[v].amp.st) {             /* from silence: the phases from 0, the same attack every time */
-                for (o = 0; o < NOSC; o++)
-                    voice[v].ph[o][0] = voice[v].ph[o][1] = voice[v].ph[o][2] = 0;
-                voice[v].ic1 = voice[v].ic2 = 0;
-                voice[v].f_cs = eg.f_cut << 8;  /* the knob as it is now; the first block starts on its own */
-                voice[v].f_ks = (int32_t)eg.f_k;
-                voice[v].fc[0] = -1;
-            }
-            voice[v].amp.st = 1;
-            voice[v].flt.st = 1;
-            for (o = 0; o < NOSC; o++)
-                voice[v].mod[o][0].st = voice[v].mod[o][1].st = 1;
-            voice[v].lfo_ph = 0;                /* (used when the LFO retriggers) */
-            voice[v].lfo_rng += 0x9E3779B9u + v;
-            voice[v].lfo_sh = lfo_random(&voice[v].lfo_rng);
-            voice[v].lfo_fade = 0;              /* the delay: it fades in from the note */
-            voice[v].menv.st = 1;
+            voice_start(v);
         }
-        if (!voice[v].amp.st)
+        if (!voice[v].amp.st && voice[v].itrig == 0xFFu)
             continue;                           /* silent: costs nothing */
         for (b = 0; b < n; b += BLK) {
-            uint32_t gate = voice[v].gate, bi = b / BLK < MAXBLK ? b / BLK : MAXBLK - 1u, ph;
+            uint32_t gate, bi = b / BLK < MAXBLK ? b / BLK : MAXBLK - 1u, ph;
+            if (voice[v].ioff == b / BLK) {     /* the arpeggiator's: an end, then a start, on their blocks */
+                voice[v].ioff = 0xFF;
+                voice[v].gate = 0;
+            }
+            if (voice[v].itrig == b / BLK) {
+                voice[v].itrig = 0xFF;
+                voice[v].note = voice[v].inote;
+                voice[v].vel = voice[v].ivel;
+                voice[v].glide_q8 = voice[v].iglide;
+                voice_tune(v);
+                voice[v].gate = 1;
+                voice_start(v);
+            }
+            if (!voice[v].amp.st)
+                continue;
+            gate = voice[v].gate;
+            if (voice[v].glide_q8) {            /* glide: the rest of the slide, exponentially */
+                voice[v].glide_q8 -= (int32_t)(((int64_t)voice[v].glide_q8 * eg.glide_k) >> 16);
+                if (voice[v].glide_q8 > -64 && voice[v].glide_q8 < 64) voice[v].glide_q8 = 0;
+            }
             int32_t a_to = env_step(&voice[v].amp, gate, eg.a_att, eg.a_dec, eg.a_sus, eg.a_rel) >> 9;
             int32_t a, da, l, acc[BLK];
             lfo_mod_t m;
@@ -455,9 +644,10 @@ static void engine_render(int32_t *out, uint32_t n)
             for (o = 0; o < NOSC; o++) {
                 src_t t[NOP];
                 uint32_t p0 = voice[v].ph[o][0], p1 = voice[v].ph[o][1], p2 = voice[v].ph[o][2];
-                uint32_t i0 = inc_moved(voice[v].inc[o][0], m.pitch16[o]);
-                uint32_t i1 = inc_moved(voice[v].inc[o][1], m.pitch16[o] + m.mpitch16);
-                uint32_t i2 = inc_moved(voice[v].inc[o][2], m.pitch16[o] + m.mpitch16);
+                int32_t g16 = voice[v].glide_q8 >> 8;   /* (+-48 semitones: the LFO, the envelope, glide) */
+                uint32_t i0 = rate_moved(voice[v].inc[o][0], m.pitch16[o] + g16);
+                uint32_t i1 = rate_moved(voice[v].inc[o][1], m.pitch16[o] + m.mpitch16 + g16);
+                uint32_t i2 = rate_moved(voice[v].inc[o][2], m.pitch16[o] + m.mpitch16 + g16);
                 uint32_t m1 = eg.mode[o][0], m2 = eg.mode[o][1];
                 int32_t lvl = eg.lvl[o], am1, am2;
                 int32_t e1_to, e2_to, e1, e2, d1, d2;
@@ -669,6 +859,25 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
     eg.vel_amp = (int32_t)(patch.vel_amp & 127u) * 32767 / 127;
     eg.vel_mod = (int32_t)(patch.vel_mod & 127u) * 32767 / 127;
     eg.vel_cut = (int32_t)(patch.vel_cut & 127u) * 144 / 127;
+    eg.glide_k = patch.glide ? PR_ENV_EXP[patch.glide & 127u] : 0u;
+    eg.glide_legato = patch.glide_mode == GLIDE_LEGATO;
+    {
+        uint32_t bpm = 40u + (patch.arp_bpm <= 200u ? patch.arp_bpm : 80u);
+        uint32_t spb = DIV_SPB[patch.arp_div < DIV_N ? patch.arp_div : DIV_16];
+        if (eg.arp_on != (patch.arp_on ? 1u : 0u)) {   /* on or off: the notes held go, the arp starts afresh */
+            arp_clear();
+            engine_all_off();
+        }
+        eg.arp_len_q8 = 44100u * 60u * 256u / (bpm * spb);
+        eg.arp_mode = patch.arp_mode < ARP_N ? patch.arp_mode : ARP_UP;
+        eg.arp_oct = patch.arp_oct <= 3u ? patch.arp_oct : 0u;
+        eg.arp_latch = patch.arp_latch ? 1u : 0u;
+        if (!eg.arp_latch && held_down == 0u && held.n) arp_clear();   /* latch off: the latched notes go */
+        eg.arp_tie = (patch.arp_gate & 127u) == 127u;
+        eg.arp_gate = 1638 + (int32_t)(patch.arp_gate & 127u) * (32768 - 1638) / 127;   /* 5 .. 100 % */
+        eg.arp_swing = (int32_t)(patch.arp_swing & 127u) * 16384 / 127;
+        eg.arp_on = patch.arp_on ? 1u : 0u;
+    }
     fx_set(&patch);
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
@@ -681,8 +890,10 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
 
 static void engine_init(void)
 {
-    uint32_t o, k;
+    uint32_t o, k, v;
     fx_init();
+    for (v = 0; v < NV; v++)
+        voice[v].itrig = voice[v].ioff = 0xFF;
     for (o = 0; o < NOSC; o++)                  /* force every table to be built */
         for (k = 0; k < NOP; k++)
             op_cur[o][k] = 0;
@@ -692,17 +903,11 @@ static void engine_init(void)
 /* ---- notes (main loop) */
 static void engine_note_on_vel(uint32_t note, uint32_t vel)   /* vel 1 .. 127 */
 {
-    uint32_t v, pick = 0, best = 0xFFFFFFFFu;
+    uint32_t pick;
     if (note > 127u)
         return;
-    for (v = 0; v < NV; v++) {                  /* the same note, else a silent voice, else the quietest release,
-                                                 * else the oldest held */
-        uint32_t score = voice[v].note == note && voice[v].gate ? 0u
-                       : !voice[v].amp.st && !voice[v].trig ? 1u
-                       : !voice[v].gate ? 2u + ((uint32_t)voice[v].amp.lvl >> 8)
-                       : 0x80000000u + voice[v].age;
-        if (score < best) { best = score; pick = v; }
-    }
+    pick = voice_pick(note);
+    voice[pick].glide_q8 = glide_from(note);
     voice[pick].note = (uint8_t)note;
     voice[pick].vel = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);
     voice[pick].age = ++ages;
@@ -721,11 +926,61 @@ static void engine_note_off(uint32_t note)
             voice[v].gate = 0;
 }
 
-static int engine_quiet(void)                   /* nothing sounds, not even a release */
+static int engine_quiet(void)                   /* nothing sounds, not even a release, and the arp is not playing */
+{
+    uint32_t v;
+    if (eg.arp_on && held.n)
+        return 0;
+    for (v = 0; v < NV; v++)
+        if (voice[v].gate || voice[v].trig || voice[v].itrig != 0xFFu || voice[v].amp.st)
+            return 0;
+    return 1;
+}
+
+/* ---- the arpeggiator's held notes (main loop): the keys and MIDI go here while it is on */
+static void held_change(void) { held.seq++; }   /* called before and after a change: odd while changing (the ISR copies around it) */
+static void arp_clear(void)
+{
+    held_change();
+    held.n = 0;
+    held_change();
+    held_down = 0;
+}
+static void arp_key_down(uint32_t note, uint32_t vel)
+{
+    uint32_t i, n;
+    if (eg.arp_latch && !held_down)             /* latch: a new chord, after all the keys were let go */
+        arp_clear();
+    held_down++;
+    n = held.n;
+    for (i = 0; i < n; i++)
+        if (held.note[i] == note) return;       /* (already there: latched) */
+    if (n >= ARP_MAX) return;
+    held_change();
+    held.note[n] = (uint8_t)note;
+    held.vel[n] = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);
+    held.n = n + 1u;
+    held_change();
+}
+static void arp_key_up(uint32_t note)
+{
+    uint32_t i, j, n = held.n;
+    if (held_down) held_down--;
+    if (eg.arp_latch)
+        return;                                 /* latch: they keep playing */
+    for (i = 0; i < n; i++)
+        if (held.note[i] == note) {
+            held_change();
+            for (j = i; j + 1u < n; j++) { held.note[j] = held.note[j + 1u]; held.vel[j] = held.vel[j + 1u]; }
+            held.n = n - 1u;
+            held_change();
+            return;
+        }
+}
+
+static void engine_all_off(void)                /* every note let go (the arp switched on or off) */
 {
     uint32_t v;
     for (v = 0; v < NV; v++)
-        if (voice[v].gate || voice[v].trig || voice[v].amp.st)
-            return 0;
-    return 1;
+        voice[v].gate = 0;
 }

@@ -87,6 +87,20 @@ int main(void)
               "format 4: slot 4's sound and mod envelope kept");
         CHECK(a.vel_amp == PATCH_INIT.vel_amp, "format 4: velocity comes in as the default sound has it");
     }
+    {                                           /* format 5 (with velocity, before glide and the arp) -> 6 */
+        struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V5_SIZE]; } v5;
+        patch_t c = PATCH_INIT;
+        c.vel_cut = 99; c.osc[0].pos[1] = 33;
+        memset(&v5, 0, sizeof v5);
+        v5.version = 5;
+        v5.used[6] = 1; memcpy(v5.p[6], &c, PATCH_V5_SIZE);
+        store_save(&v5, sizeof v5);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(6, &a) == 0 && !memcmp(&a, &c, PATCH_V5_SIZE) && bank.version == PATCH_VERSION,
+              "format 5: slot 7's sound and velocity kept");
+        CHECK(a.arp_on == 0 && a.glide == 0, "format 5: the arp comes in off, no glide");
+    }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }

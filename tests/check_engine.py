@@ -233,6 +233,62 @@ c127, c40 = centroid(v127), centroid(v40)
 check("velocity brightness", c40 < 0.8 * c127, f"spectral centroid {c127:.0f} Hz at 127, {c40:.0f} Hz at 40")
 check("velocity off", np.array_equal(voff, v127), "no sensitivity: velocity 40 gives the same samples as 127")
 
+# ---- the arpeggiator
+NOTE = {60: 261.63, 64: 329.63, 67: 392.0, 72: 523.25, 76: 659.26, 79: 783.99}
+STEP = 60 / 120 / 4                              # 1/16 at 120 BPM
+
+
+def arp_notes(name, n=8, step=STEP):
+    x = load(name)
+    out = []
+    for k in range(n):
+        f = peak_hz(*spectrum(x, k * step + 0.012, k * step + 0.055))
+        out.append(min(NOTE, key=lambda m: abs(NOTE[m] - f)) if f > 100 else None)
+    return out
+
+
+for name, want in (("arp_up", [60, 64, 67] * 3), ("arp_down", [67, 64, 60] * 3), ("arp_updn", [60, 64, 67, 64] * 2 + [60]),
+                   ("arp_oct2", [60, 64, 67, 72, 76, 79, 60, 64, 67])):
+    got = arp_notes(name, len(want))
+    check(name.replace("_", " "), got == want, f"{got}")
+
+
+def onsets(x, thr=0.02):
+    e = np.abs(x)
+    on, i = [], 0
+    while i < len(e):
+        if e[i] > thr:
+            on.append(i)
+            i += int(0.03 * FS)                   # (past this note's attack)
+            while i < len(e) and np.max(e[i:i + 64]) > thr * 0.5: i += 64
+        i += 1
+    return np.array(on)
+
+
+ons = onsets(load("arp_up")[: int(1.35 * FS)])
+d = np.diff(ons)
+check("arp timing", len(d) >= 8 and np.all(np.abs(d - STEP * FS) <= 24), f"steps {d.min()}..{d.max()} frames (want {STEP * FS:.1f}, +-a block)")
+gap_rms = rms(load("arp_up"), 0.10, 0.12)           # in the second half of the first step: the 50 % gate is closed
+tie_rms = rms(load("arp_tie"), 0.10, 0.12)
+check("arp gate", gap_rms < 0.1 * tie_rms, f"between notes {gap_rms:.4f} with a 50 % gate, {tie_rms:.4f} tied")
+sw = np.diff(onsets(load("arp_swing")[: int(1.35 * FS)]))
+ratio = np.median(sw[0::2]) / np.median(sw[1::2]) if len(sw) > 3 else 0
+check("arp swing", 2.6 < ratio < 3.4, f"steps alternate {np.median(sw[0::2]):.0f} / {np.median(sw[1::2]):.0f} frames (ratio {ratio:.2f}, want 3)")
+la, nl = rms(load("arp_latch"), 0.8, 1.3), rms(load("arp_nolatch"), 0.8, 1.3)
+check("arp latch", la > 0.02 and nl < 0.001, f"after the keys are let go: {la:.4f} latched, {nl:.5f} not")
+
+# ---- glide
+def pitch_at(name, t):
+    return peak_hz(*spectrum(load(name), t, t + 0.03))
+
+
+ga = [pitch_at("glide_always", t) for t in (0.36, 0.45, 0.8)]
+gl = [pitch_at("glide_legato_apart", t) for t in (0.36, 0.45, 0.8)]
+go = [pitch_at("glide_legato_over", t) for t in (0.36, 0.45, 0.8)]
+check("glide always", ga[0] < 360 and abs(ga[2] - 392) < 4, "G4 from " + " -> ".join(f"{v:.0f}" for v in ga) + " Hz")
+check("glide legato apart", abs(gl[0] - 392) < 8, f"G4 played apart from C4: {gl[0]:.0f} Hz at once (no slide)")
+check("glide legato over", go[0] < 360 and abs(go[2] - 392) < 4, "G4 over C4: " + " -> ".join(f"{v:.0f}" for v in go) + " Hz")
+
 # ---- the mod envelope
 f = cents(inst_freq(load("menv_rate"), 0.05, 2.85))
 

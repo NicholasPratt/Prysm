@@ -32,6 +32,7 @@ static void wav(const char *name, const int16_t *s, uint32_t n)
 static const patch_t *render_p2;
 static uint32_t render_change_ms, render_on_ms;   /* (render_on_ms: the notes start then, not at 0) */
 static uint32_t render_vel = 127;               /* the notes' velocity */
+static int render_arp;                          /* the notes into the arpeggiator (held), not played */
 static void render(const char *name, const patch_t *p, const uint8_t *notes, uint32_t nn,
                    uint32_t off_ms, uint32_t end_ms)
 {
@@ -41,14 +42,18 @@ static void render(const char *name, const patch_t *p, const uint8_t *notes, uin
     engine_init();
     engine_set(p);
     if (!render_on_ms)
-        for (k = 0; k < nn; k++)
-            engine_note_on_vel(notes[k], render_vel);
+        for (k = 0; k < nn; k++) {
+            if (render_arp) arp_key_down(notes[k], render_vel);
+            else engine_note_on_vel(notes[k], render_vel);
+        }
     while (done < total) {
         int32_t blk[2u * FRAMES] = {0};
         uint32_t i;
-        if (done >= off_ms * (FS / 1000u))
-            for (k = 0; k < nn; k++)
-                engine_note_off(notes[k]);
+        if (done >= off_ms * (FS / 1000u) && done < off_ms * (FS / 1000u) + FRAMES)
+            for (k = 0; k < nn; k++) {
+                if (render_arp) arp_key_up(notes[k]);
+                else engine_note_off(notes[k]);
+            }
         if (render_p2 && done == render_change_ms * (FS / 1000u) / FRAMES * FRAMES)
             engine_set(render_p2);
         if (render_on_ms && done == render_on_ms * (FS / 1000u) / FRAMES * FRAMES)
@@ -201,6 +206,48 @@ int main(void)
         q.vel_amp = 0; q.vel_mod = 0;           /* no sensitivity: velocity changes nothing */
         render_vel = 40; render("vel_40_off", &q, A4, 1, 900, 1000);
         render_vel = 127;
+    }
+
+    {                                           /* the arpeggiator: C4 E4 G4 held, 120 BPM, 1/16 (125 ms) */
+        static const uint8_t CEG[] = {60, 64, 67};
+        patch_t q = solo();
+        q.amp_r = 5; q.arp_on = 1; q.arp_bpm = 80; q.arp_div = DIV_16; q.arp_gate = 64;
+        render_arp = 1;
+        q.arp_mode = ARP_UP; render("arp_up", &q, CEG, 3, 1400, 1500);
+        q.arp_mode = ARP_DOWN; render("arp_down", &q, CEG, 3, 1400, 1500);
+        q.arp_mode = ARP_UPDN; render("arp_updn", &q, CEG, 3, 1400, 1500);
+        q.arp_mode = ARP_UP; q.arp_oct = 1; render("arp_oct2", &q, CEG, 3, 1400, 1500);
+        q.arp_oct = 0; q.arp_gate = 127; render("arp_tie", &q, CEG, 3, 1400, 1500);
+        q.arp_gate = 64; q.arp_swing = 127; render("arp_swing", &q, CEG, 3, 1400, 1500);
+        q.arp_swing = 0; q.arp_latch = 1; render("arp_latch", &q, CEG, 3, 300, 1500);   /* keys up at 300 ms */
+        q.arp_latch = 0; render("arp_nolatch", &q, CEG, 3, 300, 1500);
+        render_arp = 0;
+    }
+
+    {                                           /* glide: C4 for 300 ms, then G4 (apart, or overlapping) */
+        uint32_t mode;
+        for (mode = 0; mode < 3u; mode++) {     /* ALWAYS apart; LEGATO apart; LEGATO overlapping */
+            static int16_t s[2u * 44100u];
+            patch_t q = solo();
+            uint32_t done = 0, total = 44032u;
+            q.glide = 70; q.glide_mode = mode ? GLIDE_LEGATO : GLIDE_ALWAYS; q.amp_r = 5;
+            memset(voice, 0, sizeof voice);
+            engine_init(); engine_set(&q);
+            last_note = -1;
+            engine_note_on(60);
+            while (done < total) {
+                int32_t blk[2u * FRAMES] = {0};
+                uint32_t i;
+                if (done == 13312u && mode < 2u) engine_note_off(60);     /* (300 ms) */
+                if (done == 15360u) engine_note_on(67);                  /* (348 ms) */
+                if (done == 17408u && mode == 2u) engine_note_off(60);
+                engine_render(blk, FRAMES);
+                for (i = 0; i < 2u * FRAMES; i++)
+                    s[2u * done + i] = (int16_t)(blk[i] > 32767 ? 32767 : blk[i] < -32767 ? -32767 : blk[i]);
+                done += FRAMES;
+            }
+            wav(mode == 0u ? "glide_always" : mode == 1u ? "glide_legato_apart" : "glide_legato_over", s, total);
+        }
     }
 
     {                                           /* the mod envelope */

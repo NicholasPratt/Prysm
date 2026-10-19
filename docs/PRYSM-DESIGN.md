@@ -102,6 +102,19 @@ The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve 
 Velocity comes from MIDI only (the FM-1's keys are on / off: they play at 127, where velocity changes nothing):
 level by the square of velocity, cutoff down to 36 semitones, both mod amounts. Patch format 5.
 
+### ARP (the ARP button; PLAY: on / off)
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| ARP | on / off | UP, DOWN, UPDN, RAND, ORDER | 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32 | 1 .. 4 octaves |
+| TIME | 40 .. 240 BPM | gate 5 .. 100 % (127: tied) | swing 50 .. 75 % | latch |
+
+The arp runs in the audio ISR (`arp_run`, before the voices): it counts frames block by block and starts / stops its
+notes at the exact 16-frame block (`itrig` / `ioff` per voice), so its timing does not depend on the main loop.
+The held notes come from the main loop (`arp_key_down` / `_up`, the keys and MIDI while it is on) through a
+sequence-counted copy. Patch format 6. Glide (MIX page): each new note slides from the last one's pitch,
+exponentially, ALWAYS or LEGATO (only while another note is held); arp notes too.
+
 ### SCOPE (HOME)
 
 The output before MASTER, left (white) and right (lilac), captured by the ISR only while shown (2048 frames);
@@ -190,11 +203,11 @@ The **SAVE** button opens the PATCH screen:
   a save cut by a power loss loses only that save. `PATCH_VERSION` (patches.c) guards the format; older
   formats convert when read (format 1, before the LFO: the LFO comes in with no amount; format 2, before the
   effects: they come in off; format 3, before the mod envelope: it comes in with no amount; format 4, before velocity: it comes in as the
-  default sound has it).
+  default sound has it; format 5, before glide and the arp: off).
 
 ## Not in the first version
 
-Glide, a second LFO, patch names.
+A sequencer, MIDI clock sync, a second LFO, patch names.
 
 ## Budget
 

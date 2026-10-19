@@ -8,7 +8,7 @@
  *   MASTER     the volume (platform.c)
  *   USB-MIDI   notes in play the engine, with their velocity (the keys: full velocity)
  *   pages      ALGORITHM / EDIT ENV LFO GLO FX: the page; SELECT: the row; KNOB1..4: its parameters (ui.c)
- *   HOME       the oscilloscope; SAVE: the patches
+ *   HOME       the oscilloscope; SAVE: the patches; PLAY: the arpeggiator on / off
  *
  * Rules of the road (the chip has no FPU and no libgcc): integers only, no float, no 64-bit division.
  * tests/host.c runs this file on a computer: the screen as a PNG, the sound as a WAV.
@@ -53,8 +53,16 @@ static void app_audio(int32_t *out, uint32_t n)
 #endif
 }
 
-static void play(uint32_t note, uint32_t vel) { engine_note_on_vel(note, vel); }
-static void stop(uint32_t note) { engine_note_off(note); }
+static void play(uint32_t note, uint32_t vel)   /* a key or MIDI: to the arpeggiator while it is on */
+{
+    if (eg.arp_on) arp_key_down(note, vel);
+    else engine_note_on_vel(note, vel);
+}
+static void stop(uint32_t note)
+{
+    if (eg.arp_on) arp_key_up(note);
+    else engine_note_off(note);
+}
 
 #define KEY0 53u                                /* key 0 = F3 */
 #include "patches.c"                            /* the 8 patch slots */
@@ -141,6 +149,7 @@ static void app_main(void)
             fm1_led_key(KEY_LED(k), lit >> k & 1u);
         fm1_led_key(BTN_OCT_DOWN, set.oct < 0);
         fm1_led_key(BTN_OCT_UP, set.oct > 0);
+        fm1_led_key(BTN_PLAY, eg.arp_on);       /* the arpeggiator is on */
 
         ui_draw();
 

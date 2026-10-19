@@ -8,18 +8,21 @@
  *   2  + the LFO (lfo_wave .. lfo_amt: 63 bytes)
  *   3  + the effects (cho_rate .. rev_shimmer: 81 bytes)
  *   4  + the mod envelope (menv_a .. menv_amt: 88 bytes)
- *   5  + velocity (vel_amp .. vel_mod) */
+ *   5  + velocity (vel_amp .. vel_mod: 91 bytes)
+ *   6  + glide and the arpeggiator (glide .. arp_swing) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 5u
+#define PATCH_VERSION 6u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
 #define PATCH_V4_SIZE 88u                       /* format 4's: everything before vel_amp */
-#define PATCH_OLD_MAX PATCH_V4_SIZE
+#define PATCH_V5_SIZE 91u                       /* format 5's: everything before glide */
+#define PATCH_OLD_MAX PATCH_V5_SIZE
 _Static_assert(__builtin_offsetof(patch_t, lfo_wave) == PATCH_V1_SIZE, "format 1 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, cho_rate) == PATCH_V2_SIZE, "format 2 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, menv_a) == PATCH_V3_SIZE, "format 3 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, vel_amp) == PATCH_V4_SIZE, "format 4 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, glide) == PATCH_V5_SIZE, "format 5 is a prefix of patch_t");
 
 static struct {
     uint32_t version;
@@ -49,7 +52,8 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     if (store_load(&bank, sizeof bank) == 0 && bank.version == PATCH_VERSION)
         return;
     memset(&bank, 0, sizeof bank);
-    if (patches_from_old(4u, PATCH_V4_SIZE) != 0 &&   /* (kept in RAM; written in the new format by the next save) */
+    if (patches_from_old(5u, PATCH_V5_SIZE) != 0 &&   /* (kept in RAM; written in the new format by the next save) */
+        patches_from_old(4u, PATCH_V4_SIZE) != 0 &&
         patches_from_old(3u, PATCH_V3_SIZE) != 0 &&
         patches_from_old(2u, PATCH_V2_SIZE) != 0)
         patches_from_old(1u, PATCH_V1_SIZE);

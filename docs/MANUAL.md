@@ -8,7 +8,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
 - [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
-  [MIX](#mix), [FX](#fx)
+  [MIX](#mix), [ARP](#arp), [FX](#fx)
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
@@ -78,6 +78,8 @@ Every page works the same way:
 | **ENV** | AMP (press again: FILTER) |
 | **LFO** | LFO |
 | **GLO** | MIX |
+| **ARP** | ARP |
+| **PLAY** | the arpeggiator on / off (from any page; its LED shows it) |
 | **FX** | FX |
 | **HOME** | the oscilloscope |
 | **SAVE** | the PATCH screen |
@@ -210,6 +212,32 @@ where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | OSC | osc 1 level | osc 2 level | osc 2 semitones (+-24) | osc 2 fine (+-50 cents) |
+| GLIDE | glide time (0 = off) | mode: ALWAYS / LEGATO | | |
+
+**Glide** (portamento) slides each new note from the pitch of the last one. **ALWAYS** slides every note;
+**LEGATO** only when another note is still held (play overlapping to slide, apart to jump). Arpeggiated notes glide
+too: with a tied gate and LEGATO, an acid line.
+
+### ARP
+
+The arpeggiator plays the notes you hold, one at a time, in time. **PLAY** turns it on or off from any page (its LED
+lights). While it is on, the keys and MIDI notes go to it instead of straight to the voices.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| ARP | ON / OFF | mode: UP, DOWN, UPDN, RAND, ORDER | step: 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32 | octaves: 1 .. 4 |
+| TIME | tempo: 40 .. 240 BPM | gate: 5 .. 100 % (TIE) | swing: 50 .. 75 % | LATCH ON / OFF |
+
+- **UP / DOWN** by pitch, **UPDN** up and back (the top and bottom once), **RAND** any of them, **ORDER** as you
+  pressed them. **Octaves** repeat the pattern higher.
+- **Gate** is how long each note sounds in its step; at **TIE** they join with no gap (with glide LEGATO: slides).
+- **Swing** lengthens every other step and shortens the next: 50 % is straight, 67 % a triplet feel, 75 % a dotted
+  one.
+- **LATCH**: the notes keep playing after you let go; the next chord (after all the keys are up) replaces them.
+- Its notes start and stop to within a third of a millisecond, whatever the screen is doing.
+- The picture shows the next 16 steps, as long and as far apart as they will be, the one playing in white.
+
+The arpeggiator keeps its own tempo (MIDI clock sync is not in yet).
 
 ### FX
 

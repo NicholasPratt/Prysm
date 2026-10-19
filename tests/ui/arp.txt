@@ -1,0 +1,17 @@
+# the ARP page: off, on (PLAY) with C E G held, UPDN over 2 octaves with swing; the MIX page's GLIDE row
+100 btn 10
+200 shot
+300 btn 12
+350 keys 0x4880
+600 shot
+700 enc 3 4
+720 enc 5 2
+800 shot
+900 enc 0 1
+920 enc 4 90
+1100 shot
+1200 btn 7
+1250 enc 0 1
+1260 enc 2 60
+1400 shot
+1500 end

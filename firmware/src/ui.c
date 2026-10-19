@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, FX.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, ARP, FX.
  *
- *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX, FX = FX)
+ *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX, ARP = ARP, FX = FX)
+ *   PLAY             the arpeggiator on / off (anywhere; its LED shows it)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
  *   HOME             the oscilloscope (KNOB1: how many cycles); HOME again, ALGORITHM or a page button: back
@@ -31,7 +32,7 @@
 
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
-       K_DMS, K_PMS, K_SHIFT };
+       K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM };
 typedef struct { const char *label; uint8_t off, max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, or 0 = none */
@@ -96,14 +97,21 @@ static const row_t FX_ROWS[] = {                /* lit: LIT_C = the chorus, LIT_
 static const row_t MIX_ROWS[] = {
     {"OSC", {{"OSC1", PO(lvl1), 127, K_NUM}, {"OSC2", PO(lvl2), 127, K_NUM},
              {"SEMI", PO(semi2), 48, K_SEMI}, {"FINE", PO(fine2), 127, K_CENT}}, LIT_ALL},
+    {"GLIDE", {{"TIME", PO(glide), 127, K_NUM}, {"MODE", PO(glide_mode), GLIDE_N - 1u, K_GLIDEM}, NOPRM, NOPRM}, LIT_ALL},
+};
+static const row_t ARP_ROWS[] = {
+    {"ARP", {{"ARP", PO(arp_on), 1, K_ONOFF}, {"MODE", PO(arp_mode), ARP_N - 1u, K_ARPM},
+             {"DIV", PO(arp_div), DIV_N - 1u, K_DIV}, {"OCT", PO(arp_oct), 3, K_OCT}}, LIT_CURVE},
+    {"TIME", {{"BPM", PO(arp_bpm), 200, K_BPM}, {"GATE", PO(arp_gate), 127, K_GATE},
+              {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_FX, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_ARP, PG_FX, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
     {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
-    {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
+    {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
 };
 
 static patch_t edit;                            /* the sound being edited (engine_set() after each change) */
@@ -160,6 +168,13 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_DMS: put(num(s, (441u + (uint32_t)*v * (DLY_N - 1100u) / 127u) * 1000u / 44100u), "ms"); break;
     case K_PMS: put(num(s, (1u + (uint32_t)*v * (PRE_N - 2u) / 127u) * 1000u / 44100u), "ms"); break;
     case K_SHIFT: put(snum(s, (int32_t)*v - 12), "st"); break;
+    case K_ARPM: put(s, ARP_NAME[*v < ARP_N ? *v : 0u]); break;
+    case K_DIV: put(s, DIV_NAME[*v < DIV_N ? *v : DIV_16]); break;
+    case K_OCT: num(s, *v + 1u); break;
+    case K_BPM: num(s, *v + 40u); break;
+    case K_GATE: if (*v >= 127u) put(s, "TIE"); else put(num(s, 5u + *v * 95u / 127u), "%"); break;
+    case K_SWING: put(num(s, 50u + *v * 25u / 127u), "%"); break;   /* the even steps' share of a pair */
+    case K_GLIDEM: put(s, GLIDE_NAME[*v < GLIDE_N ? *v : 0u]); break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
         uint32_t h = PR_LFO_HZ100[*v & 127u];
         char *e = num(s, h / 100u);
@@ -433,6 +448,43 @@ static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a b
     }
 }
 
+/* the arpeggiator: the next 16 steps from the notes held now (as the ISR will play them), each where its swung step
+ * falls and as long as its gate, the one playing lit */
+static uint32_t arp_drawn = 0xFFFFFFFFu;        /* arp.steps when last drawn */
+static void gfx_arp(uint32_t lit)
+{
+    uint8_t nt[ARP_MAX], vl[ARP_MAX], pat[16];
+    uint32_t n = held.n, i, idx = arp.idx, base, rng = 0xC0FFEEu, lo = 127, hi = 0, vel, x = 0, tot = 0;
+    uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
+    arp_drawn = arp.steps;
+    if (!edit.arp_on) {
+        cv_text(48, 18, &FONT_S, "OFF: PLAY TURNS IT ON", C_FAINT);
+        return;
+    }
+    if (n > ARP_MAX) n = ARP_MAX;
+    for (i = 0; i < n; i++) { nt[i] = held.note[i]; vl[i] = held.vel[i]; }
+    if (!n) {
+        cv_text(64, 18, &FONT_S, "HOLD SOME KEYS", C_FAINT);
+        return;
+    }
+    base = idx ? (idx - 1u) / 16u * 16u : 0u;   /* the 16 the playing step is in */
+    for (i = 0; i < 16u; i++) {
+        pat[i] = (uint8_t)arp_pick(nt, vl, n, base + i, &vel, &rng);
+        if (pat[i] < lo) lo = pat[i];
+        if (pat[i] > hi) hi = pat[i];
+    }
+    for (i = 0; i < 16u; i++)                   /* (the swung lengths, scaled to the width) */
+        tot += arp_step_len(i & 1u) >> 8;
+    for (i = 0; i < 16u; i++) {
+        uint32_t w = (arp_step_len(i & 1u) >> 8) * 236u / tot, gw = edit.arp_gate >= 127u ? w : w * (5u + edit.arp_gate * 95u / 127u) / 100u;
+        int32_t y = hi > lo ? 54 - (int32_t)((pat[i] - lo) * 48u / (hi - lo)) : 30;
+        uint32_t playing = idx && i == (idx - 1u) - base;
+        cv_rect(2 + (int32_t)x, y, gw > 1u ? (int32_t)gw - 1 : 1, 5, playing ? C_WHITE : c);
+        if (playing) cv_rect(2 + (int32_t)x, G_H - 3, (int32_t)w - 1, 2, C_ACC);
+        x += w;
+    }
+}
+
 static void gfx_mix(void)
 {
     char s[24], *e;
@@ -457,6 +509,7 @@ static void draw_gfx(void)
     case PG_AMP: cv_adsr(8, 4, 224, G_H - 10, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
     case PG_LFO: gfx_lfo(lit); break;
     case PG_FX: gfx_fx(lit); break;
+    case PG_ARP: gfx_arp(lit); break;
     default: gfx_mix();
     }
     cv_blit(0, G_Y);
@@ -804,6 +857,11 @@ static int ui_input(uint32_t buttons)
     const row_t *r;
     int32_t d;
     uint32_t i, changed = 0;
+    if (buttons & (1u << BTN_PLAY)) {           /* PLAY: the arpeggiator on / off, from anywhere */
+        edit.arp_on = !edit.arp_on;
+        changed = 1;
+        dirty |= D_HDR | D_GFX | D_ROWS;
+    }
     if (page == PG_SCOPE) {                     /* the SCOPE: KNOB1 the cycles; HOME, ALGORITHM, SAVE or a page leave */
         if ((d = fm1_enc_take(ENC_KNOB1)) != 0) {
             int32_t c = (int32_t)sc_cycles + d;
@@ -813,26 +871,27 @@ static int ui_input(uint32_t buttons)
         for (i = 1; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
         (void)fm1_enc_take(ENC_SELECT);
         (void)fm1_enc_take(ENC_PRESETS);
-        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return 0; }
-        if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return 0; }
-        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO)))
-            return 0;                           /* (else a page button: on to that page, below) */
+        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
+        if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return (int)changed; }
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP)))
+            return (int)changed;                /* (else a page button: on to that page, below) */
     } else if (buttons & (1u << BTN_HOME) && page != PG_PATCH) {
         ui_page(PG_SCOPE);
-        return 0;
+        return (int)changed;
     }
     if (page == PG_PATCH) {                     /* the PATCH screen: HOME, a page button or ALGORITHM leave it */
-        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(pa_back); return 0; }
-        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO)))
-            return pa_input(buttons);           /* (else a page button: on to that page, below) */
+        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(pa_back); return (int)changed; }
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP)))
+            return pa_input(buttons) | (int)changed;   /* (else a page button: on to that page, below) */
     } else if (buttons & (1u << BTN_SAVE)) {
         ui_page(PG_PATCH);
-        return 0;
+        return (int)changed;
     }
     if (buttons & (1u << BTN_EDIT)) ui_page(page == PG_OSC1 ? PG_OSC2 : PG_OSC1);
     if (buttons & (1u << BTN_FX)) ui_page(PG_FX);
     if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
     if (buttons & (1u << BTN_LFO)) ui_page(PG_LFO);
+    if (buttons & (1u << BTN_ARP)) ui_page(PG_ARP);
     if (buttons & (1u << BTN_GLO)) ui_page(PG_MIX);
     if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0)
         ui_page((uint32_t)(((int32_t)page + d % (int32_t)PG_N + (int32_t)PG_N) % (int32_t)PG_N));
@@ -849,7 +908,8 @@ static int ui_input(uint32_t buttons)
         int32_t x;
         if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE)
             continue;
-        if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF) {   /* one step per two detents: no flicker */
+        if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM) {
+            /* one step per two detents: no flicker */
             slow[i] += d;
             if (slow[i] > -2 && slow[i] < 2) continue;
             d = slow[i] / 2;
@@ -898,6 +958,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
         dirty = 0;
         return;
     }
+    if (page == PG_ARP && arp_drawn != arp.steps)
+        dirty |= D_GFX;                         /* (the arp's picture follows the playing step) */
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;
