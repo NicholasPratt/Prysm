@@ -162,8 +162,8 @@ off while its mix is 0 (the dry sound passes untouched, at no cost). The **FX** 
 - The graphic: the chain as three boxes, a mix bar under each; the chorus's two swept lines, the delay's repeats
   (spaced by the time, fading by the feedback, alternating for ping-pong, stepping with the shift), the reverb's
   pre-delay and tail.
-- Memory: ~230 KB of lines in the pool (the pool is then 315 of 336 KB). CPU: every effect on roughly doubles the
-  render on a computer (16 -> 35 us); the header shows it on the FM-1.
+- Memory: ~230 KB of lines in the pool (the pool is then 315 of 336 KB). CPU, measured on the FM-1 (0.2): 4 notes
+  held with every effect on peaks at **44 %** of the audio budget.
 
 ## Patches
 
