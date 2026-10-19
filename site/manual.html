@@ -14,7 +14,7 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.2</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.3</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators. After them come a resonant low-pass filter, an amp envelope, an
 LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
@@ -23,8 +23,9 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 <li><a href="#playing">Playing</a></li>
 <li><a href="#finding-your-way-around">Finding your way around</a></li>
 <li><a href="#the-pages">The pages</a>: <a href="#osc-1--osc-2">OSC 1 / OSC 2</a>, <a href="#filter">FILTER</a>, <a href="#amp">AMP</a>, <a href="#lfo">LFO</a>,
-  <a href="#mix">MIX</a>, <a href="#fx">FX</a></li>
+  <a href="#mix">MIX</a>, <a href="#arp">ARP</a>, <a href="#seq">SEQ</a>, <a href="#fx">FX</a>, <a href="#setup">SETUP</a></li>
 <li><a href="#patches">Patches</a></li>
+<li><a href="#the-oscilloscope">The oscilloscope</a></li>
 <li><a href="#usb-audio-and-midi">USB: audio and MIDI</a></li>
 <li><a href="#if-something-goes-wrong">If something goes wrong</a></li>
 <li><a href="#sound-ideas">Sound ideas</a></li>
@@ -35,7 +36,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.2.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.3.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -69,7 +70,7 @@ community firmware; Prysm answers its updater like the others.</p>
 </tr>
 <tr>
 <td><strong>USB-MIDI in</strong></td>
-<td>notes on any channel play Prysm</td>
+<td>notes play Prysm with their velocity (see AMP's VEL row), on any channel or the one set on SETUP</td>
 </tr>
 </tbody>
 </table>
@@ -97,6 +98,10 @@ community firmware; Prysm answers its updater like the others.</p>
 <td>the next / previous page</td>
 </tr>
 <tr>
+<td><strong>PRESETS</strong></td>
+<td>the filter's cutoff, from any page (the header shows the value for a moment)</td>
+</tr>
+<tr>
 <td><strong>SELECT</strong></td>
 <td>the row</td>
 </tr>
@@ -118,11 +123,31 @@ community firmware; Prysm answers its updater like the others.</p>
 </tr>
 <tr>
 <td><strong>GLO</strong></td>
-<td>MIX</td>
+<td>MIX (press again: SETUP)</td>
+</tr>
+<tr>
+<td><strong>ARP</strong></td>
+<td>ARP (on the ARP page: the arpeggiator on / off; its LED shows it)</td>
+</tr>
+<tr>
+<td><strong>SEQ</strong></td>
+<td>SEQ</td>
+</tr>
+<tr>
+<td><strong>PLAY</strong></td>
+<td>the sequencer: run / stop (from any page; its LED shows it)</td>
+</tr>
+<tr>
+<td><strong>REC</strong></td>
+<td>step entry on the SEQ page (its LED shows it)</td>
 </tr>
 <tr>
 <td><strong>FX</strong></td>
 <td>FX</td>
+</tr>
+<tr>
+<td><strong>HOME</strong></td>
+<td>the oscilloscope</td>
 </tr>
 <tr>
 <td><strong>SAVE</strong></td>
@@ -303,9 +328,20 @@ note, so every key keeps the same brightness. A negative envelope amount closes 
 <td>sustain</td>
 <td>release</td>
 </tr>
+<tr>
+<td>VEL</td>
+<td>velocity to level</td>
+<td>velocity to cutoff</td>
+<td>velocity to modulation</td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <p>Times go from 1 ms to 10 s.</p>
+<p><strong>Velocity</strong> comes from MIDI: a keyboard or a DAW playing Prysm over USB. The FM-1's own keys have no velocity (they
+are on / off), so they always play at full velocity and these settings do not change them. Each sensitivity says how
+much a softer note is quieter (by the square of its velocity, as it sounds natural), darker (up to 36 semitones of
+cutoff) or less modulated (less FM brightness: the classic expressive FM touch). At 0, velocity changes nothing.</p>
 <h3 id="lfo">LFO</h3>
 <p>One LFO per voice (or one shared, free-running), and a mod envelope that can loop.</p>
 <table>
@@ -444,8 +480,64 @@ where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the 
 <td>osc 2 semitones (+-24)</td>
 <td>osc 2 fine (+-50 cents)</td>
 </tr>
+<tr>
+<td>GLIDE</td>
+<td>glide time (0 = off)</td>
+<td>mode: ALWAYS / LEGATO</td>
+<td></td>
+<td></td>
+</tr>
 </tbody>
 </table>
+<p><strong>Glide</strong> (portamento) slides each new note from the pitch of the last one. <strong>ALWAYS</strong> slides every note;
+<strong>LEGATO</strong> only when another note is still held (play overlapping to slide, apart to jump). Arpeggiated notes glide
+too: with a tied gate and LEGATO, an acid line.</p>
+<h3 id="arp">ARP</h3>
+<p>The arpeggiator plays the notes you hold, one at a time, in time. <strong>ARP</strong> (pressed again on the ARP page) or the ARP
+cell turns it on or off (its LED lights). While it is on, the keys and MIDI notes go to it instead of straight to
+the voices.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ARP</td>
+<td>ON / OFF</td>
+<td>mode: UP, DOWN, UPDN, RAND, ORDER</td>
+<td>step: 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32</td>
+<td>octaves: 1 .. 4</td>
+</tr>
+<tr>
+<td>TIME</td>
+<td>tempo: 40 .. 240 BPM</td>
+<td>gate: 5 .. 100 % (TIE)</td>
+<td>swing: 50 .. 75 %</td>
+<td>LATCH ON / OFF</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>UP / DOWN</strong> by pitch, <strong>UPDN</strong> up and back (the top and bottom once), <strong>RAND</strong> any of them, <strong>ORDER</strong> as you
+  pressed them. <strong>Octaves</strong> repeat the pattern higher.</li>
+<li><strong>Gate</strong> is how long each note sounds in its step; at <strong>TIE</strong> they join with no gap (with glide LEGATO: slides).</li>
+<li><strong>Swing</strong> lengthens every other step and shortens the next: 50 % is straight, 67 % a triplet feel, 75 % a dotted
+  one.</li>
+<li><strong>LATCH</strong>: the notes keep playing after you let go; the next chord (after all the keys are up) replaces them.</li>
+<li>Its notes start and stop to within a third of a millisecond, whatever the screen is doing.</li>
+<li>The picture shows the next 16 steps, as long and as far apart as they will be, the one playing in white.</li>
+</ul>
+<p><strong>On the MIDI clock</strong> (SETUP: CLOCK = MIDI) the arpeggiator follows a DAW or another instrument instead of its own
+tempo: 24 clock ticks a beat, a step every 24, 12, 8, 6, 4 or 3 ticks for 1/4 .. 1/32. <strong>START</strong> plays the pattern
+from its first note, <strong>STOP</strong> stops it, <strong>CONTINUE</strong> goes on. Each step lands on its tick to within a third of a
+millisecond, one audio buffer (5.8 ms) later. The BPM cell then shows the clock's tempo (<strong>EXT</strong> while none comes);
+swing and gate still apply. With CLOCK = MIDI and no clock running, the arpeggiator waits.</p>
 <h3 id="fx">FX</h3>
 <p>Stereo effects after the voices: <strong>chorus -&gt; delay -&gt; reverb</strong>. Each one is off while its <strong>MIX</strong> is 0. The picture
 draws the chain, with a mix bar under each effect.</p>
@@ -510,6 +602,79 @@ draws the chain, with a mix bar under each effect.</p>
 <li><strong>Shimmer</strong>: the tail climbs in octaves as it fades. It never runs away, at any setting.</li>
 </ul>
 <p>With every effect on, Prysm uses roughly twice the CPU: watch the header.</p>
+<h3 id="seq">SEQ</h3>
+<p>A step sequencer of up to <strong>64 steps</strong>, one note each, 303-style: notes, rests, <strong>accents</strong> and <strong>slides</strong>. It plays
+alongside the keys (and the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock.
+Each patch has its own pattern.</p>
+<p>The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a lilac one a note, a white one an
+accent; a little bar joins a sliding step to the next; past the length, dots. The cursor is ringed (white while
+recording); a mark under a square shows the step playing.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>STEP</td>
+<td>the step (the cursor)</td>
+<td>its note</td>
+<td>its trigger: REST, NOTE, ACCENT</td>
+<td>SLIDE ON / OFF</td>
+</tr>
+<tr>
+<td>PATTERN</td>
+<td>length: 1 .. 64</td>
+<td>step: 1/4 .. 1/32</td>
+<td>gate</td>
+<td>tempo (the arp's)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Entering notes</strong>: press <strong>REC</strong> (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or start at
+the first) and <strong>play a key</strong>: its note goes into the step (a rest becomes a note) and the cursor moves to the next,
+so you can type a line in. MIDI notes enter the same way. Press REC again to play the keys normally.</p>
+<ul>
+<li><strong>PLAY</strong> starts the sequence from its first step, and stops it.</li>
+<li><strong>ACCENT</strong> plays the step at full velocity, the others a little softer: how much louder, brighter and more
+  modulated an accent is comes from the AMP page's <strong>VEL</strong> row.</li>
+<li><strong>SLIDE</strong> holds the step's note into the next one and glides to its pitch in about 30 ms, <strong>without a new attack</strong>
+  (the 303 slide). A slide into a rest just ends.</li>
+<li><strong>On the MIDI clock</strong> (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
+  PLAY must be on.</li>
+</ul>
+<h3 id="setup">SETUP</h3>
+<p>Settings for your setup rather than a sound: they are kept with the octave, not in patches. <strong>GLO</strong> twice.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MIDI</td>
+<td>IN: OMNI or 1 .. 16</td>
+<td>OUT: 1 .. 16</td>
+<td>CLOCK: INT / MIDI</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>IN</strong>: the channel Prysm plays from (OMNI: all of them).</li>
+<li><strong>OUT</strong>: the channel the FM-1's keys send their notes on.</li>
+<li><strong>CLOCK</strong>: the arpeggiator's tempo: its own (<strong>INT</strong>, the BPM on the ARP page) or the <strong>MIDI</strong> clock.</li>
+</ul>
 <hr />
 <h2 id="patches">Patches</h2>
 <p>Press <strong>SAVE</strong> for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
@@ -551,12 +716,24 @@ osc 1 wave (a dash: empty). The selected slot has a double edge; a dot marks the
 <li>Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them).</li>
 </ul>
 <hr />
+<h2 id="the-oscilloscope">The oscilloscope</h2>
+<p>Press <strong>HOME</strong> for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
+down): <strong>left in white, right in lilac</strong> (the chorus and a ping-pong delay show as the two apart).</p>
+<ul>
+<li>It locks onto the <strong>newest note</strong>: the trace shows that many of its cycles, starting on a rising zero, so the
+  wave stands still whatever you play. <strong>KNOB1</strong> sets how many cycles (1 .. 8; it starts at 2).</li>
+<li>It <strong>zooms by itself</strong> (x1 .. x8, shown under the trace), so a single quiet note fills the screen too.</li>
+<li><strong>HOME</strong> again, ALGORITHM, SAVE or a page button go back.</li>
+</ul>
+<p>The scope costs no sound processing while it is not shown.</p>
+<hr />
 <h2 id="usb-audio-and-midi">USB: audio and MIDI</h2>
 <p>Connected to a computer, the FM-1 shows up as <strong>Prysm FM-1</strong>:</p>
 <ul>
 <li>a <strong>2-in audio input</strong> (16-bit stereo, 44.1 or 48 kHz): record Prysm straight into any DAW, no cable needed. It
   carries exactly what the speaker plays, effects included.</li>
-<li>a <strong>MIDI port</strong>: notes in play Prysm; the keys' notes come out.</li>
+<li>a <strong>MIDI port</strong>: notes in play Prysm (with their velocity, on the SETUP page's IN channel); the keys' notes come
+  out on its OUT channel; the MIDI clock can drive the arpeggiator.</li>
 </ul>
 <p>Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.</p>
 <hr />
