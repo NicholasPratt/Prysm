@@ -39,29 +39,10 @@ static void app_audio(int32_t *out, uint32_t n)
 static void play(uint32_t note) { engine_note_on(note); }
 static void stop(uint32_t note) { engine_note_off(note); }
 
-/* ---- the screen: the name, the last note big, the keyboard with what sounds, the octave */
+/* ---- the screen: the test readouts, the octave and the CPU (the pages come later) */
 #define C_ACC RGB(180, 140, 255)                /* lilac, as the logo */
-#define C_KEY RGB(210, 210, 210)
 #define C_OFF RGB(90, 90, 90)
 #define KEY0 53u                                /* key 0 = F3 */
-static int black(uint32_t note) { return (0x54Au >> (note % 12u)) & 1u; }
-
-static void draw_keys(uint32_t lit)             /* bit k: key k sounds */
-{
-    uint32_t k, w = 0;
-    cv_begin(240, 56, C_BLACK);
-    for (k = 0; k < 27u; k++)                   /* 16 white keys of 14 px from x = 8 */
-        if (!black(KEY0 + k)) {
-            cv_rect(8 + (int32_t)w * 14, 0, 13, 56, lit >> k & 1u ? C_ACC : C_KEY);
-            w++;
-        }
-    for (k = 0, w = 0; k < 27u; k++)            /* the black ones on the line between two white */
-        if (black(KEY0 + k))
-            cv_rect(8 + (int32_t)w * 14 - 5, 0, 9, 34, lit >> k & 1u ? C_ACC : C_BLACK);
-        else
-            w++;
-    cv_blit(0, 140);
-}
 
 /* ---- TEMPORARY test controls, until the pages: osc 1's carrier and mod 1 on the knobs, so the engine can be heard.
  *   SELECT  carrier bank     KNOB1  carrier position    KNOB2  mod 1 amount
@@ -147,7 +128,7 @@ static void draw_status(int32_t oct)
 static void app_main(void)
 {
     struct { int8_t oct; } set = {0};           /* what survives a power-off (add yours, up to 256 bytes) */
-    uint32_t prev = 0, k, t_change = 0, dirty = 0, lit_drawn = ~0u, t_status = 0;
+    uint32_t prev = 0, k, t_change = 0, dirty = 0, t_status = 0;
     int32_t oct_drawn = 99;
     uint8_t held[27] = {0};                     /* the note each key plays */
     patch_t edit;
@@ -157,8 +138,6 @@ static void app_main(void)
     edit = PATCH_INIT;
 
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    draw_text_box(0, 18, 240, &FONT_L, APP_NAME, C_ACC, 1);
-    draw_text_box(0, 52, 240, &FONT_S, "engine test  v" APP_VER, C_OFF, 1);
     draw_test(&edit);
 
     for (;;) {
@@ -204,7 +183,6 @@ static void app_main(void)
         fm1_led_key(BTN_OCT_DOWN, set.oct < 0);
         fm1_led_key(BTN_OCT_UP, set.oct > 0);
 
-        if (lit != lit_drawn) { lit_drawn = lit; draw_keys(lit); }   /* redraw only what changed */
         if (set.oct != oct_drawn || fm1_ms - t_status > 500u) {      /* the octave, the CPU twice a second */
             oct_drawn = set.oct;
             t_status = fm1_ms;
