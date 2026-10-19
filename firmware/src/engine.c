@@ -224,6 +224,7 @@ static struct {
 _Static_assert(BLK == 1u << BLK_SHIFT, "BLK is a power of two");
 static patch_t patch;
 static uint32_t ages;
+static volatile uint8_t engine_up;              /* engine_init has run: the ISR starts before it (platform.c) */
 static uint32_t lfo_ph, lfo_rng = 0x2545F491u;  /* the free-running LFO (retrig off) */
 static int32_t lfo_sh;
 static int32_t lfo_rate16;                      /* its rate moved by the newest note's mod envelope (last render) */
@@ -756,6 +757,8 @@ static void engine_render(int32_t *out, uint32_t n)
     uint32_t v, o, k, b, i, nb = n / BLK;
     uint32_t g_ph[MAXBLK];                      /* the free-running LFO, block by block, shared by the voices */
     int32_t g_sh[MAXBLK];
+    if (!engine_up)                             /* (zeroed voices: itrig 0 would start note 0 on every one, held) */
+        return;
     for (b = 0; b < nb && b < MAXBLK; b++) {
         uint32_t nx = lfo_ph + rate_moved(eg.lfo_inc, lfo_rate16);
         if (nx < lfo_ph) lfo_sh = lfo_random(&lfo_rng);   /* a cycle ends: S&H takes a new value */
@@ -1110,6 +1113,7 @@ static void engine_init(void)
         for (k = 0; k < NOP; k++)
             op_cur[o][k] = 0;
     engine_set(&PATCH_INIT);
+    engine_up = 1;
 }
 
 /* ---- notes (main loop) */

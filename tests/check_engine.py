@@ -55,6 +55,9 @@ def rms(x, t0, t1):
 
 print("engine checks")
 
+boot = float(np.abs(load2("boot")).max())
+check("silent at power-on", boot == 0, f"peak {boot:.4f} with no note (rendered before engine_init too)")
+
 f, s = spectrum(load("sine"))
 hz = peak_hz(f, s)
 worst = max(level_db(f, s, 440 * h) for h in range(2, 8))

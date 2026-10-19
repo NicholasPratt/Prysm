@@ -104,6 +104,22 @@ int main(void)
     uint32_t bank, pos;
     (void)system("mkdir -p build/engine");
 
+    {                                           /* power-on: the ISR renders before app_main's engine_init */
+        static int16_t s[2u * 44100u / 2u];
+        uint32_t done = 0, total = 44100u / 2u / FRAMES * FRAMES, i;
+        while (done < total) {
+            int32_t blk[2u * FRAMES] = {0};
+            if (done == 4u * FRAMES)
+                engine_init();                  /* (no note played: it must stay silent) */
+            engine_render(blk, FRAMES);
+            for (i = 0; i < 2u * FRAMES; i++)
+                s[2u * done + i] = (int16_t)(blk[i] > 32767 ? 32767 : blk[i] < -32767 ? -32767 : blk[i]);
+            done += FRAMES;
+        }
+        wav("boot", s, total);
+        printf("%-14s %u frames\n", "boot", total);
+    }
+
     p = solo();                                 /* a pure sine: 440 Hz */
     render("sine", &p, A4, 1, 900, 1000);
 
