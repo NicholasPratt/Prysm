@@ -55,6 +55,7 @@ The feature unit's mute and volume are answered and stored, not yet applied to t
 | | |
 | --- | --- |
 | USB product (audio device, MIDI port) | `Prysm FM-1` (`firmware/src/usb.c`, `STR2`). It keeps "FM-1": the firmware hub and the web installers only probe ports named like an FM-1 |
+| USB manufacturer | `Nicholas Pratt` (`firmware/src/usb.c`, `STR1`; the update loader keeps Felucca's) |
 | Update loader / rescue | `Felucca Update`, unchanged: the name the installers know |
 | Screen | `PRYSM` (`APP_NAME` in `firmware/src/prysm.c`) |
 | Package identity | `FM-1_980` for development builds, `FM-1_98Y` for `./build.sh --release X.Y` (`tools/build.py`). The hub lists `FM-1_981` for Pocket GammaWave: skip 0.1 for the first release |
