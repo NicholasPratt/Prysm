@@ -1,0 +1,590 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Prysm manual</title><style>
+:root { --bg: #fbfaff; --fg: #17141f; --dim: #6c6878; --acc: #7d5bd6; --line: #e2dcf2; --code: #f1edfa; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0b0a10; --fg: #ece9f5; --dim: #8d88a0; --acc: #b48cff;
+  --line: #2a2538; --code: #17141f; color-scheme: dark; } }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { color: var(--acc); letter-spacing: .04em; } h2 { margin-top: 8px; }
+a { color: var(--acc); } hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+table { border-collapse: collapse; margin: 10px 0 18px; display: block; overflow-x: auto; }
+th, td { border: 1px solid var(--line); padding: 5px 9px; text-align: left; vertical-align: top; }
+th { background: var(--code); }
+thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings) */
+code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
+.top { font-size: 14px; color: var(--dim); }
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.2</p><h1 id="prysm-manual">Prysm manual</h1>
+<p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
+little modulation chain of three wavetable operators. After them come a resonant low-pass filter, an amp envelope, an
+LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
+<ul>
+<li><a href="#installing">Installing</a></li>
+<li><a href="#playing">Playing</a></li>
+<li><a href="#finding-your-way-around">Finding your way around</a></li>
+<li><a href="#the-pages">The pages</a>: <a href="#osc-1--osc-2">OSC 1 / OSC 2</a>, <a href="#filter">FILTER</a>, <a href="#amp">AMP</a>, <a href="#lfo">LFO</a>,
+  <a href="#mix">MIX</a>, <a href="#fx">FX</a></li>
+<li><a href="#patches">Patches</a></li>
+<li><a href="#usb-audio-and-midi">USB: audio and MIDI</a></li>
+<li><a href="#if-something-goes-wrong">If something goes wrong</a></li>
+<li><a href="#sound-ideas">Sound ideas</a></li>
+</ul>
+<hr />
+<h2 id="installing">Installing</h2>
+<p><strong>From the web installer</strong> (Chrome or Edge, on a computer): open the Prysm installer page, connect the FM-1 by USB
+straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
+restart. Do not unplug it while it writes.</p>
+<p><strong>From the command line</strong> (a built package, see the README):</p>
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.2.fwsc
+</code></pre>
+<p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
+M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
+official V15 first (ETCH's own installer has <em>RESTORE - OFFICIAL V15</em>), then install Prysm.</p>
+<p><strong>Going back.</strong> The <a href="https://thefirmwarehub.com">FM-1 Firmware Hub</a> installs the official firmware and every
+community firmware; Prysm answers its updater like the others.</p>
+<p>Prysm is a community firmware, not made or supported by M-VAVE. Installing it is at your own risk.</p>
+<hr />
+<h2 id="playing">Playing</h2>
+<p>When the FM-1 starts you see the splash picture for a moment (press any key or button to skip it), then the
+<strong>OSC 1</strong> page. The sound is the last patch you saved or loaded.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Keys</strong></td>
+<td>play; 4 voices. The key LEDs show what sounds. The notes also go out over USB-MIDI.</td>
+</tr>
+<tr>
+<td><strong>OCT- / OCT+</strong></td>
+<td>the keyboard's octave (-2 .. +2; remembered when the FM-1 is switched off)</td>
+</tr>
+<tr>
+<td><strong>MASTER</strong></td>
+<td>the volume</td>
+</tr>
+<tr>
+<td><strong>USB-MIDI in</strong></td>
+<td>notes on any channel play Prysm</td>
+</tr>
+</tbody>
+</table>
+<p>When a fifth note comes, the voice that is quietest (or, if all are held, the oldest) gives way.</p>
+<hr />
+<h2 id="finding-your-way-around">Finding your way around</h2>
+<p>Every page works the same way:</p>
+<pre><code> OSC 1  WAVE                    3*  1/7  22%      &lt;- page, row     slot, unsaved (*), page number, CPU
+ [carrier] &lt;- [ mod 1 ] &lt;- [ mod 2 ]              &lt;- the page's picture: what the row touches is lit
+    BANK    WAVE    BANK    WAVE                  &lt;- the selected row's four knobs, over their values
+ * BASIC   SINE    BASIC   SINE                   &lt;- the selected row (filled marker)
+ o BASIC   SINE                                   &lt;- the other rows
+ o  x1      x2      x1      0c
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ALGORITHM</strong></td>
+<td>the next / previous page</td>
+</tr>
+<tr>
+<td><strong>SELECT</strong></td>
+<td>the row</td>
+</tr>
+<tr>
+<td><strong>KNOB1 .. KNOB4</strong></td>
+<td>the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks.</td>
+</tr>
+<tr>
+<td><strong>EDIT</strong></td>
+<td>OSC 1 (press again: OSC 2)</td>
+</tr>
+<tr>
+<td><strong>ENV</strong></td>
+<td>AMP (press again: FILTER)</td>
+</tr>
+<tr>
+<td><strong>LFO</strong></td>
+<td>LFO</td>
+</tr>
+<tr>
+<td><strong>GLO</strong></td>
+<td>MIX</td>
+</tr>
+<tr>
+<td><strong>FX</strong></td>
+<td>FX</td>
+</tr>
+<tr>
+<td><strong>SAVE</strong></td>
+<td>the PATCH screen</td>
+</tr>
+</tbody>
+</table>
+<p>The header's <strong>CPU</strong> figure is how much of the FM-1's time the sound takes (its peak over the last half second).
+Keep it under about 70 %: near 100 % the sound starts to crackle.</p>
+<p>Values go from 0 to 127 unless the page says otherwise. Bipolar values (shown with a sign, like <code>+24</code>) are 0 in the
+middle of their knob.</p>
+<hr />
+<h2 id="the-pages">The pages</h2>
+<h3 id="osc-1--osc-2">OSC 1 / OSC 2</h3>
+<p>Each oscillator is a chain: <strong>mod 2 -&gt; mod 1 -&gt; carrier</strong>. The carrier is what you hear; mod 1 changes the carrier,
+and mod 2 changes mod 1. The picture draws the three as boxes with the waves they are playing, and the arrows
+between them: an arrow gets thicker with more modulation, and the symbol on it is its mode
+(<strong>~</strong> FM, <strong>x</strong> ring, <strong>+</strong> mix).</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>WAVE</td>
+<td>carrier bank</td>
+<td>carrier wave</td>
+<td>mod 1 bank</td>
+<td>mod 1 wave</td>
+</tr>
+<tr>
+<td>WAVE2</td>
+<td>mod 2 bank</td>
+<td>mod 2 wave</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>RATIO</td>
+<td>carrier ratio</td>
+<td>mod 1 ratio</td>
+<td>mod 2 ratio</td>
+<td>fine tune</td>
+</tr>
+<tr>
+<td>MODE</td>
+<td>mod 1's mode</td>
+<td>mod 2's mode</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>ENV</td>
+<td>mod 1 attack</td>
+<td>mod 1 release</td>
+<td>mod 2 attack</td>
+<td>mod 2 release</td>
+</tr>
+<tr>
+<td>MIX</td>
+<td>mod 1 amount</td>
+<td>mod 2 amount</td>
+<td>the oscillator's level</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Waves.</strong> Six banks of eight waves, from simple to complex. The <strong>wave</strong> knob moves smoothly through the bank,
+morphing from one wave into the next (the name shown is the nearest).</p>
+<table>
+<thead>
+<tr>
+<th>Bank</th>
+<th>Its waves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BASIC</td>
+<td>sine, rounded, triangle, soft saw, saw, square, pulse 30 %, pulse 12 %</td>
+</tr>
+<tr>
+<td>HARM</td>
+<td>organ-like stacks of 1, 2, 3, 5, 8, 13, 21, 34 harmonics</td>
+</tr>
+<tr>
+<td>PULSE</td>
+<td>pulse widths from square (50 %) to a thin 3 %</td>
+</tr>
+<tr>
+<td>VOCAL</td>
+<td>vowels: oo, oh, ah, ae, eh, er, ih, ee</td>
+</tr>
+<tr>
+<td>DIGI</td>
+<td>stepped and bit-reduced shapes</td>
+</tr>
+<tr>
+<td>CMPLX</td>
+<td>folded sines, hard-synced saws, harmonic clusters</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ratio.</strong> Each of the three runs at a ratio to the note: 0.5, 1, 1.5, 2, 3 ... 16. With FM, whole-number ratios
+give harmonic, instrument-like tones; 1.5 and 0.5 give hollow and sub tones. <strong>Fine</strong> detunes the whole
+oscillator by up to +-50 cents.</p>
+<p><strong>Modes.</strong> How a modulator acts on the wave it points at:</p>
+<ul>
+<li><strong>FM</strong> (phase modulation): bright, metallic, bell-like, the DX7 sound. More amount, more harmonics.</li>
+<li><strong>RING</strong>: multiplies; at full amount you hear the sum and difference of the two pitches, not the carrier itself.</li>
+<li><strong>MIX</strong>: adds the modulator's wave to the other one, a layer.</li>
+</ul>
+<p><strong>Envelopes.</strong> Each modulator has its own attack and release (1 ms .. 10 s): the amount rises over the attack,
+holds while the key is down, and falls over the release. A slow mod 1 attack on FM makes a note that brightens as
+you hold it.</p>
+<p><strong>MIX row.</strong> The modulators' amounts (how much they change the next one) and the oscillator's own level.</p>
+<h3 id="filter">FILTER</h3>
+<p>A 2-pole (12 dB / octave) low-pass for each voice, with drive before it and its own envelope. The picture draws the
+filter's actual response (cutoff and resonance) and the envelope's shape.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FILTER</td>
+<td>cutoff (16 Hz .. 20 kHz)</td>
+<td>resonance</td>
+<td>envelope amount (bipolar, +-60 semitones)</td>
+<td>keytrack (0 .. 100 %)</td>
+</tr>
+<tr>
+<td>ENV</td>
+<td>attack</td>
+<td>decay</td>
+<td>sustain</td>
+<td>release</td>
+</tr>
+<tr>
+<td>DRIVE</td>
+<td>drive (0 = clean)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>Cutoff and resonance glide as you turn them, so sweeps are smooth. <strong>Keytrack</strong> at 100 % moves the cutoff with the
+note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.</p>
+<h3 id="amp">AMP</h3>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ENV</td>
+<td>attack</td>
+<td>decay</td>
+<td>sustain</td>
+<td>release</td>
+</tr>
+</tbody>
+</table>
+<p>Times go from 1 ms to 10 s.</p>
+<h3 id="lfo">LFO</h3>
+<p>One LFO per voice (or one shared, free-running), and a mod envelope that can loop.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LFO</td>
+<td>wave: SINE, TRI, SAW UP, SAW DN, SQUARE, S&amp;H</td>
+<td>rate (0.05 .. 40 Hz)</td>
+<td>delay</td>
+<td>retrig ON / OFF</td>
+</tr>
+<tr>
+<td>DEST</td>
+<td>destination 1</td>
+<td>amount 1</td>
+<td>destination 2</td>
+<td>amount 2</td>
+</tr>
+<tr>
+<td>M.ENV</td>
+<td>mod envelope attack</td>
+<td>decay</td>
+<td>sustain</td>
+<td>release</td>
+</tr>
+<tr>
+<td>M.DST</td>
+<td>LOOP ON / OFF</td>
+<td>destination</td>
+<td>amount</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>S&amp;H</strong> (sample and hold) jumps to a new random value each cycle.</li>
+<li><strong>Delay</strong>: from each note, the LFO fades in over this time (0: at once).</li>
+<li><strong>Retrig ON</strong>: each note starts its own LFO from the beginning; <strong>OFF</strong>: one LFO runs free and every note shares
+  it.</li>
+<li><strong>Destinations</strong> (two, each with a bipolar amount):</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>PITCH</td>
+<td>both oscillators, up to +-12 semitones (vibrato)</td>
+</tr>
+<tr>
+<td>PITCH2</td>
+<td>osc 2 only (a wobbling detune against osc 1)</td>
+</tr>
+<tr>
+<td>WAVE1, WAVE2</td>
+<td>the carrier's wave position, across the whole bank (each note moves on its own)</td>
+</tr>
+<tr>
+<td>MWAVE1, MWAVE2</td>
+<td>both modulators' wave positions</td>
+</tr>
+<tr>
+<td>MOD1, MOD2</td>
+<td>both modulators' amounts (FM brightness)</td>
+</tr>
+<tr>
+<td>MPITCH</td>
+<td>the modulators' pitch: the FM sidebands slide</td>
+</tr>
+<tr>
+<td>CUTOFF</td>
+<td>the filter, up to +-48 semitones</td>
+</tr>
+<tr>
+<td>AMP</td>
+<td>tremolo</td>
+</tr>
+<tr>
+<td>MIX</td>
+<td>the balance between the two oscillators</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The mod envelope</strong> (M.ENV, M.DST) is an ADSR started by each note. With <strong>LOOP ON</strong> it runs attack -&gt; decay -&gt;
+attack -&gt; decay ... for as long as you hold the key, then releases: a sustain of 0 gives full up-and-down sweeps, a
+higher sustain a shallower cycle. Its destination can be any of the LFO's, plus two of its own:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LFORATE</td>
+<td>the LFO's rate, up to +-4 octaves: an envelope that speeds the LFO up and slows it down</td>
+</tr>
+<tr>
+<td>LFOAMT</td>
+<td>the LFO's depth, from nothing up to double</td>
+</tr>
+</tbody>
+</table>
+<p>On the M.ENV and M.DST rows the picture shows two seconds of the envelope (the key held for 1.5 s, the dotted line
+where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the envelope moves it.</p>
+<h3 id="mix">MIX</h3>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OSC</td>
+<td>osc 1 level</td>
+<td>osc 2 level</td>
+<td>osc 2 semitones (+-24)</td>
+<td>osc 2 fine (+-50 cents)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="fx">FX</h3>
+<p>Stereo effects after the voices: <strong>chorus -&gt; delay -&gt; reverb</strong>. Each one is off while its <strong>MIX</strong> is 0. The picture
+draws the chain, with a mix bar under each effect.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CHORUS</td>
+<td>rate</td>
+<td>depth</td>
+<td>mix</td>
+<td></td>
+</tr>
+<tr>
+<td>DELAY</td>
+<td>time (10 .. 735 ms)</td>
+<td>feedback</td>
+<td>mix</td>
+<td>PING ON / OFF</td>
+</tr>
+<tr>
+<td>D.MOD</td>
+<td>wow rate</td>
+<td>wow depth</td>
+<td>shift (-12 .. +12 st)</td>
+<td>tone</td>
+</tr>
+<tr>
+<td>REVERB</td>
+<td>size</td>
+<td>damping</td>
+<td>mix</td>
+<td>pre-delay (up to 93 ms)</td>
+</tr>
+<tr>
+<td>R.MOD</td>
+<td>rate</td>
+<td>depth</td>
+<td>shimmer</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Chorus</strong>: left and right swept against each other, for width. Full mix is half wet: the classic chorus.</li>
+<li><strong>Delay</strong>: <strong>ping</strong> sends the repeats from side to side. <strong>Tone</strong> darkens each repeat. Turning the time while it
+  plays bends the repeats, like tape.</li>
+<li><strong>Wow</strong>: sweeps the delay time, so the repeats wobble in pitch.</li>
+<li><strong>Shift</strong>: each repeat is pitch-shifted: +12 makes the echoes climb an octave at a time, -5 makes them fall in
+  fourths. (The first repeat is the note as played.)</li>
+<li><strong>Reverb</strong>: a plate. <strong>Size</strong> sets how long the tail lasts, <strong>damping</strong> how quickly its highs fade, <strong>pre-delay</strong>
+  the gap before it starts.</li>
+<li><strong>R.MOD</strong>: sweeps the reverb's inside, so the tail shimmers and wobbles around the note.</li>
+<li><strong>Shimmer</strong>: the tail climbs in octaves as it fades. It never runs away, at any setting.</li>
+</ul>
+<p>With every effect on, Prysm uses roughly twice the CPU: watch the header.</p>
+<hr />
+<h2 id="patches">Patches</h2>
+<p>Press <strong>SAVE</strong> for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
+osc 1 wave (a dash: empty). The selected slot has a double edge; a dot marks the slot the current sound came from.</p>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SELECT</strong></td>
+<td>SAVE, LOAD or INIT</td>
+</tr>
+<tr>
+<td><strong>KNOB1</strong></td>
+<td>the slot</td>
+</tr>
+<tr>
+<td><strong>SAVE</strong></td>
+<td>does it</td>
+</tr>
+<tr>
+<td><strong>HOME</strong>, ALGORITHM or a page button</td>
+<td>back</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>SAVE</strong> writes the current sound to the slot. Over a slot holding another sound it asks first: press SAVE again.</li>
+<li><strong>LOAD</strong> brings the slot's sound back. <strong>INIT</strong> loads the default sound. If you have unsaved changes, both ask
+  first: press SAVE again.</li>
+<li>The header shows the current slot on every page, with <strong>*</strong> when there are unsaved changes.</li>
+<li>When the FM-1 is switched on, the slot last saved or loaded comes back.</li>
+<li>Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.</li>
+<li>Patches are kept in two flash sectors written in turn: if the power goes during a save, only that save is lost.</li>
+<li>Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them).</li>
+</ul>
+<hr />
+<h2 id="usb-audio-and-midi">USB: audio and MIDI</h2>
+<p>Connected to a computer, the FM-1 shows up as <strong>Prysm FM-1</strong>:</p>
+<ul>
+<li>a <strong>2-in audio input</strong> (16-bit stereo, 44.1 or 48 kHz): record Prysm straight into any DAW, no cable needed. It
+  carries exactly what the speaker plays, effects included.</li>
+<li>a <strong>MIDI port</strong>: notes in play Prysm; the keys' notes come out.</li>
+</ul>
+<p>Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.</p>
+<hr />
+<h2 id="if-something-goes-wrong">If something goes wrong</h2>
+<ul>
+<li><strong>It will not start / a black screen after an update</strong>: hold <strong>OCT-</strong> while switching the FM-1 on. That starts
+  the rescue updater (no sound, just the update port): install Prysm, or another firmware from the Firmware Hub.</li>
+<li><strong>A crash</strong>: the screen shows where, and the FM-1 restarts. Two crashes in a row at start-up go to the rescue
+  updater by themselves.</li>
+<li><strong>The installer cannot find the FM-1</strong>: use Chrome or Edge, a USB cable that carries data, plugged straight into
+  the computer; close other music apps that may hold the MIDI port.</li>
+<li><strong>The sound crackles</strong>: the CPU is over its limit; lower the effects or the number of notes.</li>
+</ul>
+<hr />
+<h2 id="sound-ideas">Sound ideas</h2>
+<ul>
+<li><strong>Electric piano</strong>: OSC 1 carrier sine, mod 1 sine at x1 (or x14 for the tine), FM, a quick mod 1 attack and a
+  medium release; AMP with a long decay and low sustain; chorus.</li>
+<li><strong>Evolving pad</strong>: carrier on VOCAL, LFO TRI slow into WAVE1, mod envelope slow attack into LFOAMT; reverb with a
+  big size and some shimmer.</li>
+<li><strong>Rhythmic bleeps</strong>: LFO S&amp;H into MPITCH with some FM; mod envelope LOOP ON into LFORATE; delay with ping and a
+  little shift.</li>
+<li><strong>Bass</strong>: carrier saw, osc 2 a square an octave down (MIX: -12 st), filter low with a fast envelope and some
+  drive.</li>
+<li><strong>Bells</strong>: carrier sine, mod 1 sine at x3 (or x1.5, x7), FM with a long release; delay with shift +12 and the tone
+  down.</li>
+</ul>
+<hr />
+<p>Prysm by Nicholas Pratt, built on <a href="https://github.com/zvenson/dinghy">Dinghy</a> (zvenson), the platform of
+<a href="https://github.com/hugelton/Felucca">Felucca</a> (Leo Kuroshita, Hügelton Instruments) and
+<a href="https://github.com/isod89/sloop-fm1">SLOOP</a> (isod89). GPL-3.0. M-VAVE and FM-1 are trademarks of their owners.</p></main></body></html>

@@ -4,7 +4,7 @@ A 4-voice, 2-oscillator synth module for the M-VAVE FM-1. Each oscillator is a w
 series chain of two wavetable modulators, each with its own AR envelope. Then a 2-pole low-pass filter with an
 ADSR, and an amp ADSR.
 
-Status: the sound engine, the filter and a first version of the pages are built (host-mode tests: tests/run_engine.sh, screenshots: tests/run_ui.sh). Next: the pages refined on the device.
+Status: release 0.2 (site/: the web installer and the manual). User manual: docs/MANUAL.md.
 
 ## Voice
 
