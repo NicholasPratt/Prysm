@@ -79,8 +79,8 @@ The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](S
 tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchain, the AC79 SDK, a Python venv
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
-./build.sh --release 0.2             # build/prysm-0.3.fwsc (identity FM-1_982, "0.2" on the splash)
-tools/make_site.py build/prysm-0.3.fwsc 0.2   # site/: the web installer and the manual (GitHub Pages)
+./build.sh --release 0.3             # build/prysm-0.3.fwsc (identity FM-1_983, "0.3" on the splash)
+tools/make_site.py build/prysm-0.3.fwsc 0.3   # site/: the web installer and the manual (GitHub Pages)
 ```
 
 ### Tests (on the computer, no FM-1 needed)
