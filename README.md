@@ -1,3 +1,7 @@
+> **Prysm** is a synth-module firmware for the M-VAVE FM-1, built on Dinghy. Building on a Mac and what Prysm
+> changed: [SETUP-MACOS.md](SETUP-MACOS.md). Prysm's app is `firmware/src/prysm.c` (Dinghy's `dinghy.c`, renamed);
+> the rest of this README is Dinghy's.
+
 <p align="center"><img src="assets/logo.svg" width="96" alt="Dinghy"></p>
 
 # Dinghy

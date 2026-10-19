@@ -48,10 +48,10 @@ def describe(p):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", help="MIDI port name (default: the first matching Felucca / FM-1)")
+    ap.add_argument("--port", help="MIDI port name (default: the first FM-1 port, e.g. Prysm FM-1)")
     a = ap.parse_args()
     ins, outs = mido.get_input_names(), mido.get_output_names()
-    pick = lambda names: next((n for n in names if (a.port or "felucca").lower() in n.lower()), None)
+    pick = lambda names: next((n for n in names if (a.port or "fm-1").lower() in n.lower()), None)
     i_name, o_name = pick(ins), pick(outs)
     if not i_name or not o_name:
         sys.exit(f"no FM-1 MIDI port (inputs {ins}, outputs {outs})")
