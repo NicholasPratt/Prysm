@@ -42,7 +42,7 @@ Prysm is a community firmware, not made or supported by M-VAVE. Installing it is
 
 ## Playing
 
-When the FM-1 starts you see the splash picture for a moment (press any key or button to skip it), then the
+When the FM-1 starts, rainbow static collapses into the word PRYSM (press any key or button to skip it), then the
 **OSC 1** page. The sound is the last patch you saved or loaded.
 
 | | |

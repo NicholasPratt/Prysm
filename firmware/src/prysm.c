@@ -81,29 +81,118 @@ static void stop(uint32_t note)
 #define KEY0 53u                                /* key 0 = F3 */
 #include "patches.c"                            /* the 8 patch slots */
 #include "ui.c"                                 /* the pages, the PATCH screen */
-#include "prysm_splash.h"                       /* the power-on picture (tools/gen_splash.py, assets/splash.jpg) */
+/* ---- the splash: rainbow static that thins and closes in as its specks fly together into PRYSM (FONT_P, twice its size),
+ * which fades to white, the version under it; 2.6 s, or until a key or button is pressed. Drawn whole each frame,
+ * in two strips of the canvas. (Host mode skips it unless built with -DPRYSM_SPLASH: the UI scripts time their
+ * screenshots from power-on.) */
+#define SPL_X 40                                /* the word: 5 letters of 16 x 32, doubled: 160 x 64 */
+#define SPL_Y 74
+#define SPL_FRAME_MS 33u
+#define SPL_GATHER_MS 300u                      /* the specks start flying ... */
+#define SPL_FLY_MS 900u                         /* ... take this long (each up to 300 ms late) ... */
+#define SPL_DONE_MS 1600u                       /* ... and the word stands */
+#define SPL_END_MS 2600u
 
-/* ---- the splash: the picture (from flash, through the canvas in strips), the name under it; until 2.5 s have
- * passed or a key or button is pressed. (Host mode skips it unless built with -DPRYSM_SPLASH: the UI scripts
- * time their screenshots from power-on.) */
+static uint32_t spl_hash(uint32_t x)            /* a speck's own random numbers */
+{
+    x ^= x >> 16; x *= 0x7FEB352Du; x ^= x >> 15; x *= 0x846CA68Bu; x ^= x >> 16;
+    return x;
+}
+
+static uint16_t spl_hue(uint32_t h, uint32_t v) /* hue 0..1535 at brightness v 0..255 -> RGB565 */
+{
+    uint32_t f = h & 255u, r, g, b;
+    switch ((h >> 8) % 6u) {
+    case 0: r = 255; g = f; b = 0; break;
+    case 1: r = 255 - f; g = 255; b = 0; break;
+    case 2: r = 0; g = 255; b = f; break;
+    case 3: r = 0; g = 255 - f; b = 255; break;
+    case 4: r = f; g = 0; b = 255; break;
+    default: r = 255; g = 0; b = 255 - f; break;
+    }
+    return RGB(r * v / 255u, g * v / 255u, b * v / 255u);
+}
+
+static int spl_ink(uint32_t letter, uint32_t gx, uint32_t gy)   /* the word's pixel (FONT_P's cell): set? */
+{
+    static const char WORD[] = "PRYSM";
+    uint32_t gi = (uint32_t)WORD[letter] - FONT_P.first, bpr = (FONT_P.bw[gi] + 1u) / 2u;
+    uint32_t v = FONT_P.data[FONT_P.off[gi] + gy * bpr + gx / 2u];
+    return ((gx & 1u) ? (v & 15u) : (v >> 4)) != 0;
+}
+
+static void spl_frame(uint32_t t)               /* the screen at t ms */
+{
+    uint32_t strip, i, l, gx, gy, rng = spl_hash(t + 1u);
+    uint32_t dens = t < SPL_GATHER_MS ? 65536u : t >= SPL_DONE_MS - 300u ? 0u :
+                    65536u - (t - SPL_GATHER_MS) * 65536u / (SPL_DONE_MS - 300u - SPL_GATHER_MS);   /* the static */
+    uint32_t rr = dens * 200u >> 16;            /* ... inside an ellipse round the word, closing on it */
+    uint32_t ea = 80u + rr, eb = 32u + rr * 3u / 5u, eab = ea * ea * eb * eb;
+    for (strip = 0; strip < 2u; strip++) {
+        int32_t y0 = (int32_t)strip * 120;
+        cv_begin(240, 120, C_BLACK);
+        if (dens)
+            for (i = 0; i < 120u * 60u; i++) {  /* 2 x 2 specks: a random colour and brightness, fewer and fewer */
+                int32_t dx = (int32_t)(i % 120u) * 2 - 120, dy = (int32_t)(i / 120u) * 2 + y0 - (SPL_Y + 32);
+                rng = rng * 1664525u + 1013904223u;
+                if ((rng >> 16) < dens && (uint32_t)(dx * dx) * eb * eb + (uint32_t)(dy * dy) * ea * ea <= eab)
+                    cv_rect((int32_t)(i % 120u) * 2, (int32_t)(i / 120u) * 2, 2, 2,
+                            spl_hue((rng >> 5) % 1536u, 40u + (rng & 31u) * 6u));
+            }
+        for (i = 0, l = 0; l < 5u; l++)         /* the word's specks: each from somewhere, flying home */
+            for (gy = 0; gy < FONT_P.h; gy++)
+                for (gx = 0; gx < 16u; gx++) {
+                    uint32_t h, late, p, e;
+                    int32_t sx, sy, tx, ty, x, y;
+                    if (!spl_ink(l, gx, gy))
+                        continue;
+                    h = spl_hash(i++);
+                    late = h % 300u;
+                    tx = SPL_X + (int32_t)(l * 32u + gx * 2u);
+                    ty = SPL_Y + (int32_t)(gy * 2u);
+                    sx = (int32_t)(h >> 8) % 240;
+                    sy = (int32_t)(h >> 20) % 240;
+                    p = t < SPL_GATHER_MS + late ? 0u : t - SPL_GATHER_MS - late;
+                    p = p >= SPL_FLY_MS ? 1024u : p * 1024u / SPL_FLY_MS;
+                    e = 1024u - (((1024u - p) * (1024u - p) >> 10) * (1024u - p) >> 10);   /* ease out: 1 - (1-p)^3 */
+                    x = sx + (tx - sx) * (int32_t)e / 1024;
+                    y = sy + (ty - sy) * (int32_t)e / 1024 - y0;
+                    if (y < -2 || y >= 120)
+                        continue;
+                    if (e >= 1024u)
+                        cv_rect(x, y, 2, 2, C_WHITE);
+                    else {                      /* rainbow on the way, whiter as it nears home */
+                        uint16_t c = spl_hue((h + t * 3u) % 1536u, 255u);
+                        uint32_t w = e * e >> 12;   /* 0 .. 256 */
+                        uint32_t r = (c >> 11) * 8u, g = (c >> 5 & 63u) * 4u, b = (c & 31u) * 8u;
+                        r += (255u - r) * w >> 8; g += (255u - g) * w >> 8; b += (255u - b) * w >> 8;
+                        cv_rect(x, y, 2, 2, RGB(r, g, b));
+                    }
+                }
+        if (t >= SPL_DONE_MS && strip == 1u) {  /* the version, under the word */
+            static const char V[] = "v" APP_VER;
+            cv_text((240 - text_w(&FONT_S, V)) / 2, 172 - y0, &FONT_S, V, t >= SPL_DONE_MS + 200u ? C_MID : C_FAINT);
+        }
+        cv_blit(0, (uint32_t)y0);
+    }
+}
+
 static void splash(void)
 {
 #if !defined(DINGHY_HOST) || defined(PRYSM_SPLASH)
-    uint32_t y, t0, rel, strip = CV_MAX / SPLASH_W;
+    uint32_t t0 = fm1_ms, next = 0, rel;
     lcd_fill(0, 0, 240, 240, C_BLACK);
-    for (y = 0; y < SPLASH_H; y += strip) {
-        uint32_t h = SPLASH_H - y < strip ? SPLASH_H - y : strip;
-        cv_begin(SPLASH_W, h, C_BLACK);
-        memcpy(cv_px, SPLASH + y * SPLASH_W, SPLASH_W * h * 2u);
-        cv_blit((240u - SPLASH_W) / 2u, 4u + y);
-    }
-    draw_text_box(0, 216, 240, &FONT_S, "PRYSM  v" APP_VER, C_ACC, 1);
-    t0 = fm1_ms;
-    while (fm1_ms - t0 < 2500u) {
+    while (fm1_ms - t0 < SPL_END_MS) {
+        uint32_t t = fm1_ms - t0;
+        if (t >= next && t < SPL_DONE_MS + 400u) {   /* (then it stands still: nothing to redraw) */
+            spl_frame(t);
+            next = t + SPL_FRAME_MS;
+        }
         platform_poll();
         if (fm1_in.notes || fm1_input_edges(&rel))
             break;                              /* a key or a button: straight on (a key then plays) */
     }
+    lcd_sync();
 #endif
 }
 

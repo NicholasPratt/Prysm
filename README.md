@@ -101,9 +101,10 @@ tests/run_host.sh       # the whole app on the computer: build/host/prysm.wav an
 | `firmware/src/fx.c` | chorus, delay, reverb |
 | `firmware/src/ui.c` | the pages and the PATCH screen |
 | `firmware/src/patches.c` | the 8 slots and their format conversions |
-| `firmware/src/prysm.c` | the app: notes, the splash, the main loop |
+| `firmware/src/prysm.c` | the app: notes, the splash animation, the main loop |
 | `firmware/src/platform.c`, `usb.c`, `hal/`, `loader/` | the platform (Dinghy / Felucca / SLOOP), with Prysm's USB audio layout and store |
-| `tools/gen_prysm_tables.py`, `tools/gen_splash.py` | the wavetables and lookup tables; the splash picture |
+| `tools/gen_prysm_tables.py`, `tools/gen_prysm_font.py` | the wavetables and lookup tables; the UI's Terminus fonts (FONT_M, FONT_P) |
+| `tools/gen_splash.py` | the old splash picture (assets/splash.jpg; no longer shown) |
 | `web/`, `tools/make_site.py` | the web installer |
 | `docs/` | the [manual](docs/MANUAL.md), the [design](docs/PRYSM-DESIGN.md), the platform's [API](docs/API.md) and [rules](docs/RULES.md) |
 
