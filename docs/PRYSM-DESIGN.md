@@ -59,7 +59,7 @@ Status: release 0.2 (site/: the web installer and the manual). User manual: docs
   - **GLO**: MIX, press again for SETUP;
   - **FX**: CHORUS, then DELAY, then REVERB;
   - **SELECT** (the button): FILTER.
-- **PRESETS** is the filter's cutoff on every page but PATCH (shown large over the picture for 1.2 s).
+- **PRESETS** is the filter's cutoff on every page but PATCH (shown large in the picture's corner for 1.2 s).
 - **MASTER** stays the output volume (platform).
 - **OCT- / OCT+** set the keyboard octave (kept).
 
@@ -68,9 +68,10 @@ Status: release 0.2 (site/: the web installer and the manual). User manual: docs
 The display is graphical where possible: waves drawn in their boxes and envelopes drawn as shapes, all redrawn as
 the knobs turn. White and greys on black. Top to bottom (ui.c): the header (page > row; slot, `*`, a CPU bar), the
 picture (240 x 124: a faint dotted grid, one line weight, a dim fill under curves, what the row touches in white),
-the focus row (the selected row's four labels, values in FONT_M, Terminus 22 bold from tools/gen_font_m.py, and a
+the focus row (the selected row's four labels, values in FONT_M, Terminus 22 bold from tools/gen_prysm_font.py, and a
 bar under each level), the tabs (the page's rows, the selected one inverted). A knob turned: its name and value in
-FONT_L over the picture for 1.2 s.
+FONT_P (Terminus 32 bold) in a box in the picture's top right corner for 1.2 s. The PATCH screen
+has the same header and tabs (SAVE, LOAD, INIT), the slots as tiles in the picture.
 
 ### OSC 1 / OSC 2
 

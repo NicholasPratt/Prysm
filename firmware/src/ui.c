@@ -29,6 +29,7 @@
 #define C_FILL RGB(34, 34, 34)                  /* under a curve */
 
 #include "prysm_font_m.h"                       /* FONT_M: the focus row's values (Terminus 22 bold, 11 x 22) */
+#include "prysm_font_p.h"                       /* FONT_P: the pop-up's value (Terminus 32 bold, 16 x 32) */
 
 /* the screen, top to bottom: the header (the page > the row; the slot, unsaved, the CPU), the picture, the focus
  * row (the selected row's four labels and values, large, a bar under each), the tabs (every row of the page) */
@@ -41,14 +42,8 @@
 #define TAB_Y 216u                              /* the tabs */
 #define TAB_H 22u
 #ifndef POP_MS
-#define POP_MS 1200u                            /* a knob turned: its name and value, large, over the picture */
+#define POP_MS 1200u                            /* a knob turned: its name and value, large, in the picture's corner */
 #endif
-/* (the PATCH screen keeps the old layout: a 64 px picture, a legend, its rows) */
-#define PA_G_H 64u
-#define LEG_Y 86u
-#define ROW_Y 104u
-#define ROW_H 22u
-#define CELL_X 14
 #define UI_FRAME_MS 30u
 
 /* ---- the parameters */
@@ -762,20 +757,25 @@ static void draw_gfx(void)
     case PG_SEQ: gfx_seq(lit); break;
     default: gfx_mix();
     }
-    if (fm1_ms < pop_until) {                   /* a knob turned: its name and value, large, over the picture */
-        int32_t w = text_w(&FONT_L, pop_val), bw = w + 32 < 150 ? 150 : w + 32, x0 = (240 - bw) / 2, y0 = 22;
-        bw = bw > 236 ? 236 : bw;
-        x0 = (240 - bw) / 2;
-        cv_rect(x0, y0, bw, 68, C_BLACK);
-        cv_rect(x0, y0, bw, 1, C_MID); cv_rect(x0, y0 + 67, bw, 1, C_MID);
-        cv_rect(x0, y0, 1, 68, C_MID); cv_rect(x0 + bw - 1, y0, 1, 68, C_MID);
-        cv_text((240 - text_w(&FONT_S, pop_name)) / 2, y0 + 6, &FONT_S, pop_name, C_MID);
-        cv_text((240 - w) / 2, y0 + 26, &FONT_L, pop_val, C_BRIGHT);
+    if (fm1_ms < pop_until) {                   /* a knob turned: its name and value, large, in the top right corner */
+        const felucca_font_t *f = text_w(&FONT_P, pop_val) <= 220 ? &FONT_P : &FONT_M;
+        int32_t w = text_w(f, pop_val), nw = text_w(&FONT_S, pop_name), bw = (w > nw ? w : nw) + 16, x0, h = 24 + f->h;
+        bw = bw < 80 ? 80 : bw > 236 ? 236 : bw;
+        x0 = 238 - bw;
+        cv_rect(x0, 0, bw, h, C_BLACK);         /* (the picture shows around it) */
+        cv_frame(x0, 0, bw, h, C_MID);
+        cv_text(x0 + (bw - nw) / 2, 3, &FONT_S, pop_name, C_MID);
+        cv_text(x0 + (bw - w) / 2, 20, f, pop_val, C_BRIGHT);
         pop_drawn = 1;
     } else
         pop_drawn = 0;
     cv_blit(0, G_Y);
 }
+
+#define PG_PATCH PG_N                           /* (the PATCH screen: not in ALGORITHM's round, only SAVE leads here) */
+enum { PA_SAVE, PA_LOAD, PA_INIT, PA_N };
+static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "INIT"};
+static uint32_t pa_row;
 
 /* ---- the header, the focus row, the tabs */
 static void draw_hdr(void)
@@ -784,15 +784,13 @@ static void draw_hdr(void)
     int32_t x;
     uint32_t cpu = 0;
     cv_begin(240, 20, C_BLACK);
-    x = cv_text(4, 1, &FONT_S, PAGES[page].name, C_BRIGHT);
+    x = cv_text(4, 1, &FONT_S, page < PG_N ? PAGES[page].name : "PATCH", C_BRIGHT);
     if (page == PG_SEQ && seq_rec) {            /* REC: inverted */
         cv_rect(x + 6, 1, 36, 16, C_BRIGHT);
         x = cv_text(x + 10, 1, &FONT_S, "REC", C_BLACK) + 4;
     }
-    if (page < PG_N) {                          /* > the row */
-        cv_line(x + 6, 5, x + 9, 9, C_FAINT); cv_line(x + 9, 9, x + 6, 13, C_FAINT);
-        cv_text(x + 15, 1, &FONT_S, PAGES[page].rows[row[page]].name, C_MID);
-    }
+    cv_line(x + 6, 5, x + 9, 9, C_FAINT); cv_line(x + 9, 9, x + 6, 13, C_FAINT);   /* > the row */
+    cv_text(x + 15, 1, &FONT_S, page < PG_N ? PAGES[page].rows[row[page]].name : PA_NAME[pa_row], C_MID);
     e = s;                                      /* the slot, and * for unsaved changes */
     if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
     else e = put(e, "-");
@@ -842,34 +840,40 @@ static void draw_focus(void)                    /* the selected row: four labels
     cv_blit(0, FOC_Y);
 }
 
-static void draw_tabs(void)                     /* every row of the page; the selected one inverted */
+static void tabs(const char *const *name, uint32_t nn, uint32_t sel)   /* names along the bottom, sel inverted */
 {
-    const page_t *pg = &PAGES[page];
     int32_t xs[8], ws[8], x = 0, shift = 0;
-    uint32_t n, sel = row[page];
-    for (n = 0; n < pg->n && n < 8u; n++) {     /* where each goes; scrolled to keep the selected one on screen */
-        ws[n] = text_w(&FONT_S, pg->rows[n].name) + 10;
+    uint32_t n;
+    for (n = 0; n < nn && n < 8u; n++) {        /* where each goes; scrolled to keep the selected one on screen */
+        ws[n] = text_w(&FONT_S, name[n]) + 10;
         xs[n] = x;
         x += ws[n] + 4;
     }
     if (xs[sel] + ws[sel] > 238) shift = xs[sel] + ws[sel] - 238;
     cv_begin(240, TAB_H, C_BLACK);
     cv_rect(0, 0, 240, 1, C_BOX);               /* the rule over them */
-    for (n = 0; n < pg->n && n < 8u; n++) {
+    for (n = 0; n < nn && n < 8u; n++) {
         int32_t tx = xs[n] - shift + (x - 4 - shift < 240 ? (240 - (x - 4)) / 2 : 1);   /* (centred when they fit) */
         if (n == sel) {
             cv_rect(tx, 4, ws[n], 17, C_BRIGHT);
-            cv_text(tx + 5, 5, &FONT_S, pg->rows[n].name, C_BLACK);
+            cv_text(tx + 5, 5, &FONT_S, name[n], C_BLACK);
         } else
-            cv_text(tx + 5, 5, &FONT_S, pg->rows[n].name, C_MID);
+            cv_text(tx + 5, 5, &FONT_S, name[n], C_MID);
     }
     cv_blit(0, TAB_Y);
 }
 
+static void draw_tabs(void)                     /* every row of the page */
+{
+    const char *name[8];
+    uint32_t n;
+    for (n = 0; n < PAGES[page].n && n < 8u; n++)
+        name[n] = PAGES[page].rows[n].name;
+    tabs(name, n, row[page]);
+}
+
 /* ---- the PATCH screen (the SAVE button): the 8 slots as tiles, then SAVE / LOAD / INIT */
-#define PG_PATCH PG_N                           /* not in ALGORITHM's round: only SAVE leads here */
-enum { PA_SAVE, PA_LOAD, PA_INIT, PA_N };
-static uint32_t pa_row, pa_slot, pa_armed, pa_back = PG_OSC1;
+static uint32_t pa_slot, pa_armed, pa_back = PG_OSC1;
 static const char *pa_msg = "";
 static char pa_msgbuf[32];
 
@@ -881,70 +885,55 @@ static int32_t wave_sample(uint32_t b, uint32_t pos, uint32_t i)   /* a morphed 
     return PW_WAVE[b][w][i] + (((int32_t)PW_WAVE[b][w + 1u][i] - PW_WAVE[b][w][i]) * (int32_t)f >> 8);
 }
 
-static void pa_draw_gfx(void)
+static void pa_draw_gfx(void)                   /* the 8 slots as tiles: the number, osc 1's carrier as a thumbnail */
 {
     uint32_t s, i;
-    cv_begin(240, PA_G_H, C_BLACK);
+    cv_begin(240, G_H, C_BLACK);
     for (s = 0; s < PATCH_SLOTS; s++) {
-        int32_t x = 2 + (int32_t)(s % 4u) * 59, y = 1 + (int32_t)(s / 4u) * 32, w = 56, h = 30, px = 0, py = 0;
-        uint16_t edge = s == pa_slot ? C_ACC : C_BOX;
+        int32_t x = 2 + (int32_t)(s % 4u) * 60, y = 2 + (int32_t)(s / 4u) * 62, w = 56, h = 58, px = 0, py = 0;
+        int32_t mid = y + 34, sel = s == pa_slot;
         char n[4];
-        cv_rect(x, y, w, 1, edge); cv_rect(x, y + h - 1, w, 1, edge);
-        cv_rect(x, y, 1, h, edge); cv_rect(x + w - 1, y, 1, h, edge);
-        if (s == pa_slot) {                     /* the selected slot: a double edge */
-            cv_rect(x + 1, y + 1, w - 2, 1, edge); cv_rect(x + 1, y + h - 2, w - 2, 1, edge);
-            cv_rect(x + 1, y + 1, 1, h - 2, edge); cv_rect(x + w - 2, y + 1, 1, h - 2, edge);
-        }
+        cv_frame(x, y, w, h, sel ? C_BRIGHT : C_BOX);
+        if (sel) cv_frame(x + 1, y + 1, w - 2, h - 2, C_BRIGHT);   /* the selected slot: a double edge */
         num(n, s + 1u);
-        cv_text(x + 5, y + 7, &FONT_S, n, bank.used[s] ? C_BRIGHT : C_FAINT);
-        if (bank.used[s])                       /* its sound: osc 1's carrier, as a thumbnail */
-            for (i = 0; i < 32u; i++) {
-                int32_t xx = x + 19 + (int32_t)i, yy = y + h / 2 -
-                             wave_sample(bank.p[s].osc[0].bank[0], bank.p[s].osc[0].pos[0], i * PW_N / 32u) * 10 / 32767;
-                if (i) cv_line(px, py, xx, yy, s == pa_slot ? C_BRIGHT : C_MID);
+        cv_text(x + 5, y + 3, &FONT_S, n, bank.used[s] ? C_BRIGHT : C_FAINT);
+        if ((int32_t)s == cur_slot)             /* where the sound came from */
+            cv_circle(x + w - 8, y + 10, 3, C_BRIGHT, 1);
+        if (bank.used[s]) {                     /* its sound: osc 1's carrier */
+            cv_hdots(x + 5, x + w - 5, mid, 4);
+            for (i = 0; i < 44u; i++) {
+                int32_t xx = x + 6 + (int32_t)i, yy = mid -
+                             wave_sample(bank.p[s].osc[0].bank[0], bank.p[s].osc[0].pos[0], i * PW_N / 44u) * 16 / 32767;
+                if (i) { cv_under(px, py, xx, yy, mid); cv_line(px, py, xx, yy, sel ? C_BRIGHT : C_MID); }
                 px = xx; py = yy;
             }
-        else
-            cv_rect(x + 28, y + h / 2, 14, 1, C_FAINT);   /* empty */
-        if ((int32_t)s == cur_slot)             /* where the sound came from */
-            cv_circle(x + w - 7, y + 6, 2, C_ACC, 1);
+        } else
+            cv_text(x + (w - text_w(&FONT_S, "EMPTY")) / 2, mid - 8, &FONT_S, "EMPTY", C_FAINT);
     }
     cv_blit(0, G_Y);
 }
 
-static void pa_draw_text(void)                  /* the header, the legend, the three rows, the message */
+static void pa_draw_text(void)                  /* the header, what SAVE will do, the message, the tabs */
 {
-    static const char *const NAME[PA_N] = {"SAVE", "LOAD", "INIT"};
     char s[40], *e, n[4];
-    uint32_t r;
-    e = put(s, "PATCH  ");
-    put(e, NAME[pa_row]);
-    draw_text_box(4, HDR_Y, 130, &FONT_S, s, C_ACC, 0);
-    e = s;
-    if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
-    else e = put(e, "-");
-    if (modified()) put(e, "*");
-    draw_text_box(134, HDR_Y, 102, &FONT_S, s, C_FAINT, 2);
-    draw_text_box(0, LEG_Y, 240, &FONT_S, "KNOB1: SLOT", C_ACC, 1);
+    const char *m = pa_msg;
     num(n, pa_slot + 1u);
-    cv_begin(240, PA_N * ROW_H, C_BLACK);
-    for (r = 0; r < PA_N; r++) {
-        int32_t y = (int32_t)(r * ROW_H), sel = r == pa_row;
-        if (sel)
-            cv_rect(0, y, 240, ROW_H - 2, C_SEL);
-        cv_circle(6, y + 9, sel ? 4 : 3, sel ? C_ACC : C_FAINT, sel);
-        cv_text(CELL_X + 6, y + 1, &FONT_S, NAME[r], sel ? C_BRIGHT : C_MID);
-        e = r == PA_SAVE ? put(s, "TO SLOT ") : r == PA_LOAD ? put(s, "SLOT ") : put(s, "THE DEFAULT SOUND");
-        if (r != PA_INIT) {
-            e = put(e, n);
-            if (r == PA_LOAD && !bank.used[pa_slot]) put(e, "  (EMPTY)");
-            if (r == PA_SAVE && bank.used[pa_slot]) put(e, "  (USED)");
-        }
-        cv_text(CELL_X + 60, y + 1, &FONT_S, s, sel ? C_BRIGHT : C_MID);
+    draw_hdr();
+    cv_begin(240, FOC_H, C_BLACK);
+    e = pa_row == PA_SAVE ? put(s, "SAVE TO SLOT ") : pa_row == PA_LOAD ? put(s, "LOAD SLOT ") : put(s, "LOAD THE DEFAULT SOUND");
+    if (pa_row != PA_INIT) {
+        e = put(e, n);
+        if (pa_row == PA_LOAD && !bank.used[pa_slot]) put(e, " (EMPTY)");
+        if (pa_row == PA_SAVE && bank.used[pa_slot]) put(e, " (USED)");
     }
-    cv_blit(0, ROW_Y);
-    draw_text_box(0, ROW_Y + PA_N * ROW_H + 8u, 240, &FONT_S, pa_msg, pa_armed ? C_BRIGHT : C_ACC, 1);
-    draw_text_box(0, 222, 240, &FONT_S, "SAVE: DO IT    HOME: BACK", C_FAINT, 1);
+    cv_text((240 - text_w(&FONT_S, s)) / 2, 0, &FONT_S, s, C_MID);
+    if (*m)                                     /* what happened, or what to do */
+        cv_text((240 - text_w(&FONT_S, m)) / 2, 24, &FONT_S, m, C_BRIGHT);
+    else
+        cv_text((240 - text_w(&FONT_S, "KNOB1 SLOT  SAVE DO IT")) / 2, 24, &FONT_S, "KNOB1 SLOT  SAVE DO IT", C_FAINT);
+    if (pa_armed) cv_frame(4, 20, 232, 24, C_BRIGHT);   /* (asking again: framed) */
+    cv_blit(0, FOC_Y);
+    tabs(PA_NAME, PA_N, pa_row);
 }
 
 static void pa_say(const char *a, uint32_t slot)   /* the message line: a, then the slot's number if slot > 0 */

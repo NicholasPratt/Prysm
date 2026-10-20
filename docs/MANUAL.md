@@ -73,7 +73,8 @@ Every page works the same way:
   [WAVE]  WAVE2  RATIO  MODE  ENV          <- the page's rows: SELECT moves along them
 ```
 
-Turning a knob shows its name and value large over the picture for a moment (PRESETS too: the cutoff).
+Turning a knob shows its name and value large in the picture's top right corner for a moment (PRESETS too: the
+cutoff).
 
 | Control | Does |
 | --- | --- |
@@ -375,7 +376,9 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 ## Patches
 
 Press **SAVE** for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
-osc 1 wave (a dash: empty). The selected slot has a double edge; a dot marks the slot the current sound came from.
+osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
+them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
+tabs SAVE, LOAD, INIT.
 
 | Control | Does |
 | --- | --- |
