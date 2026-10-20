@@ -358,11 +358,14 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | MIDI | IN: OMNI or 1 .. 16 | OUT: 1 .. 16 | CLOCK: INT / MIDI | BEND: OFF, +-1 .. +-24 semitones |
+| SCREEN | THEME: LILAC, AMBER, MONO | | | |
 
 - **IN**: the channel Prysm plays from (OMNI: all of them).
 - **OUT**: the channel the FM-1's keys send their notes on.
 - **CLOCK**: the arpeggiator's tempo: its own (**INT**, the BPM on the ARP page) or the **MIDI** clock.
 - **BEND**: how far a MIDI keyboard's pitch wheel bends every note, either way (2 at first; OFF ignores it).
+- **THEME**: the screen's colours: **LILAC** (violet), **AMBER** (warm orange) or **MONO** (white and greys, the
+  easiest to read).
 
 ---
 

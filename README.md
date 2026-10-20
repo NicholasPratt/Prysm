@@ -53,7 +53,7 @@ envelopes, the LFO, the effects chain.
 | AMP | ENV | ENV, VEL |
 | LFO | LFO (twice: LFO 2) | LFO, DEST, M.ENV, M.DST; LFO 2: LFO, DEST |
 | MIX | GLO | OSC, GLIDE |
-| SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK, pitch BEND range |
+| SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK, pitch BEND range; SCREEN: THEME |
 | ARP | ARP (again: on / off) | ARP, TIME |
 | SEQ | SEQ (PLAY: run, REC: step entry) | STEP, PATTERN |
 | CHORUS / DELAY / REVERB | FX (1, 2, 3 times) | CHORUS; DELAY, D.MOD; REVERB, R.MOD |

@@ -157,9 +157,10 @@ MIDI note writes its note at the cursor and moves it on. The page draws 64 squar
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | MIDI | in: OMNI, 1 .. 16 | out: 1 .. 16 | the arp's clock: INT / MIDI | pitch bend range: OFF, +-1 .. 24 st |
+| SCREEN | theme: LILAC, AMBER, MONO (`THEMES[]` in ui.c: accent, bright, mid, faint, box, selected band) | | | |
 
 Global, not per patch: `gset` (ui.c), saved in the settings sector with the octave and the last slot (an older
-record still loads: 5 bytes, before BEND, which then comes in at +-2; or 2 bytes). MIDI pitch bend (0xE0, any
+record still loads: 6 bytes, before THEME (LILAC); 5 bytes, before BEND, which then comes in at +-2; or 2 bytes). MIDI pitch bend (0xE0, any
 channel the IN setting lets through) -> `engine_bend`: +-range semitones on both oscillators (as the LFO's PITCH, so
 the comb's keytrack follows).
 
