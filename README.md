@@ -63,7 +63,7 @@ envelopes, the LFO, the effects chain.
 
 ```sh
 pip3 install mido python-rtmidi
-python3 tools/fm1_install.py prysm-0.5.fwsc       # asks before it writes; restarts into Prysm
+python3 tools/fm1_install.py prysm-0.6.fwsc       # asks before it writes; restarts into Prysm
 python3 tools/fm1_install.py --info               # what the connected FM-1 runs
 ```
 
@@ -79,8 +79,8 @@ The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](S
 tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchain, the AC79 SDK, a Python venv
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
-./build.sh --release 0.5             # build/prysm-0.5.fwsc (identity FM-1_985, "0.5" on the splash)
-tools/make_site.py build/prysm-0.5.fwsc 0.4   # site/: the web installer and the manual (GitHub Pages)
+./build.sh --release 0.6             # build/prysm-0.6.fwsc (identity FM-1_986, "0.6" on the splash)
+tools/make_site.py build/prysm-0.6.fwsc 0.4   # site/: the web installer and the manual (GitHub Pages)
 ```
 
 ### Tests (on the computer, no FM-1 needed)
