@@ -1,7 +1,7 @@
 # Prysm manual
 
 Prysm is a 4-voice synthesizer firmware for the **M-VAVE FM-1**. Each voice has two oscillators, and each oscillator is a
-little modulation chain of three wavetable operators. After them come a resonant low-pass filter, an amp envelope, an
+little modulation chain of three wavetable operators. After them come a comb, a resonant low-pass and a high-pass filter, an amp envelope, an
 LFO, a looping mod envelope and stereo chorus, delay and reverb.
 
 - [Installing](#installing)
@@ -143,17 +143,25 @@ you hold it.
 
 ### FILTER
 
-A 2-pole (12 dB / octave) low-pass for each voice, with drive before it and its own envelope. The picture draws the
-filter's actual response (cutoff and resonance) and the envelope's shape.
+A 2-pole (12 dB / octave) low-pass for each voice, with drive and a comb before it, a high-pass after it, and its own
+envelope. The picture draws the filters' actual response (cutoff, resonance and the high-pass) and the envelope's shape.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | FILTER | cutoff (16 Hz .. 20 kHz) | resonance | envelope amount (bipolar, +-60 semitones) | keytrack (0 .. 100 %) |
 | ENV | attack | decay | sustain | release |
 | DRIVE | drive (0 = clean) | | | |
+| HPF | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | | | |
+| COMB | tune (-24 .. +24 st from the note) | feedback (bipolar) | damping (0 bright .. 127 dark) | mix (0 = off) |
 
 Cutoff and resonance glide as you turn them, so sweeps are smooth. **Keytrack** at 100 % moves the cutoff with the
 note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.
+
+**HPF** is a gentle 12 dB / octave high-pass with no resonance: turn it up to thin out the low end. **COMB** is a comb
+filter tuned to the note you play (TUNE moves it up to two octaves either way; it follows glide and vibrato). Positive
+feedback rings on the note's harmonics, metallic and plucked as it rises; negative feedback rings between them, hollow
+and an octave down. DAMP darkens the ringing; MIX blends it with the dry sound. High feedback takes a moment to build
+up on low notes.
 
 ### AMP
 

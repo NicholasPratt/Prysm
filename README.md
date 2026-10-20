@@ -5,7 +5,7 @@
 <p align="center"><img src="docs/screen.png" width="240" alt="Prysm's OSC 1 page: a VOCAL carrier modulated by a CMPLX wave"></p>
 
 Two oscillators per voice, each a chain of three wavetable operators (mod 2 -> mod 1 -> carrier) that modulate
-each other by FM, ring or mix; a resonant filter with drive; an LFO with six shapes and two destinations; a mod
+each other by FM, ring or mix; a resonant filter with drive, a high-pass and a comb; an LFO with six shapes and two destinations; a mod
 envelope that can loop and modulate the LFO's rate; stereo chorus, delay (with wow and pitch-shifting repeats) and
 a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; USB audio and MIDI.
 
@@ -22,7 +22,7 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | --- | --- |
 | **Voices** | 4, polyphonic |
 | **Oscillators** | 2 per voice; each a carrier modulated by mod 1, modulated by mod 2. Each operator: 6 banks x 8 morphing waves (BASIC, HARM, PULSE, VOCAL, DIGI, CMPLX), a ratio to the note (0.5 .. 16); each modulator: FM / RING / MIX, an amount, its own AR envelope |
-| **Filter** | 2-pole state-variable low-pass (zero-delay feedback), resonance, drive, keytrack, its own ADSR |
+| **Filter** | 2-pole state-variable low-pass (zero-delay feedback), resonance, drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance); a comb tuned to the note (feedback +-, damping, mix) |
 | **Amp** | ADSR |
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch, cutoff, amp, mix) |
 | **Mod envelope** | ADSR with LOOP (attack-decay until release); into the LFO's rate or depth, or any LFO destination |
@@ -48,7 +48,7 @@ envelopes, the LFO, the effects chain.
 | Page | Button | Rows |
 | --- | --- | --- |
 | OSC 1, OSC 2 | EDIT | WAVE, WAVE2, RATIO, MODE, ENV, MIX |
-| FILTER | ENV (twice) | FILTER, ENV, DRIVE |
+| FILTER | ENV (twice) | FILTER, ENV, DRIVE, HPF, COMB |
 | AMP | ENV | ENV, VEL |
 | LFO | LFO | LFO, DEST, M.ENV, M.DST |
 | MIX | GLO | OSC, GLIDE |

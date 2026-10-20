@@ -173,6 +173,17 @@ int main(void)
         p.fenv = 127; p.flt_a = 0; p.flt_d = 75; p.flt_s = 0; p.flt_r = 60;
         render("fenv", &p, A2, 1, 900, 1000);
         p = solo(); p.drive = 127; render("drive", &p, A4, 1, 900, 1000);
+        p = saw_through(127, 0); p.hp_cut = 92; render("hp_880", &p, A2, 1, 900, 1000);   /* 883 Hz */
+        p = solo(); p.comb_mix = 127; p.comb_fb = 127; p.comb_damp = 0;   /* a sine on A4 into the comb */
+        render("comb_on", &p, A4, 1, 900, 1000);   /* on the note: 440 a peak */
+        p.comb_fb = 0; render("comb_neg", &p, A4, 1, 900, 1000);   /* - : the peaks between: 440 a notch */
+        p.comb_fb = 127; p.comb_tune = 31; render("comb_5th", &p, A4, 1, 900, 1000);   /* 659 Hz: 440 between */
+        p = saw_through(127, 0); p.comb_mix = 127; p.comb_fb = 127; p.comb_damp = 0; p.drive = 127;
+        p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 127; p.glide = 90;   /* the worst: driven, swept, at full */
+        {
+            static const uint8_t LOW[] = {12, 100};
+            render("comb_stable", &p, LOW, 2, 1500, 2000);
+        }
         p = saw_through(10, 127);               /* the worst: full resonance, drive, the envelope sweeping it */
         p.drive = 127; p.fenv = 127; p.flt_d = 40; p.flt_s = 0; p.amp_r = 30;
         render("stable", &p, A5, 1, 700, 1500);
@@ -470,6 +481,7 @@ int main(void)
             p.cho_mix = p.dly_mix = p.rev_mix = 127; p.dly_shift = 0; p.rev_shimmer = 127;
             p.dly_wdepth = p.rev_mdepth = 127;
         }
+        p.hp_cut = 40; p.comb_mix = 127; p.comb_fb = 120;   /* the high-pass and the comb, on every voice */
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
         memset(voice, 0, sizeof voice);
         engine_init();

@@ -116,6 +116,20 @@ int main(void)
               "format 6: slot 2's sound and arp kept");
         CHECK(a.seq_len == 16 && a.seq_trig[0] == SEQ_REST && a.seq_trig[63] == SEQ_REST,
               "format 6: the sequencer comes in empty, 16 steps");
+    }
+    {                                           /* format 7 (with the sequencer, before the high-pass and comb) -> 8 */
+        static struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V7_SIZE]; } v7;
+        patch_t c = PATCH_INIT;
+        c.seq_len = 40; c.seq_trig[39] = SEQ_ACCENT; c.seq_slide[2] = 1; c.cut = 5;
+        memset(&v7, 0, sizeof v7);
+        v7.version = 7;
+        v7.used[4] = 1; memcpy(v7.p[4], &c, PATCH_V7_SIZE);
+        store_save(&v7, sizeof v7);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(4, &a) == 0 && !memcmp(&a, &c, PATCH_V7_SIZE) && bank.version == PATCH_VERSION,
+              "format 7: slot 5's sound and sequence kept");
+        CHECK(a.hp_cut == 0 && a.comb_mix == 0, "format 7: the high-pass and the comb come in off");
         CHECK(sizeof bank <= STORE_MAX, "the bank fits the store (%u of %u bytes)", (unsigned)sizeof bank, (unsigned)STORE_MAX);
     }
     printf(fails ? "%d failed\n" : "all passed\n", fails);

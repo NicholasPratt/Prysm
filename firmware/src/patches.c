@@ -10,23 +10,25 @@
  *   4  + the mod envelope (menv_a .. menv_amt: 88 bytes)
  *   5  + velocity (vel_amp .. vel_mod: 91 bytes)
  *   6  + glide and the arpeggiator (glide .. arp_swing: 101 bytes)
- *   7  + the sequencer (seq_len .. seq_slide) */
+ *   7  + the sequencer (seq_len .. seq_slide: 297 bytes)
+ *   8  + the high-pass and the comb (hp_cut .. comb_mix) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 7u
+#define PATCH_VERSION 8u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
 #define PATCH_V4_SIZE 88u                       /* format 4's: everything before vel_amp */
 #define PATCH_V5_SIZE 91u                       /* format 5's: everything before glide */
 #define PATCH_V6_SIZE 101u                      /* format 6's: everything before seq_len */
-#define PATCH_OLD_MAX PATCH_V6_SIZE
+#define PATCH_V7_SIZE 297u                      /* format 7's: everything before hp_cut */
+#define PATCH_OLD_MAX PATCH_V7_SIZE
 _Static_assert(__builtin_offsetof(patch_t, lfo_wave) == PATCH_V1_SIZE, "format 1 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, cho_rate) == PATCH_V2_SIZE, "format 2 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, menv_a) == PATCH_V3_SIZE, "format 3 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, vel_amp) == PATCH_V4_SIZE, "format 4 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, glide) == PATCH_V5_SIZE, "format 5 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, seq_len) == PATCH_V6_SIZE, "format 6 is a prefix of patch_t");
-_Static_assert(__builtin_offsetof(patch_t, seq_slide) <= 255u, "the UI's offsets (uint8) reach the step arrays");
+_Static_assert(__builtin_offsetof(patch_t, hp_cut) == PATCH_V7_SIZE, "format 7 is a prefix of patch_t");
 
 static struct {
     uint32_t version;
@@ -56,7 +58,8 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     if (store_load(&bank, sizeof bank) == 0 && bank.version == PATCH_VERSION)
         return;
     memset(&bank, 0, sizeof bank);
-    if (patches_from_old(6u, PATCH_V6_SIZE) != 0 &&   /* (kept in RAM; written in the new format by the next save) */
+    if (patches_from_old(7u, PATCH_V7_SIZE) != 0 &&   /* (kept in RAM; written in the new format by the next save) */
+        patches_from_old(6u, PATCH_V6_SIZE) != 0 &&
         patches_from_old(5u, PATCH_V5_SIZE) != 0 &&
         patches_from_old(4u, PATCH_V4_SIZE) != 0 &&
         patches_from_old(3u, PATCH_V3_SIZE) != 0 &&

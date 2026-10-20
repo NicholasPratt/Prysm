@@ -90,8 +90,17 @@ OSC 1                              1/5
 | FILTER | cutoff | resonance | env amount | keytrack |
 | ENV | A | D | S | R |
 | DRIVE | drive | | | |
+| HPF | high-pass cutoff (0 = off) | | | |
+| COMB | tune (+-24 st from the note) | feedback (bipolar) | damping | mix (0 = off) |
 
-The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve *(default)*.
+The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve *(default)*, with the high-pass's slope.
+
+Per voice: drive -> comb -> low-pass -> high-pass -> amp (patch format 8: `hp_cut`, `comb_*`). The **high-pass** is two
+TPT one-poles in series (12 dB / octave, no resonance), 16 Hz .. 4.2 kHz. The **comb** is a feedback comb, its delay one
+period of the note (with the voice's glide and LFO pitch; interpolated, Q8 frames), a one-pole damping in the loop,
+the input scaled by 1 - |feedback| so the peaks stay at unity; negative feedback puts the peaks between the harmonics
+(an octave down, hollow). Its lines are 4 x 2048 frames (down to 21.5 Hz) in RAM, not the pool (16 KB; .bss is then
+~64 of 96 KB); cleared when it is turned on or a voice starts from silence.
 
 ### AMP
 

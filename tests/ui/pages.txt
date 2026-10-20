@@ -27,6 +27,14 @@
 1550 enc 0 1
 1555 enc 2 30
 1600 shot
+1610 enc 0 1
+1615 enc 2 92
+1640 shot
+1650 enc 0 1
+1655 enc 2 7
+1660 enc 4 -10
+1665 enc 5 70
+1690 shot
 1700 btn 4
 1800 shot
 1900 btn 7

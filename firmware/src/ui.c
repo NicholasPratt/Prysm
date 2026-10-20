@@ -36,8 +36,8 @@
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
        K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
-       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN };   /* (the step kinds: the step under the cursor) */
-typedef struct { const char *label; uint8_t off, max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF };   /* (the step kinds: the step under the cursor) */
+typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
 
@@ -52,13 +52,13 @@ typedef struct {
 static gset_t gset = {0, -1, 0, 0, 0};
 static uint8_t gset_dirty;                      /* changed: the app saves it (when quiet) */
 #define G 3u                                    /* (page_t.osc: the page edits gset) */
-#define GO(f) ((uint8_t)__builtin_offsetof(gset_t, f))
+#define GO(f) ((uint16_t)__builtin_offsetof(gset_t, f))
 
 enum { LIT_C = 1, LIT_M1 = 2, LIT_M2 = 4, LIT_A1 = 8, LIT_A2 = 16, LIT_CURVE = 32, LIT_ENV = 64, LIT_ALL = 127,
        LIT_AR = 128,                            /* (OSC pages: the mods' AR shapes under their boxes, not the names) */
        LIT_MENV = 256 };                        /* (the LFO page: the mod envelope's picture, not the LFO's) */
-#define OO(f) ((uint8_t)__builtin_offsetof(patch_t, osc[0].f))
-#define PO(f) ((uint8_t)__builtin_offsetof(patch_t, f))
+#define OO(f) ((uint16_t)__builtin_offsetof(patch_t, osc[0].f))
+#define PO(f) ((uint16_t)__builtin_offsetof(patch_t, f))
 #define NOPRM {0, 0, 0, K_NONE}
 
 static const row_t OSC_ROWS[] = {
@@ -82,6 +82,9 @@ static const row_t FILTER_ROWS[] = {
     {"ENV", {{"A", PO(flt_a), 127, K_NUM}, {"D", PO(flt_d), 127, K_NUM},
              {"S", PO(flt_s), 127, K_NUM}, {"R", PO(flt_r), 127, K_NUM}}, LIT_ENV},
     {"DRIVE", {{"DRIVE", PO(drive), 127, K_NUM}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},
+    {"HPF", {{"CUT", PO(hp_cut), 127, K_HPF}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},
+    {"COMB", {{"TUNE", PO(comb_tune), 48, K_SEMI}, {"FDBK", PO(comb_fb), 127, K_BIP},
+              {"DAMP", PO(comb_damp), 127, K_NUM}, {"MIX", PO(comb_mix), 127, K_NUM}}, LIT_CURVE},
 };
 static const row_t AMP_ROWS[] = {
     {"ENV", {{"A", PO(amp_a), 127, K_NUM}, {"D", PO(amp_d), 127, K_NUM},
@@ -232,6 +235,15 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_STRIG: put(s, SEQ_TRIG_NAME[*v < SEQ_TRIGS ? *v : 0u]); break;
     case K_SSLIDE: put(s, *v ? "ON" : "OFF"); break;
     case K_SLEN: num(s, *v); break;
+    case K_HPF:                                 /* OFF, or Hz (to the half semitone): 8.176 Hz x 2^(q / 48) */
+        if (*v) {
+            int32_t q = hp_q(*v);
+            uint32_t h = ((8176u * PR_EXP2_24_Q12[(q % 48) >> 1]) >> 12) << (q / 48);   /* mHz */
+            if (h < 1000000u) put(num(s, (h + 500u) / 1000u), "Hz");
+            else { char *e = num(s, h / 1000000u); *e++ = '.'; put(num(e, h / 100000u % 10u), "k"); }
+        } else
+            put(s, "OFF");
+        break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
         uint32_t h = PR_LFO_HZ100[*v & 127u];
         char *e = num(s, h / 100u);
@@ -335,29 +347,43 @@ static int32_t msb64(uint64_t v)                /* the highest set bit (no libgc
     return n;
 }
 
+static uint64_t x2_at(int32_t dq)                /* (f / fc)^2 in Q12, dq quarter semitones from the cutoff */
+{
+    int32_t e = dq >= 0 ? dq / 24 : -((-dq + 23) / 24), f = dq - 24 * e;
+    uint64_t x2 = PR_EXP2_24_Q12[f];
+    if (e >= 12) return 1u << 24;
+    if (e >= 0) return x2 << e;
+    return -e >= 31 ? 0 : x2 >> -e;
+}
+
+static int32_t lg2_q8(uint64_t v)               /* log2(v) in Q8 (a straight line between the powers of 2) */
+{
+    int32_t l2 = msb64(v) * 256;
+    return l2 + (int32_t)((l2 >= 8 * 256 ? v >> (l2 / 256 - 8) : v << (8 - l2 / 256)) & 255u);
+}
+
 static void gfx_filter(uint32_t lit)
 {
-    /* the response: |H|^2 = 1 / ((1 - x^2)^2 + k^2 x^2), x = f / fc, over MIDI 16 .. 135, +24 .. -36 dB */
+    /* the response: |H|^2 = 1 / ((1 - x^2)^2 + k^2 x^2), x = f / fc, over MIDI 16 .. 135, +24 .. -36 dB; with the
+     * high-pass, each of its one-poles x^2 / (1 + x^2) */
     const int32_t W = 160, top = 2, h = G_H - 4;
     uint64_t k12 = eg.f_k >> 12;
-    int32_t px, py = 0, cx = (eg.f_cut - 64) * (W - 1) / 476;
+    int32_t px, py = 0, cx = (eg.f_cut - 64) * (W - 1) / 476, hq = edit.hp_cut ? hp_q(edit.hp_cut) : 0;
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
     for (px = 0; px < W; px += 8)               /* the 0 dB line, dotted; the cutoff */
         cv_pset(px, top + 24, C_FAINT);
     for (py = top; py < top + h; py += 3)
         cv_pset(cx, py, C_FAINT);
     for (px = 0; px < W; px++) {
-        int32_t dq = 64 + px * 476 / (W - 1) - eg.f_cut, e = dq >= 0 ? dq / 24 : -((-dq + 23) / 24), f = dq - 24 * e;
-        uint64_t x2 = PR_EXP2_24_Q12[f], den, one = 4096;
-        int32_t l2, db, y;
-        if (e >= 12) x2 = 1u << 24;
-        else if (e >= 0) x2 <<= e;
-        else x2 = -e >= 31 ? 0 : x2 >> -e;
+        int32_t q = 64 + px * 476 / (W - 1), db, y;
+        uint64_t x2 = x2_at(q - eg.f_cut), den, one = 4096;
         den = (x2 > one ? (x2 - one) * (x2 - one) : (one - x2) * (one - x2)) + ((k12 * k12 * x2) >> 12);
         if (!den) den = 1;
-        l2 = msb64(den) * 256;                  /* log2(den) in Q8 (a straight line between the powers of 2) */
-        l2 += (int32_t)((l2 >= 8 * 256 ? den >> (l2 / 256 - 8) : den << (8 - l2 / 256)) & 255u);
-        db = (-(l2 - 24 * 256) * 3083) / (1024 * 256);   /* -10 log10(den / 2^24) = -3.0103 log2(...) */
+        db = (-(lg2_q8(den) - 24 * 256) * 3083) / (1024 * 256);   /* -10 log10(den / 2^24) = -3.0103 log2(...) */
+        if (hq) {                               /* the high-pass: -2 x 10 log10((1 + x^2) / x^2) */
+            uint64_t xh = x2_at(q - hq);
+            db = xh ? db - 2 * (lg2_q8(xh + one) - lg2_q8(xh)) * 3083 / (1024 * 256) : -99;
+        }
         y = top + 24 - db;
         if (y < top) y = top;
         if (y > top + h - 1) y = top + h - 1;
