@@ -61,19 +61,25 @@ When a fifth note comes, the voice that is quietest (or, if all are held, the ol
 Every page works the same way:
 
 ```
- OSC 1  WAVE                    3*  1/7  22%      <- page, row     slot, unsaved (*), page number, CPU
- [carrier] <- [ mod 1 ] <- [ mod 2 ]              <- the page's picture: what the row touches is lit
-    BANK    WAVE    BANK    WAVE                  <- the selected row's four knobs, over their values
- * BASIC   SINE    BASIC   SINE                   <- the selected row (filled marker)
- o BASIC   SINE                                   <- the other rows
- o  x1      x2      x1      0c
+ OSC 1 > WAVE              3* [###   ]     <- page > row          slot, unsaved (*), CPU bar
+ ----------------------------------------
+  CAR       MOD1      MOD2
+ [carrier] <- [ mod 1 ] <- [ mod 2 ]       <- the page's picture: what the row touches is white
+ ----------------------------------------
+  BANK     WAVE     BANK     WAVE          <- the selected row: its four knobs' names,
+  BASIC    SINE     BASIC    SINE          <- their values, large,
+  ---      ----                            <- and a bar under each level
+ ----------------------------------------
+  [WAVE]  WAVE2  RATIO  MODE  ENV          <- the page's rows: SELECT moves along them
 ```
+
+Turning a knob shows its name and value large over the picture for a moment (PRESETS too: the cutoff).
 
 | Control | Does |
 | --- | --- |
 | **ALGORITHM** | the next / previous page |
-| **PRESETS** | the filter's cutoff, from any page (the header shows the value for a moment) |
-| **SELECT** | the row |
+| **PRESETS** | the filter's cutoff, from any page (shown large for a moment) |
+| **SELECT** | the row (the tabs along the bottom) |
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
 | **EDIT** | OSC 1 (press again: OSC 2) |
 | **ENV** | AMP (press again: FILTER) |
@@ -88,8 +94,8 @@ Every page works the same way:
 | **HOME** | the oscilloscope |
 | **SAVE** | the PATCH screen |
 
-The header's **CPU** figure is how much of the FM-1's time the sound takes (its peak over the last half second).
-Keep it under about 70 %: near 100 % the sound starts to crackle.
+The header's **CPU** bar is how much of the FM-1's time the sound takes (its peak over the last half second); it
+turns bright past 70 %. Keep it under that: near 100 % the sound starts to crackle.
 
 Values go from 0 to 127 unless the page says otherwise. Bipolar values (shown with a sign, like `+24`) are 0 in the
 middle of their knob.
@@ -330,7 +336,7 @@ A step sequencer of up to **64 steps**, one note each, 303-style: notes, rests, 
 alongside the keys (and the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock.
 Each patch has its own pattern.
 
-The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a lilac one a note, a white one an
+The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white one an
 accent; a little bar joins a sliding step to the next; past the length, dots. The cursor is ringed (white while
 recording); a mark under a square shows the step playing.
 
@@ -392,7 +398,7 @@ osc 1 wave (a dash: empty). The selected slot has a double edge; a dot marks the
 ## The oscilloscope
 
 Press **HOME** for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
-down): **left in white, right in lilac** (the chorus and a ping-pong delay show as the two apart).
+down): **left in white, right in grey** (the chorus and a ping-pong delay show as the two apart).
 
 - It locks onto the **newest note**: the trace shows that many of its cycles, starting on a rising zero, so the
   wave stands still whatever you play. **KNOB1** sets how many cycles (1 .. 8; it starts at 2).

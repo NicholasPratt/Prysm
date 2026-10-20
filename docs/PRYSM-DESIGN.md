@@ -50,7 +50,7 @@ Status: release 0.2 (site/: the web installer and the manual). User manual: docs
 
 ## Controls
 
-- **SELECT** moves the row on the current page (a marker shows it).
+- **SELECT** moves the row on the current page (the tabs along the bottom show it).
 - **KNOB1–KNOB4** edit the row's (up to) 4 parameters, left to right.
 - **Pages** are stepped through with **ALGORITHM**, or reached directly with buttons:
   - **EDIT**: OSC 1, press again for OSC 2;
@@ -59,14 +59,18 @@ Status: release 0.2 (site/: the web installer and the manual). User manual: docs
   - **GLO**: MIX, press again for SETUP;
   - **FX**: CHORUS, then DELAY, then REVERB;
   - **SELECT** (the button): FILTER.
-- **PRESETS** is the filter's cutoff on every page but PATCH (the header shows it for 1.2 s).
+- **PRESETS** is the filter's cutoff on every page but PATCH (shown large over the picture for 1.2 s).
 - **MASTER** stays the output volume (platform).
 - **OCT- / OCT+** set the keyboard octave (kept).
 
 ## Pages
 
 The display is graphical where possible: waves drawn in their boxes and envelopes drawn as shapes, all redrawn as
-the knobs turn.
+the knobs turn. White and greys on black. Top to bottom (ui.c): the header (page > row; slot, `*`, a CPU bar), the
+picture (240 x 124: a faint dotted grid, one line weight, a dim fill under curves, what the row touches in white),
+the focus row (the selected row's four labels, values in FONT_M, Terminus 22 bold from tools/gen_font_m.py, and a
+bar under each level), the tabs (the page's rows, the selected one inverted). A knob turned: its name and value in
+FONT_L over the picture for 1.2 s.
 
 ### OSC 1 / OSC 2
 
@@ -165,7 +169,7 @@ the comb's keytrack follows).
 
 ### SCOPE (HOME)
 
-The output before MASTER, left (white) and right (lilac), captured by the ISR only while shown (2048 frames);
+The output before MASTER, left (white) and right (grey), captured by the ISR only while shown (2048 frames);
 triggered on a rising zero over 1 .. 8 cycles (KNOB1) of the newest note's period; auto-zoom x1 .. x8; redrawn
 every 40 ms.
 

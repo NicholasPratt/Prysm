@@ -26,15 +26,29 @@
 #define C_FAINT RGB(72, 72, 72)                 /* guides, dotted lines, what is off */
 #define C_BOX RGB(56, 56, 56)                   /* frames */
 #define C_SEL RGB(40, 40, 40)                   /* the selected row's band */
+#define C_FILL RGB(34, 34, 34)                  /* under a curve */
 
+#include "prysm_font_m.h"                       /* FONT_M: the focus row's values (Terminus 22 bold, 11 x 22) */
+
+/* the screen, top to bottom: the header (the page > the row; the slot, unsaved, the CPU), the picture, the focus
+ * row (the selected row's four labels and values, large, a bar under each), the tabs (every row of the page) */
 #define HDR_Y 0u
-#define G_Y 20u                                 /* the graphic: 240 x G_H */
-#define G_H 64u
-#define LEG_Y 86u                               /* the legend */
-#define ROW_Y 104u                              /* the rows: ROW_H each */
+#define G_Y 21u                                 /* the picture: 240 x G_H */
+#define G_H 124u
+#define FOC_Y 151u                              /* the focus row: labels, values, bars */
+#define FOC_H 52u
+#define FOC_W 60                                /* a cell each knob */
+#define TAB_Y 216u                              /* the tabs */
+#define TAB_H 22u
+#ifndef POP_MS
+#define POP_MS 1200u                            /* a knob turned: its name and value, large, over the picture */
+#endif
+/* (the PATCH screen keeps the old layout: a 64 px picture, a legend, its rows) */
+#define PA_G_H 64u
+#define LEG_Y 86u
+#define ROW_Y 104u
 #define ROW_H 22u
-#define CELL_X 14                               /* the four cells, after the markers */
-#define CELL_W 56
+#define CELL_X 14
 #define UI_FRAME_MS 30u
 
 /* ---- the parameters */
@@ -295,22 +309,55 @@ static void cv_circle(int32_t cx, int32_t cy, int32_t r, uint16_t c, int fill)
         }
 }
 
+static void cv_frame(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)   /* a 1 px outline */
+{
+    cv_rect(x, y, w, 1, c); cv_rect(x, y + h - 1, w, 1, c);
+    cv_rect(x, y, 1, h, c); cv_rect(x + w - 1, y, 1, h, c);
+}
+
+static void cv_hdots(int32_t x0, int32_t x1, int32_t y, int32_t step)   /* a guide: dotted, faint */
+{
+    for (; x0 < x1; x0 += step) cv_pset(x0, y, C_FAINT);
+}
+
+static void cv_vdots(int32_t x, int32_t y0, int32_t y1, int32_t step)
+{
+    for (; y0 < y1; y0 += step) cv_pset(x, y0, C_FAINT);
+}
+
+static void cv_under(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t base)   /* the fill under a segment */
+{
+    int32_t x;
+    for (x = x0; x <= x1; x++) {
+        int32_t y = x1 > x0 ? y0 + (y1 - y0) * (x - x0) / (x1 - x0) : y1;
+        if (base > y) cv_rect(x, y, 1, base - y, C_FILL);
+        else if (y > base) cv_rect(x, base, 1, y - base, C_FILL);
+    }
+}
+
 static void cv_adsr(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t a, uint32_t d, uint32_t s, uint32_t r,
                     uint16_t c)                 /* an envelope's shape: times as widths, the sustain as a height */
 {
     int32_t seg = w / 4, aw = 1 + (int32_t)a * (seg - 1) / 127, dw = 1 + (int32_t)d * (seg - 1) / 127;
     int32_t rw = 1 + (int32_t)r * (seg - 1) / 127, sy = y + h - (int32_t)s * h / 127;
     int32_t x1 = x + aw, x2 = x1 + dw, x4 = x + w - 1, x3 = x4 - rw;
+    cv_under(x, y + h, x1, y, y + h); cv_under(x1, y, x2, sy, y + h);
+    cv_under(x2, sy, x3, sy, y + h); cv_under(x3, sy, x4, y + h, y + h);
+    cv_hdots(x, x4, y + h, 4);                  /* the floor */
     cv_line(x, y + h, x1, y, c);
     cv_line(x1, y, x2, sy, c);
     cv_line(x2, sy, x3, sy, c);
     cv_line(x3, sy, x4, y + h, c);
+    cv_vdots(x1, y, y + h, 3);                  /* the stages' edges */
+    cv_vdots(x2, sy, y + h, 3);
+    cv_vdots(x3, sy, y + h, 3);
 }
 
 /* ---- the graphics, one per kind of page */
-static const int32_t BOX_X[NOP] = {14, 98, 182}; /* carrier, mod 1, mod 2: right to left is the signal's way */
-#define BOX_W 52
-#define BOX_H 42
+static const int32_t BOX_X[NOP] = {6, 88, 170};  /* carrier, mod 1, mod 2: right to left is the signal's way */
+#define BOX_W 64
+#define BOX_H 62
+#define BOX_Y 18
 
 static void gfx_osc(uint32_t o, uint32_t lit)   /* the sketch: carrier <- mod 1 <- mod 2 */
 {
@@ -321,26 +368,29 @@ static void gfx_osc(uint32_t o, uint32_t lit)   /* the sketch: carrier <- mod 1 
         uint16_t edge = lit & LITS[k] ? C_ACC : C_BOX, line = lit & LITS[k] ? C_BRIGHT : C_MID;
         int32_t x0 = BOX_X[k], px = 0, py = 0;
         char s[16];
-        cv_rect(x0, 0, BOX_W, 1, edge); cv_rect(x0, BOX_H - 1, BOX_W, 1, edge);
-        cv_rect(x0, 0, 1, BOX_H, edge); cv_rect(x0 + BOX_W - 1, 0, 1, BOX_H, edge);
-        for (i = 0; t && i < (uint32_t)BOX_W - 6u; i++) {
-            int32_t x = x0 + 3 + (int32_t)i, y = BOX_H / 2 - t[i * PW_N / ((uint32_t)BOX_W - 6u)] * (BOX_H / 2 - 4) / 32767;
-            if (i) cv_line(px, py, x, y, line);
+        static const char *const ROLE[NOP] = {"CAR", "MOD1", "MOD2"};
+        cv_text(x0 + (BOX_W - text_w(&FONT_S, ROLE[k])) / 2, 0, &FONT_S, ROLE[k], lit & LITS[k] ? C_MID : C_FAINT);
+        cv_frame(x0, BOX_Y, BOX_W, BOX_H, edge);
+        cv_hdots(x0 + 3, x0 + BOX_W - 3, BOX_Y + BOX_H / 2, 4);   /* the zero line */
+        for (i = 0; t && i < (uint32_t)BOX_W - 6u; i++) {   /* the wave, filled to its zero line */
+            int32_t x = x0 + 3 + (int32_t)i, y = BOX_Y + BOX_H / 2 - t[i * PW_N / ((uint32_t)BOX_W - 6u)] * (BOX_H / 2 - 5) / 32767;
+            if (i) { cv_under(px, py, x, y, BOX_Y + BOX_H / 2); cv_line(px, py, x, y, line); }
             px = x; py = y;
         }
-        if (lit & LIT_AR && k) {                /* the ENV row: the modulator's AR (attack up, hold, release down) */
-            int32_t aw = 1 + (int32_t)edit.osc[o].att[k - 1u] * 15 / 127, rw = 1 + (int32_t)edit.osc[o].rel[k - 1u] * 15 / 127;
-            int32_t xa = x0 + 6, xh = xa + aw, xr = x0 + BOX_W - 6 - rw, yb = G_H - 3, yt = BOX_H + 4;
-            cv_line(xa, yb, xh, yt, C_ACC);
-            cv_line(xh, yt, xr, yt, C_ACC);
-            cv_line(xr, yt, xr + rw, yb, C_ACC);
-            continue;
-        }
         put(s, PW_WAVE_NAME[edit.osc[o].bank[k] < PW_BANKS ? edit.osc[o].bank[k] : 0u][wave_index(edit.osc[o].pos[k])]);
-        cv_text(x0 + (BOX_W - text_w(&FONT_S, s)) / 2, BOX_H + 3, &FONT_S, s, lit & LITS[k] ? C_BRIGHT : C_MID);
+        cv_text(x0 + (BOX_W - text_w(&FONT_S, s)) / 2, BOX_Y + BOX_H + 3, &FONT_S, s, lit & LITS[k] ? C_BRIGHT : C_MID);
+        if (k) {                                /* the modulator's AR under it: attack up, hold, release down */
+            int32_t aw = 1 + (int32_t)edit.osc[o].att[k - 1u] * 18 / 127, rw = 1 + (int32_t)edit.osc[o].rel[k - 1u] * 18 / 127;
+            int32_t xa = x0 + 4, xh = xa + aw, xr = x0 + BOX_W - 4 - rw, yb = G_H - 2, yt = BOX_Y + BOX_H + 23;
+            uint16_t ac = lit & LIT_AR ? C_BRIGHT : C_FAINT;
+            if (lit & LIT_AR) { cv_under(xa, yb, xh, yt, yb); cv_under(xh, yt, xr, yt, yb); cv_under(xr, yt, xr + rw, yb, yb); }
+            cv_line(xa, yb, xh, yt, ac);
+            cv_line(xh, yt, xr, yt, ac);
+            cv_line(xr, yt, xr + rw, yb, ac);
+        }
     }
     for (k = 0; k < 2u; k++) {                  /* the arrows: mod k+1 into the one on its left; thicker = more */
-        int32_t xr = BOX_X[k + 1u] - 2, xl = BOX_X[k] + BOX_W + 1, y = BOX_H / 2, mx = (xl + xr) / 2;
+        int32_t xr = BOX_X[k + 1u] - 2, xl = BOX_X[k] + BOX_W + 1, y = BOX_Y + BOX_H / 2, mx = (xl + xr) / 2;
         uint32_t amt = edit.osc[o].amt[k], mode = edit.osc[o].mode[k], th = amt > 85u ? 2u : amt > 42u ? 1u : 0u, j;
         uint16_t c = lit & (k ? LIT_A2 : LIT_A1) ? C_ACC : amt ? C_MID : C_FAINT;
         for (j = 0; j <= th; j++) {
@@ -390,14 +440,15 @@ static void gfx_filter(uint32_t lit)
 {
     /* the response: |H|^2 = 1 / ((1 - x^2)^2 + k^2 x^2), x = f / fc (LP 24: and 1 / (1 + x^4); the comb: its peaks),
      * over MIDI 16 .. 135, +24 .. -36 dB; with the high-pass, each of its one-poles x^2 / (1 + x^2) */
-    const int32_t W = 160, top = 2, h = G_H - 4;
+    const int32_t W = 164, top = 4, h = G_H - 12;   /* 2 px a dB */
     uint64_t k12 = eg.f_k >> 12;
     int32_t px, py = 0, fq = eg.flt_type >= FLT_COMBP ? eg.comb_p16 >> 2 : eg.f_cut, cx = (fq - 64) * (W - 1) / 476, hq = edit.hp_cut ? hp_q(edit.hp_cut) : 0;
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
-    for (px = 0; px < W; px += 8)               /* the 0 dB line, dotted; the cutoff */
-        cv_pset(px, top + 24, C_FAINT);
-    for (py = top; py < top + h; py += 3)
-        cv_pset(cx, py, C_FAINT);
+    cv_hdots(0, W, top + 48, 4);                /* 0 dB, dotted; the octaves; the cutoff */
+    for (px = 48; px < 476; px += 48)
+        cv_vdots(px * (W - 1) / 476, top, top + h, 6);
+    cv_vdots(cx, top, top + h, 2);
+    cv_text(4, top, &FONT_S, FLT_NAME[eg.flt_type < FLT_N ? eg.flt_type : 0u], C_FAINT);
     for (px = 0; px < W; px++) {
         int32_t q = 64 + px * 476 / (W - 1), db, y;
         uint64_t x2 = x2_at(q - eg.f_cut), den, one = 4096;
@@ -417,25 +468,25 @@ static void gfx_filter(uint32_t lit)
             uint64_t xh = x2_at(q - hq);
             db = xh ? db - 2 * (lg2_q8(xh + one) - lg2_q8(xh)) * 3083 / (1024 * 256) : -99;
         }
-        y = top + 24 - db;
+        y = top + (24 - db) * 2;
         if (y < top) y = top;
         if (y > top + h - 1) y = top + h - 1;
-        if (px) cv_line(px - 1, py, px, y, c);
+        if (px) { cv_under(px - 1, py, px, y, top + h); cv_line(px - 1, py, px, y, c); }
         py = y;
     }
-    if (edit.drive) {                           /* drive: a little bar under the curve */
-        cv_rect(0, G_H - 2, (int32_t)edit.drive * W / 127, 2, lit & LIT_CURVE ? C_ACC : C_MID);
-    }
-    for (py = 4; py < (int32_t)G_H - 4; py += 2)   /* a faint divider: the response | the filter's envelope */
-        cv_pset(166, py, C_FAINT);
-    cv_adsr(172, 6, 64, G_H - 12, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, lit & LIT_ENV ? C_ACC : C_MID);
+    cv_rect(0, G_H - 4, W, 1, C_BOX);           /* drive: a bar under the curve */
+    if (edit.drive)
+        cv_rect(0, G_H - 5, (int32_t)edit.drive * W / 127, 3, lit & LIT_CURVE ? C_BRIGHT : C_MID);
+    cv_vdots(170, 2, G_H - 2, 2);               /* the response | the filter's envelope */
+    cv_text(176, 0, &FONT_S, "ENV", C_FAINT);
+    cv_adsr(176, 20, 60, G_H - 26, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, lit & LIT_ENV ? C_ACC : C_MID);
 }
 
 /* the mod envelope over 2 s (the key held 1.5 s), simulated block by block with the engine's own steps; with LFO
  * RATE or LFO AMT, the LFO under it, as the envelope moves it */
 static void gfx_menv(uint32_t lit)
 {
-    const int32_t x0 = 4, w = 232, top = 3, h = G_H - 8;
+    const int32_t x0 = 4, w = 232, top = 4, h = G_H - 10;
     const uint32_t blocks = 2000u * 44100u / 1000u / BLK, held = blocks * 3u / 4u;
     uint32_t b, ph = 0, lfo = eg.me_dest == DEST_LFORATE || eg.me_dest == DEST_LFOAMT, rng = 12345u;
     int32_t px = -1, pe = 0, pl = 0, sh = lfo_random(&rng);
@@ -459,13 +510,15 @@ static void gfx_menv(uint32_t lit)
         ye = top + h - me * h / 32767;
         yl = top + h / 2 - l * (h / 2 - 2) / 32767;
         if (px >= 0) {
-            if (lfo) cv_line(x0 + px, pl, x0 + x, yl, lit & LIT_CURVE ? C_BRIGHT : C_MID);
+            cv_under(x0 + px, pe, x0 + x, ye, top + h);
+            if (lfo) cv_line(x0 + px, pl, x0 + x, yl, lit & LIT_CURVE ? C_BRIGHT : C_FAINT);
             cv_line(x0 + px, pe, x0 + x, ye, lit & LIT_ENV ? C_ACC : C_MID);
         }
         px = x; pe = ye; pl = yl;
     }
-    for (b = (uint32_t)top; b < (uint32_t)(top + h); b += 3u)   /* the key let go */
-        cv_pset(x0 + w * 3 / 4, (int32_t)b, C_FAINT);
+    cv_vdots(x0 + w * 3 / 4, top, top + h, 3);   /* the key let go */
+    cv_hdots(x0, x0 + w, top + h, 4);
+    cv_text(x0 + w * 3 / 4 + 4, top, &FONT_S, "OFF", C_FAINT);
 }
 
 static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at faster rates), the delay as a fade-in */
@@ -474,7 +527,7 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
         gfx_menv(lit);
         return;
     }
-    const int32_t x0 = 4, w = 232, mid = G_H / 2 - 2, amp = G_H / 2 - 8;
+    const int32_t x0 = 4, w = 232, mid = G_H / 2, amp = G_H / 2 - 8;
     uint32_t l2 = lit & LIT_L2, wave = l2 ? edit.lfo2_wave : edit.lfo_wave;   /* (LFO 2: no delay, no retrig) */
     uint32_t rate = l2 ? (edit.lfo2_sync ? 127u - edit.lfo2_sync * 10u : edit.lfo2_rate) : edit.lfo_rate;
     int32_t fade_w = l2 ? 0 : (int32_t)edit.lfo_delay * 70 / 127, px, py = mid;
@@ -482,8 +535,9 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
     int32_t sh = lfo_random(&rng);
     uint32_t last_ph = 0;
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
-    for (px = x0; px < x0 + w; px += 6)         /* the centre line, dotted */
-        cv_pset(px, mid, C_FAINT);
+    cv_hdots(x0, x0 + w, mid, 4);               /* the centre line; the cycles */
+    for (px = 1; px < (int32_t)cycles; px++)
+        cv_vdots(x0 + px * w / (int32_t)cycles, 4, G_H - 4, 6);
     for (px = 0; px < w; px++) {
         uint32_t ph = (uint32_t)((uint64_t)px * cycles * 0x100000000ull / (uint64_t)w);
         int32_t l, y, g = px < fade_w ? px * 32767 / (fade_w ? fade_w : 1) : 32767;
@@ -491,7 +545,7 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
         last_ph = ph;
         l = (lfo_wave(wv, ph, sh) * g) >> 15;
         y = mid - l * amp / 32767;
-        if (px) cv_line(x0 + px - 1, py, x0 + px, y, c);
+        if (px) { cv_under(x0 + px - 1, py, x0 + px, y, mid); cv_line(x0 + px - 1, py, x0 + px, y, c); }
         py = y;
     }
     if (fade_w)                                 /* the delay: where it has faded in */
@@ -504,7 +558,8 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
 static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a box each, a picture of it, its mix */
 {
     static const int32_t X[3] = {4, 84, 164};
-    const int32_t W = 72, H = 46;
+    static const char *const NAME[3] = {"CHORUS", "DELAY", "REVERB"};
+    const int32_t W = 72, H = 96;
     const uint32_t LITS[3] = {LIT_C, LIT_M1, LIT_M2};
     const uint8_t MIX[3] = {edit.cho_mix, edit.dly_mix, edit.rev_mix};
     uint32_t k;
@@ -512,9 +567,10 @@ static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a b
     for (k = 0; k < 3u; k++) {
         uint16_t edge = lit & LITS[k] ? C_ACC : C_BOX;
         int32_t x0 = X[k];
-        cv_rect(x0, 0, W, 1, edge); cv_rect(x0, H - 1, W, 1, edge);
-        cv_rect(x0, 0, 1, H, edge); cv_rect(x0 + W - 1, 0, 1, H, edge);
-        cv_rect(x0, H + 4, (int32_t)MIX[k] * W / 127, 3, MIX[k] ? (lit & LITS[k] ? C_ACC : C_MID) : C_FAINT);
+        cv_frame(x0, 0, W, H, edge);
+        cv_text(x0 + (W - text_w(&FONT_S, NAME[k])) / 2, H + 4, &FONT_S, NAME[k], lit & LITS[k] ? C_BRIGHT : C_FAINT);
+        cv_rect(x0, H + 22, W, 1, C_BOX);       /* its mix */
+        cv_rect(x0, H + 21, (int32_t)MIX[k] * W / 127, 3, MIX[k] ? (lit & LITS[k] ? C_BRIGHT : C_MID) : C_FAINT);
         if (k < 2u) {                           /* the arrow on to the next */
             cv_line(x0 + W + 1, H / 2, X[k + 1u] - 2, H / 2, C_FAINT);
             cv_line(X[k + 1u] - 2, H / 2, X[k + 1u] - 5, H / 2 - 3, C_FAINT);
@@ -522,7 +578,7 @@ static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a b
         }
     }
     {                                           /* the chorus: two lines swept against each other (left, right) */
-        int32_t a = 2 + (int32_t)edit.cho_depth * 12 / 127, py0 = 0, py1 = 0;
+        int32_t a = 3 + (int32_t)edit.cho_depth * 36 / 127, py0 = 0, py1 = 0;
         uint32_t cyc = 1u + (uint32_t)edit.cho_rate * 3u / 127u;
         for (i = 0; i < W - 8; i++) {
             uint32_t ph = (uint32_t)((uint64_t)i * cyc * 0x100000000ull / (uint64_t)(W - 8));
@@ -537,7 +593,7 @@ static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a b
     }
     {                                           /* the delay: the note, then its repeats (time apart, fading by the
                                                  * feedback; ping-pong: alternately up and down; shift: they move) */
-        int32_t gap = 4 + (int32_t)edit.dly_time * 28 / 127, h = 40, x = X[1] + 4, n = 0;
+        int32_t gap = 4 + (int32_t)edit.dly_time * 28 / 127, h = 84, x = X[1] + 4, n = 0;
         int32_t fb = (int32_t)edit.dly_fb * 31000 / 127;
         while (x < X[1] + W - 3 && h > 1 && n < 20) {
             int32_t up = !edit.dly_ping || !(n & 1), s = n ? ((int32_t)edit.dly_shift - 12) * n / 3 : 0, top;
@@ -545,7 +601,7 @@ static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a b
             top = up ? H / 2 - len - s : H / 2 + 1 - s;
             if (top < 2) top = 2;
             if (top + len > H - 2) top = H - 2 - len;
-            cv_rect(x, top, 2, len, n ? (lit & LIT_M1 ? C_ACC : C_MID) : (lit & LIT_M1 ? C_BRIGHT : C_MID));
+            cv_rect(x, top, 3, len, n ? (lit & LIT_M1 ? C_MID : C_FAINT) : (lit & LIT_M1 ? C_BRIGHT : C_MID));
             x += gap;
             if (n++) h = h * fb / 32767;
         }
@@ -560,7 +616,7 @@ static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a b
         for (i = 1; i <= len; i++) {            /* an exponential decay, drawn as a line and a few ticks under it */
             int32_t y = 6 + (H - 12) - (H - 12) * (len - i) * (len - i) / (len * len);
             cv_line(px, py, x0 + i, y, c);
-            if (!(i & 3)) cv_line(x0 + i, y, x0 + i, H - 6, lit & LIT_M2 ? C_SEL : C_FAINT);
+            cv_line(x0 + i, y + 1, x0 + i, H - 6, C_FILL);
             px = x0 + i; py = y;
         }
     }
@@ -576,13 +632,13 @@ static void gfx_arp(uint32_t lit)
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
     arp_drawn = arp.steps;
     if (!edit.arp_on) {
-        cv_text(48, 18, &FONT_S, "OFF: PLAY TURNS IT ON", C_FAINT);
+        cv_text(36, 54, &FONT_S, "OFF: KNOB1 TURNS IT ON", C_FAINT);
         return;
     }
     if (n > ARP_MAX) n = ARP_MAX;
     for (i = 0; i < n; i++) { nt[i] = held.note[i]; vl[i] = held.vel[i]; }
     if (!n) {
-        cv_text(64, 18, &FONT_S, "HOLD SOME KEYS", C_FAINT);
+        cv_text(64, 54, &FONT_S, "HOLD SOME KEYS", C_FAINT);
         return;
     }
     base = idx ? (idx - 1u) / 16u * 16u : 0u;   /* the 16 the playing step is in */
@@ -595,10 +651,11 @@ static void gfx_arp(uint32_t lit)
         tot += arp_step_len(i & 1u) >> 8;
     for (i = 0; i < 16u; i++) {
         uint32_t w = (arp_step_len(i & 1u) >> 8) * 236u / tot, gw = edit.arp_gate >= 127u ? w : w * (5u + edit.arp_gate * 95u / 127u) / 100u;
-        int32_t y = hi > lo ? 54 - (int32_t)((pat[i] - lo) * 48u / (hi - lo)) : 30;
+        int32_t y = hi > lo ? 104 - (int32_t)((pat[i] - lo) * 96u / (hi - lo)) : 56;
         uint32_t playing = idx && i == (idx - 1u) - base;
-        cv_rect(2 + (int32_t)x, y, gw > 1u ? (int32_t)gw - 1 : 1, 5, playing ? C_BRIGHT : c);
-        if (playing) cv_rect(2 + (int32_t)x, G_H - 3, (int32_t)w - 1, 2, C_ACC);
+        if (!(i & 3u)) cv_vdots(2 + (int32_t)x, 4, G_H - 8, 4);   /* the beats */
+        cv_rect(2 + (int32_t)x, y, gw > 1u ? (int32_t)gw - 1 : 1, 8, playing ? C_BRIGHT : c);
+        cv_rect(2 + (int32_t)x, G_H - 4, (int32_t)w - 1, 2, playing ? C_BRIGHT : C_BOX);
         x += w;
     }
 }
@@ -609,22 +666,23 @@ static void gfx_setup(void)                     /* the MIDI setup, in words */
     e = put(s, "MIDI IN ");
     if (gset.midi_in) e = num(put(e, "CH "), gset.midi_in); else e = put(e, "OMNI");
     put(num(put(e, "   OUT CH "), gset.midi_out + 1u), "");
-    cv_text(8, 0, &FONT_S, s, C_MID);
+    cv_text(8, 10, &FONT_S, s, C_MID);
     e = put(s, gset.clock ? "ARP CLOCK: MIDI " : "ARP CLOCK: ITS OWN");
     if (gset.clock) {
         uint32_t b = mc_bpm10;
         if (b) { e = num(e, b / 10u); *e++ = '.'; put(num(e, b % 10u), " BPM"); }
         else put(e, "(NONE YET)");
     }
-    cv_text(8, 16, &FONT_S, s, gset.clock ? C_ACC : C_MID);
+    cv_text(8, 34, &FONT_S, s, gset.clock ? C_ACC : C_MID);
     e = put(s, "PITCH BEND ");
     if (gset.bend) put(num(put(e, "+-"), gset.bend), " SEMITONES"); else put(e, "OFF");
-    cv_text(8, 32, &FONT_S, s, C_MID);
-    cv_text(8, 48, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
+    cv_text(8, 58, &FONT_S, s, C_MID);
+    cv_rect(8, 90, 224, 1, C_BOX);
+    cv_text(8, 98, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
 }
 
-/* the sequencer: 64 squares, 16 a row: a rest empty, a note lilac, an accent white, a slide joined to the next;
- * past the length a dot; the cursor ringed (lilac; white while REC), the step playing marked under */
+/* the sequencer: 64 squares, 16 a row: a rest empty, a note grey, an accent white, a slide joined to the next;
+ * past the length a dot; the cursor ringed (doubled while REC), the step playing marked under */
 static uint32_t seq_drawn = 0xFFFFFFFFu;
 static void gfx_seq(uint32_t lit)
 {
@@ -632,41 +690,59 @@ static void gfx_seq(uint32_t lit)
     (void)lit;
     seq_drawn = seq.steps;
     for (k = 0; k < 64u; k++) {
-        int32_t x = 1 + (int32_t)(k % 16u) * 15, y = 1 + (int32_t)(k / 16u) * 15;
+        int32_t x = 2 + (int32_t)(k % 16u) * 15, y = 3 + (int32_t)(k / 16u) * 30, gx = (int32_t)(k % 16u);
         uint32_t tr = edit.seq_trig[k];
+        if (gx == 4 || gx == 8 || gx == 12)     /* the beats */
+            cv_vdots(x - 2, y, y + 22, 2);
         if (k >= len) {
-            cv_rect(x + 5, y + 5, 2, 2, C_BOX);
+            cv_rect(x + 5, y + 10, 2, 2, C_BOX);
             continue;
         }
-        if (tr == SEQ_REST) {
-            cv_rect(x, y, 12, 1, C_BOX); cv_rect(x, y + 11, 12, 1, C_BOX);
-            cv_rect(x, y, 1, 12, C_BOX); cv_rect(x + 11, y, 1, 12, C_BOX);
-        } else {
-            cv_rect(x, y, 12, 12, tr == SEQ_ACCENT ? C_BRIGHT : C_ACC);
+        if (tr == SEQ_REST)
+            cv_frame(x, y, 12, 22, C_BOX);
+        else {
+            cv_rect(x, y, 12, 22, tr == SEQ_ACCENT ? C_BRIGHT : C_MID);
             if (edit.seq_slide[k] && k + 1u < len && (k % 16u) != 15u)
-                cv_rect(x + 12, y + 5, 3, 2, tr == SEQ_ACCENT ? C_BRIGHT : C_ACC);   /* the slide: on to the next */
+                cv_rect(x + 12, y + 10, 3, 3, tr == SEQ_ACCENT ? C_BRIGHT : C_MID);   /* the slide: on to the next */
         }
         if (k == seq_cursor) {                  /* the cursor */
-            uint16_t c = seq_rec ? C_BRIGHT : C_ACC;
-            cv_rect(x - 1, y - 1, 14, 1, c); cv_rect(x - 1, y + 12, 14, 1, c);
-            cv_rect(x - 1, y - 1, 1, 14, c); cv_rect(x + 12, y - 1, 1, 14, c);
+            uint16_t c = C_BRIGHT;
+            cv_frame(x - 2, y - 2, 16, 26, c);
+            if (seq_rec) cv_frame(x - 1, y - 1, 14, 24, c);
         }
         if (eg.seq_play && k == seq.playing)    /* the step playing */
-            cv_rect(x + 3, y + 13, 6, 1, C_BRIGHT);
+            cv_rect(x, y + 24, 12, 2, C_BRIGHT);
     }
 }
 
 static void gfx_mix(void)
 {
     char s[24], *e;
-    cv_text(4, 4, &FONT_S, "OSC1", C_MID);
-    cv_rect(48, 8, (int32_t)edit.lvl1 * 186 / 127, 8, C_ACC);
-    cv_text(4, 28, &FONT_S, "OSC2", C_MID);
-    cv_rect(48, 32, (int32_t)edit.lvl2 * 186 / 127, 8, C_ACC);
+    cv_text(4, 8, &FONT_S, "OSC1", C_MID);
+    cv_rect(48, 13, 186, 6, C_FILL);
+    cv_rect(48, 13, (int32_t)edit.lvl1 * 186 / 127, 6, C_BRIGHT);
+    cv_text(4, 36, &FONT_S, "OSC2", C_MID);
+    cv_rect(48, 41, 186, 6, C_FILL);
+    cv_rect(48, 41, (int32_t)edit.lvl2 * 186 / 127, 6, C_BRIGHT);
     e = put(s, "OSC2 ");
     e = put(snum(e, (int32_t)edit.semi2 - 24), "st ");
     put(snum(e, ((int32_t)edit.fine2 - 64) * 50 / 63), "c");
-    cv_text(48, 46, &FONT_S, s, C_MID);
+    cv_text(48, 64, &FONT_S, s, C_MID);
+    cv_rect(4, 90, 232, 1, C_BOX);
+    e = put(s, "GLIDE ");
+    if (edit.glide) put(e, edit.glide_mode == GLIDE_LEGATO ? "LEGATO" : "ALWAYS"); else put(e, "OFF");
+    cv_text(4, 98, &FONT_S, s, edit.glide ? C_MID : C_FAINT);
+}
+
+static char pop_name[16], pop_val[20];          /* the knob just turned (or PRESETS: the cutoff) */
+static uint32_t pop_until, pop_drawn;
+
+static void pop(const char *name, const char *val)
+{
+    put(pop_name, name);
+    put(pop_val, val);
+    pop_until = fm1_ms + POP_MS;
+    dirty |= D_GFX;
 }
 
 static void draw_gfx(void)
@@ -677,7 +753,7 @@ static void draw_gfx(void)
     case PG_OSC1: gfx_osc(0, lit); break;
     case PG_OSC2: gfx_osc(1, lit); break;
     case PG_FILTER: gfx_filter(lit); break;
-    case PG_AMP: cv_adsr(8, 4, 224, G_H - 10, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
+    case PG_AMP: cv_adsr(8, 6, 224, G_H - 14, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
     case PG_LFO: gfx_lfo(lit); break;
     case PG_LFO2: gfx_lfo(lit | LIT_L2); break;
     case PG_CHO: case PG_DLY: case PG_REV: gfx_fx(lit); break;
@@ -686,82 +762,108 @@ static void draw_gfx(void)
     case PG_SEQ: gfx_seq(lit); break;
     default: gfx_mix();
     }
+    if (fm1_ms < pop_until) {                   /* a knob turned: its name and value, large, over the picture */
+        int32_t w = text_w(&FONT_L, pop_val), bw = w + 32 < 150 ? 150 : w + 32, x0 = (240 - bw) / 2, y0 = 22;
+        bw = bw > 236 ? 236 : bw;
+        x0 = (240 - bw) / 2;
+        cv_rect(x0, y0, bw, 68, C_BLACK);
+        cv_rect(x0, y0, bw, 1, C_MID); cv_rect(x0, y0 + 67, bw, 1, C_MID);
+        cv_rect(x0, y0, 1, 68, C_MID); cv_rect(x0 + bw - 1, y0, 1, 68, C_MID);
+        cv_text((240 - text_w(&FONT_S, pop_name)) / 2, y0 + 6, &FONT_S, pop_name, C_MID);
+        cv_text((240 - w) / 2, y0 + 26, &FONT_L, pop_val, C_BRIGHT);
+        pop_drawn = 1;
+    } else
+        pop_drawn = 0;
     cv_blit(0, G_Y);
 }
 
-/* ---- the header, the legend, the rows */
-static char hdr_note[20];                       /* a moment's note in the header's right (PRESETS: the cutoff) */
-static uint32_t hdr_note_until;
-
+/* ---- the header, the focus row, the tabs */
 static void draw_hdr(void)
 {
     char s[32], *e;
-    e = put(s, PAGES[page].name);
-    if (page == PG_SEQ && seq_rec) e = put(e, " REC");
-    e = put(e, "  ");
-    put(e, PAGES[page].rows[row[page]].name);
-    draw_text_box(4, HDR_Y, 130, &FONT_S, s, page == PG_SEQ && seq_rec ? C_BRIGHT : C_ACC, 0);
-    e = s;
+    int32_t x;
+    uint32_t cpu = 0;
+    cv_begin(240, 20, C_BLACK);
+    x = cv_text(4, 1, &FONT_S, PAGES[page].name, C_BRIGHT);
+    if (page == PG_SEQ && seq_rec) {            /* REC: inverted */
+        cv_rect(x + 6, 1, 36, 16, C_BRIGHT);
+        x = cv_text(x + 10, 1, &FONT_S, "REC", C_BLACK) + 4;
+    }
+    if (page < PG_N) {                          /* > the row */
+        cv_line(x + 6, 5, x + 9, 9, C_FAINT); cv_line(x + 9, 9, x + 6, 13, C_FAINT);
+        cv_text(x + 15, 1, &FONT_S, PAGES[page].rows[row[page]].name, C_MID);
+    }
+    e = s;                                      /* the slot, and * for unsaved changes */
     if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
     else e = put(e, "-");
-    if (modified()) e = put(e, "*");            /* unsaved changes */
-    e = put(e, " ");
-    e = num(e, page + 1u);
-    e = put(e, "/");
-    e = num(e, PG_N);
+    if (modified()) e = put(e, "*");
+    cv_text(196 - text_w(&FONT_S, s), 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
 #ifndef DINGHY_HOST
-    e = put(e, "  ");
-    e = num(e, cpu_max * 100u / RENDER_TICKS);  /* the longest render since the last header: the peak */
-    put(e, "%");
+    cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak */
     cpu_max = 0;
 #endif
-    if (fm1_ms < hdr_note_until)                /* (instead, for a moment: what PRESETS just turned) */
-        draw_text_box(134, HDR_Y, 102, &FONT_S, hdr_note, C_ACC, 2);
-    else
-        draw_text_box(134, HDR_Y, 102, &FONT_S, s, C_FAINT, 2);
+    cv_rect(203, 5, 33, 9, C_BOX);              /* the CPU: a bar, bright past 70 % */
+    cv_rect(204, 6, 31, 7, C_BLACK);
+    cv_rect(205, 7, (int32_t)(cpu > 100u ? 100u : cpu) * 29 / 100, 5, cpu > 70u ? C_BRIGHT : C_MID);
+    cv_rect(0, 19, 240, 1, C_BOX);              /* the rule under it */
+    cv_blit(0, HDR_Y);
 }
 
-static void draw_legend(void)
+static void draw_focus(void)                    /* the selected row: four labels, values (large), bars */
 {
     const row_t *r = &PAGES[page].rows[row[page]];
     uint32_t i;
-    cv_begin(240, 16, C_BLACK);
-    for (i = 0; i < 4u; i++)
-        if (r->p[i].kind != K_NONE)
-            cv_text(CELL_X + (int32_t)i * CELL_W + (CELL_W - text_w(&FONT_S, r->p[i].label)) / 2, 0, &FONT_S,
-                    r->p[i].label, C_ACC);
-    cv_blit(0, LEG_Y);
-}
-
-static void draw_rows(void)
-{
-    const page_t *pg = &PAGES[page];
-    uint32_t n, i;
-    cv_begin(240, (uint32_t)pg->n * ROW_H, C_BLACK);
-    for (n = 0; n < pg->n; n++) {
-        int32_t y = (int32_t)(n * ROW_H), sel = n == row[page];
-        if (sel)
-            cv_rect(0, y, 240, ROW_H - 2, C_SEL);
-        cv_circle(6, y + 9, sel ? 4 : 3, sel ? C_ACC : C_FAINT, sel);   /* the sketch's markers */
-        for (i = 0; i < 4u; i++) {
-            const prm_t *p = &pg->rows[n].p[i];
-            const uint8_t *v;
-            char s[16];
-            int32_t x = CELL_X + (int32_t)i * CELL_W;
-            if (p->kind == K_NONE)
-                continue;
-            v = pval(page, p);
-            fmt(s, p, v);
-            cv_text(x + (CELL_W - text_w(&FONT_S, s)) / 2, y + 1, &FONT_S, s, sel ? C_BRIGHT : C_MID);
-            if (p->kind == K_NUM || p->kind == K_POS)         /* a level: a bar from the left */
-                cv_rect(x + 4, y + 17, (int32_t)*v * (CELL_W - 8) / p->max, 2, sel ? C_ACC : C_FAINT);
-            else if (p->kind == K_BIP || p->kind == K_CENT) { /* bipolar: from the middle */
-                int32_t m = x + CELL_W / 2, d = ((int32_t)*v - 64) * (CELL_W / 2 - 4) / 63;
-                cv_rect(d < 0 ? m + d : m, y + 17, d < 0 ? -d : d + 1, 2, sel ? C_ACC : C_FAINT);
-            }
+    cv_begin(240, FOC_H, C_BLACK);
+    for (i = 0; i < 4u; i++) {
+        const prm_t *p = &r->p[i];
+        const uint8_t *v;
+        char s[16];
+        int32_t x = (int32_t)i * FOC_W, w;
+        if (p->kind == K_NONE)
+            continue;
+        v = pval(page, p);
+        fmt(s, p, v);
+        cv_text(x + (FOC_W - text_w(&FONT_S, p->label)) / 2, 0, &FONT_S, p->label, C_MID);
+        if ((w = text_w(&FONT_M, s)) <= FOC_W - 4)
+            cv_text(x + (FOC_W - w) / 2, 19, &FONT_M, s, C_BRIGHT);
+        else                                    /* (too long for the large font: the small one) */
+            cv_text(x + (FOC_W - text_w(&FONT_S, s)) / 2, 22, &FONT_S, s, C_BRIGHT);
+        if (p->kind == K_NUM || p->kind == K_POS || p->kind == K_BIP || p->kind == K_CENT) {
+            int32_t bx = x + 6, bw = FOC_W - 12, by = 46;
+            cv_rect(bx, by + 1, bw, 1, C_BOX);  /* the track */
+            if (p->kind == K_BIP || p->kind == K_CENT) {   /* bipolar: from the middle */
+                int32_t m = bx + bw / 2, d = ((int32_t)*v - 64) * (bw / 2) / 63;
+                cv_rect(m, by - 1, 1, 5, C_FAINT);
+                cv_rect(d < 0 ? m + d : m, by, d < 0 ? -d : d + 1, 3, C_BRIGHT);
+            } else
+                cv_rect(bx, by, (int32_t)*v * bw / p->max, 3, C_BRIGHT);
         }
     }
-    cv_blit(0, ROW_Y);
+    cv_blit(0, FOC_Y);
+}
+
+static void draw_tabs(void)                     /* every row of the page; the selected one inverted */
+{
+    const page_t *pg = &PAGES[page];
+    int32_t xs[8], ws[8], x = 0, shift = 0;
+    uint32_t n, sel = row[page];
+    for (n = 0; n < pg->n && n < 8u; n++) {     /* where each goes; scrolled to keep the selected one on screen */
+        ws[n] = text_w(&FONT_S, pg->rows[n].name) + 10;
+        xs[n] = x;
+        x += ws[n] + 4;
+    }
+    if (xs[sel] + ws[sel] > 238) shift = xs[sel] + ws[sel] - 238;
+    cv_begin(240, TAB_H, C_BLACK);
+    cv_rect(0, 0, 240, 1, C_BOX);               /* the rule over them */
+    for (n = 0; n < pg->n && n < 8u; n++) {
+        int32_t tx = xs[n] - shift + (x - 4 - shift < 240 ? (240 - (x - 4)) / 2 : 1);   /* (centred when they fit) */
+        if (n == sel) {
+            cv_rect(tx, 4, ws[n], 17, C_BRIGHT);
+            cv_text(tx + 5, 5, &FONT_S, pg->rows[n].name, C_BLACK);
+        } else
+            cv_text(tx + 5, 5, &FONT_S, pg->rows[n].name, C_MID);
+    }
+    cv_blit(0, TAB_Y);
 }
 
 /* ---- the PATCH screen (the SAVE button): the 8 slots as tiles, then SAVE / LOAD / INIT */
@@ -782,7 +884,7 @@ static int32_t wave_sample(uint32_t b, uint32_t pos, uint32_t i)   /* a morphed 
 static void pa_draw_gfx(void)
 {
     uint32_t s, i;
-    cv_begin(240, G_H, C_BLACK);
+    cv_begin(240, PA_G_H, C_BLACK);
     for (s = 0; s < PATCH_SLOTS; s++) {
         int32_t x = 2 + (int32_t)(s % 4u) * 59, y = 1 + (int32_t)(s / 4u) * 32, w = 56, h = 30, px = 0, py = 0;
         uint16_t edge = s == pa_slot ? C_ACC : C_BOX;
@@ -920,7 +1022,7 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
     return (int)changed;
 }
 
-/* ---- the SCOPE (the HOME button): the output, left (white) and right (lilac), triggered on a rising zero, over
+/* ---- the SCOPE (the HOME button): the output, left (white) and right (grey), triggered on a rising zero, over
  * sc_cycles periods of the newest note (whatever the note, the wave stands still), redrawn every SC_FRAME_MS */
 #define PG_SCOPE (PG_N + 1u)
 #define SC_H 132
@@ -984,7 +1086,7 @@ static void sc_draw(void)
         for (x = 0; x < 240; x++) {
             int32_t v = snap[ch][(s + (uint32_t)x * w / 240u) & (SCOPE_N - 1u)] * (int32_t)sc_gain;
             int32_t y = SC_H / 2 - v * (SC_H / 2 - 2) / 32767;
-            if (x) cv_line(x - 1, py[ch], x, y, ch ? C_ACC : C_BRIGHT);
+            if (x) cv_line(x - 1, py[ch], x, y, ch ? C_MID : C_BRIGHT);
             py[ch] = y;
         }
     cv_blit(0, SC_Y);
@@ -1006,7 +1108,7 @@ static void sc_text(void)                       /* the header: the note, the cyc
     e = num(e, sc_cycles);
     put(e, sc_cycles == 1u ? " CYCLE" : " CYCLES");
     draw_text_box(110, HDR_Y, 126, &FONT_S, s, C_FAINT, 2);
-    e = put(s, "L WHITE   R LILAC   x");
+    e = put(s, "L WHITE   R GREY   x");
     num(e, sc_gain);
     draw_text_box(0, SC_Y + SC_H + 12u, 240, &FONT_S, s, C_FAINT, 1);
     draw_text_box(0, 222, 240, &FONT_S, "KNOB1: CYCLES   HOME: BACK", C_FAINT, 1);
@@ -1027,6 +1129,7 @@ static void ui_page(uint32_t pg)
         if (cur_slot >= 0) pa_slot = (uint32_t)cur_slot;
     }
     page = pg;
+    pop_until = 0;                              /* (the last page's pop-up goes with it) */
     dirty = D_ALL;
 }
 
@@ -1056,8 +1159,11 @@ static int ui_input(uint32_t buttons)
         if (x != edit.cut) {
             edit.cut = (uint8_t)x;
             changed = 1;
-            put(num(put(hdr_note, "CUTOFF "), (uint32_t)x), "");
-            hdr_note_until = fm1_ms + 1200u;
+            {
+                char val[8];
+                num(val, (uint32_t)x);
+                pop("CUTOFF", val);
+            }
             dirty |= D_HDR | (page == PG_FILTER ? D_GFX | D_ROWS : 0u);
         }
     }
@@ -1108,6 +1214,7 @@ static int ui_input(uint32_t buttons)
     if ((d = fm1_enc_take(ENC_SELECT)) != 0) {
         int32_t n = (int32_t)row[page] + d, max = PAGES[page].n - 1;
         row[page] = (uint32_t)(n < 0 ? 0 : n > max ? max : n);
+        pop_until = 0;
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
     r = &PAGES[page].rows[row[page]];
@@ -1137,6 +1244,11 @@ static int ui_input(uint32_t buttons)
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;
+        if (p->kind != K_CURSOR) {              /* its name and value, large, for a moment */
+            char val[16];
+            fmt(val, p, v);
+            pop(p->label, val);
+        }
         if (p->kind == K_CURSOR) {              /* the cursor: not the sound */
             dirty |= D_GFX | D_ROWS;
             continue;
@@ -1206,6 +1318,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
             dirty |= D_GFX | D_ROWS;
         }
     }
+    if (pop_drawn && fm1_ms >= pop_until)
+        dirty |= D_GFX;                         /* (the pop-up's time is up: the picture back) */
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;
@@ -1217,7 +1331,7 @@ static void ui_draw(void)                       /* from the main loop: what chan
     }
     if (dirty & D_HDR) draw_hdr();
     if (dirty & D_GFX) draw_gfx();
-    if (dirty & D_LEG) draw_legend();
-    if (dirty & D_ROWS) draw_rows();
+    if (dirty & (D_LEG | D_ROWS)) draw_focus();
+    if (dirty & D_LEG) draw_tabs();
     dirty = 0;
 }
