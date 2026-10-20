@@ -19,33 +19,13 @@
  * marker each, as in the sketch, then the four cells). Only what changed is redrawn, at most every UI_FRAME_MS.
  * Pages are tables (page_t -> row_t -> prm_t): a parameter is a field of patch_t, its range and how it shows. */
 
-/* the colours: a theme each (SETUP: THEME, global) */
-typedef struct {
-    const char *name;
-    uint16_t acc;                               /* what is being edited, where we are */
-    uint16_t bright;                            /* brighter still: what is being touched */
-    uint16_t mid;                               /* values, curves not being edited */
-    uint16_t faint;                             /* guides, dotted lines, what is off */
-    uint16_t box;                               /* frames */
-    uint16_t sel;                               /* the selected row's band */
-} theme_t;
-static const theme_t THEMES[] = {
-    {"LILAC", RGB(180, 140, 255), RGB(255, 255, 255), RGB(168, 166, 182), RGB(80, 78, 96), RGB(56, 54, 74),
-     RGB(30, 22, 50)},
-    {"AMBER", RGB(255, 156, 32), RGB(255, 228, 170), RGB(196, 160, 118), RGB(96, 70, 44), RGB(72, 50, 28),
-     RGB(46, 26, 6)},
-    {"MONO", RGB(255, 255, 255), RGB(255, 255, 255), RGB(150, 150, 150), RGB(72, 72, 72), RGB(56, 56, 56),
-     RGB(40, 40, 40)},
-};
-#define THEME_N (sizeof THEMES / sizeof THEMES[0])
-static theme_t ui_th;                           /* the one in use */
-#define C_ACC ui_th.acc
-#define C_BRIGHT ui_th.bright
-#define C_MID ui_th.mid
-#define C_FAINT ui_th.faint
-#define C_BOX ui_th.box
-#define C_SEL ui_th.sel
-static void theme_set(uint32_t i) { ui_th = THEMES[i < THEME_N ? i : 0u]; }
+/* the colours: white and greys on black */
+#define C_ACC RGB(255, 255, 255)                /* what is being edited, where we are */
+#define C_BRIGHT RGB(255, 255, 255)             /* what is being touched */
+#define C_MID RGB(150, 150, 150)                /* values, curves not being edited */
+#define C_FAINT RGB(72, 72, 72)                 /* guides, dotted lines, what is off */
+#define C_BOX RGB(56, 56, 56)                   /* frames */
+#define C_SEL RGB(40, 40, 40)                   /* the selected row's band */
 
 #define HDR_Y 0u
 #define G_Y 20u                                 /* the graphic: 240 x G_H */
@@ -60,7 +40,7 @@ static void theme_set(uint32_t i) { ui_th = THEMES[i < THEME_N ? i : 0u]; }
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
        K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
-       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC, K_BEND, K_THEME };   /* (the step kinds: the step under the cursor) */
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC, K_BEND };   /* (the step kinds: the step under the cursor) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -73,14 +53,9 @@ typedef struct {
     uint8_t midi_out;                           /* 0 .. 15 = channel 1 .. 16 */
     uint8_t clock;                              /* the arp: 0 its own, 1 the MIDI clock */
     uint8_t bend;                               /* MIDI pitch bend's range: 0 .. 24 semitones */
-    uint8_t theme;                              /* THEMES[] */
 } gset_t;
 #define GSET_V1_SIZE 5u                         /* (before bend) */
-#define GSET_V2_SIZE 6u                         /* (before theme) */
-#ifndef PRYSM_THEME
-#define PRYSM_THEME 0                           /* (the first time; tests/run_ui.sh draws the others with -D) */
-#endif
-static gset_t gset = {0, -1, 0, 0, 0, 2, PRYSM_THEME};
+static gset_t gset = {0, -1, 0, 0, 0, 2};
 static uint8_t gset_dirty;                      /* changed: the app saves it (when quiet) */
 #define G 3u                                    /* (page_t.osc: the page edits gset) */
 #define GO(f) ((uint16_t)__builtin_offsetof(gset_t, f))
@@ -148,7 +123,6 @@ static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cu
 static const row_t SETUP_ROWS[] = {
     {"MIDI", {{"IN", GO(midi_in), 16, K_MCHI}, {"OUT", GO(midi_out), 15, K_MCHO},
               {"CLOCK", GO(clock), 1, K_CLK}, {"BEND", GO(bend), 24, K_BEND}}, LIT_ALL},
-    {"SCREEN", {{"THEME", GO(theme), THEME_N - 1u, K_THEME}, NOPRM, NOPRM, NOPRM}, LIT_ALL},
 };
 /* the effects, a page each (the FX button steps through them); lit: LIT_C the chorus, LIT_M1 the delay, LIT_M2 the
  * reverb */
@@ -282,7 +256,6 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_MCHI: if (*v) num(s, *v); else put(s, "OMNI"); break;
     case K_MCHO: num(s, *v + 1u); break;
     case K_CLK: put(s, *v ? "MIDI" : "INT"); break;
-    case K_THEME: put(s, THEMES[*v < THEME_N ? *v : 0u].name); break;
     case K_BEND: if (*v) put(num(put(s, "+-"), *v), "st"); else put(s, "OFF"); break;
     case K_CURSOR: num(s, *v + 1u); break;
     case K_SNOTE: {
@@ -1171,10 +1144,6 @@ static int ui_input(uint32_t buttons)
         if (PAGES[page].osc == G) {             /* a setting, not the sound: saved; the clock to the engine */
             gset_dirty = 1;
             engine_sync(gset.clock);
-            if (p->kind == K_THEME) {           /* a new theme: everything redrawn in it */
-                theme_set(gset.theme);
-                dirty |= D_ALL;
-            }
             dirty |= D_GFX | D_ROWS;
             continue;
         }

@@ -112,13 +112,10 @@ static void app_main(void)
     uint32_t prev = 0, k, t_change = 0, dirty = 0;
     uint8_t held[27] = {0};                     /* the note each key plays */
     uint32_t bend = 8192;                       /* the last MIDI pitch bend (the range may change under it) */
-    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; an older, shorter record (before THEME; */
-        settings_load(&gset, GSET_V2_SIZE) != 0 &&  /* before BEND; the octave, the slot) */
-        settings_load(&gset, GSET_V1_SIZE) != 0)
+    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; an older, shorter record (before BEND; the */
+        settings_load(&gset, GSET_V1_SIZE) != 0)    /* octave, the slot) */
         settings_load(&gset, 2);
     if (gset.bend > 24u) gset.bend = 2;
-    if (gset.theme >= THEME_N) gset.theme = 0;
-    theme_set(gset.theme);
     if (gset.oct < -2 || gset.oct > 2) gset.oct = 0;
     if (gset.midi_in > 16u) gset.midi_in = 0;
     if (gset.midi_out > 15u) gset.midi_out = 0;
