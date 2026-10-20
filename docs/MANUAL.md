@@ -189,7 +189,8 @@ cutoff) or less modulated (less FM brightness: the classic expressive FM touch).
 
 ### LFO
 
-One LFO per voice (or one shared, free-running), and a mod envelope that can loop.
+One LFO per voice (or one shared, free-running), a mod envelope that can loop, and LFO 2: one for all the voices,
+simpler, but with many more destinations, and it can run in time with the tempo.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
@@ -197,6 +198,8 @@ One LFO per voice (or one shared, free-running), and a mod envelope that can loo
 | DEST | destination 1 | amount 1 | destination 2 | amount 2 |
 | M.ENV | mod envelope attack | decay | sustain | release |
 | M.DST | LOOP ON / OFF | destination | amount | |
+| LFO2 | wave (as the LFO's) | rate (0.05 .. 40 Hz) | sync: OFF, 4/1, 2/1, 1/1, 1/2, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/32 | |
+| L2.DST | destination | amount | | |
 
 - **S&H** (sample and hold) jumps to a new random value each cycle.
 - **Delay**: from each note, the LFO fades in over this time (0: at once).
@@ -228,6 +231,27 @@ higher sustain a shallower cycle. Its destination can be any of the LFO's, plus 
 
 On the M.ENV and M.DST rows the picture shows two seconds of the envelope (the key held for 1.5 s, the dotted line
 where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the envelope moves it.
+
+**LFO 2** runs free, one for all the voices (so every note moves together). With **SYNC** on a division it ignores
+RATE and runs in time with the arp and sequencer's tempo (the BPM on the ARP page, or the MIDI clock when it follows
+one): 1/4 is a cycle a beat, 1/1 a bar, 4/1 four bars; T, triplets. It starts from the top when the sequencer or the
+MIDI clock starts. Its destination can be any of the LFO's, or one of these (each moves the knob up and down from where
+it is set, as far as the whole knob):
+
+| | |
+| --- | --- |
+| RES | the filter's resonance (or the comb's feedback) |
+| DRIVE | the filter's drive |
+| HPF | the high-pass cutoff |
+| DAMP | the comb's damping |
+| FENV | the filter envelope's amount, up to +-60 semitones |
+| LEVEL1, LEVEL2 | the oscillators' levels (the MIX page's) |
+| DETUNE | osc 2, up to +-1 semitone |
+| MENVAMT | the mod envelope's amount |
+| CHORUS, DELAY, REVERB | the effects' mixes (from 0: an effect that comes and goes) |
+| DLYTIME | the delay time (the repeats bend, as tape does) |
+| DLYFDBK | the delay's feedback |
+| REVSIZE | the reverb's size |
 
 ### MIX
 

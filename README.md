@@ -5,7 +5,7 @@
 <p align="center"><img src="docs/screen.png" width="240" alt="Prysm's OSC 1 page: a VOCAL carrier modulated by a CMPLX wave"></p>
 
 Two oscillators per voice, each a chain of three wavetable operators (mod 2 -> mod 1 -> carrier) that modulate
-each other by FM, ring or mix; a resonant filter (12 / 24 dB low-pass or a comb) with drive and a high-pass; an LFO with six shapes and two destinations; a mod
+each other by FM, ring or mix; a resonant filter (12 / 24 dB low-pass or a comb) with drive and a high-pass; an LFO with six shapes and two destinations; a second, tempo-syncable LFO with many more; a mod
 envelope that can loop and modulate the LFO's rate; stereo chorus, delay (with wow and pitch-shifting repeats) and
 a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; USB audio and MIDI.
 
@@ -25,6 +25,7 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Filter** | state-variable low-pass, 12 or 24 dB/oct (zero-delay feedback), or a Blofeld-style comb (COMB+ / COMB-: the cutoff its frequency, resonance its feedback, plus damping and spread); drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance) |
 | **Amp** | ADSR |
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch, cutoff, amp, mix) |
+| **LFO 2** | one for all the voices; the same shapes; free (0.05 .. 40 Hz) or in time (4/1 .. 1/32, triplets); any LFO destination, or resonance, drive, high-pass, comb damping, filter envelope amount, levels, osc 2 detune, the mod envelope's amount, the effects' mixes, delay time and feedback, reverb size |
 | **Mod envelope** | ADSR with LOOP (attack-decay until release); into the LFO's rate or depth, or any LFO destination |
 | **Effects** | stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer |
 | **Velocity** | from MIDI, to level, cutoff and modulation (the FM-1's keys play at full velocity) |
@@ -50,7 +51,7 @@ envelopes, the LFO, the effects chain.
 | OSC 1, OSC 2 | EDIT | WAVE, WAVE2, RATIO, MODE, ENV, MIX |
 | FILTER | ENV (twice) | FILTER, ENV, TYPE, COMB |
 | AMP | ENV | ENV, VEL |
-| LFO | LFO | LFO, DEST, M.ENV, M.DST |
+| LFO | LFO | LFO, DEST, M.ENV, M.DST, LFO2, L2.DST |
 | MIX | GLO | OSC, GLIDE |
 | SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK |
 | ARP | ARP (again: on / off) | ARP, TIME |

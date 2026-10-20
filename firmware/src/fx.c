@@ -104,6 +104,7 @@ static volatile struct {
     uint32_t rev_pre;                           /* samples */
     uint32_t rev_inc;
     int32_t rev_depth;                          /* the tank allpasses' sweep, samples Q16 */
+    uint8_t cho_v, dly_v, time_v, fb_v, rev_v, size_v;   /* the knobs (LFO 2 moves them: fx_lfo2) */
 } fxp;
 
 static uint32_t cho_w, cho_ph, dly_w, wow_ph, pre_w, rev_ph, dly_time_q8;
@@ -124,16 +125,23 @@ static void fx_init(void)                       /* the plate's lines over rv_mem
     }
 }
 
+static int32_t cho_mix_of(uint32_t v) { return PR_CURVE_Q15[v & 127u] / 2; }   /* full = half wet: the classic chorus */
+static int32_t dly_fb_of(uint32_t v) { return (int32_t)(v & 127u) * 31000 / 127; }   /* up to 0.95 */
+static uint32_t dly_time_of(uint32_t v) { return (441u + (v & 127u) * (DLY_N - 1100u) / 127u) << 8; }   /* 10 .. 735 ms */
+static int32_t rev_decay_of(uint32_t v) { return 6000 + (int32_t)(v & 127u) * 25500 / 127; }   /* 0.18 .. 0.96 */
+
 static void fx_set(const patch_t *p)
 {
     uint32_t r;
-    fxp.cho_mix = PR_CURVE_Q15[p->cho_mix & 127u] / 2;   /* full = half wet: the classic chorus */
+    fxp.cho_v = p->cho_mix & 127u; fxp.dly_v = p->dly_mix & 127u; fxp.time_v = p->dly_time & 127u;
+    fxp.fb_v = p->dly_fb & 127u; fxp.rev_v = p->rev_mix & 127u; fxp.size_v = p->rev_size & 127u;
+    fxp.cho_mix = cho_mix_of(p->cho_mix);
     fxp.cho_depth = (int32_t)(p->cho_depth & 127u) * (260 << 16) / 127;   /* up to +-6 ms */
     fxp.cho_inc = PR_LFO_INC[p->cho_rate & 127u] >> BLK_SHIFT;
     fxp.dly_mix = PR_CURVE_Q15[p->dly_mix & 127u];
-    fxp.dly_fb = (int32_t)(p->dly_fb & 127u) * 31000 / 127;   /* up to 0.95 */
+    fxp.dly_fb = dly_fb_of(p->dly_fb);
     fxp.dly_tone = 3000 + (int32_t)(p->dly_tone & 127u) * 29000 / 127;
-    fxp.dly_time = (441u + (uint32_t)(p->dly_time & 127u) * (DLY_N - 1100u) / 127u) << 8;   /* 10 .. 735 ms */
+    fxp.dly_time = dly_time_of(p->dly_time);
     if (!dly_time_q8)
         dly_time_q8 = fxp.dly_time;             /* (the first time: no glide up from nothing) */
     fxp.dly_ping = p->dly_ping ? 1u : 0u;
@@ -142,7 +150,7 @@ static void fx_set(const patch_t *p)
     fxp.wow_inc = PR_LFO_INC[p->dly_wrate & 127u] >> BLK_SHIFT;
     fxp.wow_depth = (int32_t)(p->dly_wdepth & 127u) * (130 << 16) / 127;   /* up to +-3 ms */
     fxp.rev_mix = PR_CURVE_Q15[p->rev_mix & 127u];
-    fxp.rev_decay = 6000 + (int32_t)(p->rev_size & 127u) * 25500 / 127;   /* 0.18 .. 0.96 */
+    fxp.rev_decay = rev_decay_of(p->rev_size);
     fxp.rev_damp = 32767 - (int32_t)(p->rev_damp & 127u) * 29000 / 127;
     fxp.rev_shim = (int32_t)(p->rev_shimmer & 127u) * 26000 / 127;   /* the share shifted: up to 0.8 */
     fxp.rev_pre = 1u + (uint32_t)(p->rev_pre & 127u) * (PRE_N - 2u) / 127u;
@@ -151,14 +159,25 @@ static void fx_set(const patch_t *p)
 }
 
 /* ---- the audio ISR: out (L R, the voices) -> chorus, delay, reverb, in place */
-static void fx_render(int32_t *out, uint32_t n)
+static void fx_render(int32_t *out, uint32_t n, const int32_t *g2)   /* g2: LFO 2, a value a block */
 {
-    uint32_t i;
-    int32_t cmix = fxp.cho_mix, dmix = fxp.dly_mix, rmix = fxp.rev_mix;
-    if (!cmix && !dmix && !rmix)
+    uint32_t i, dest = eg.l2_dest, dtime = fxp.dly_time;
+    int32_t cmix = fxp.cho_mix, dmix = fxp.dly_mix, rmix = fxp.rev_mix, dfb = fxp.dly_fb, rdec = fxp.rev_decay;
+    if (!cmix && !dmix && !rmix && !(eg.l2_amt && (dest == DEST_CHORUS || dest == DEST_DELAY || dest == DEST_REVERB)))
         return;
     for (i = 0; i < n; i++) {
         int32_t l = out[2u * i], r = out[2u * i + 1u];
+        if (DEST_FX(dest) && (i & (BLK - 1u)) == 0u) {   /* LFO 2 on an effect's knob, block by block */
+            int32_t pz = (((g2[i / BLK < MAXBLK ? i / BLK : MAXBLK - 1u] * eg.l2_amt) >> 15) * 127) >> 15;
+            switch (dest) {
+            case DEST_CHORUS: cmix = cho_mix_of(knob_moved(fxp.cho_v, pz)); break;
+            case DEST_DELAY: dmix = PR_CURVE_Q15[knob_moved(fxp.dly_v, pz)]; break;
+            case DEST_DLYTIME: dtime = dly_time_of(knob_moved(fxp.time_v, pz)); break;
+            case DEST_DLYFB: dfb = dly_fb_of(knob_moved(fxp.fb_v, pz)); break;
+            case DEST_REVERB: rmix = PR_CURVE_Q15[knob_moved(fxp.rev_v, pz)]; break;
+            default: rdec = rev_decay_of(knob_moved(fxp.size_v, pz)); break;
+            }
+        }
         if (cmix) {                             /* chorus: the mono sum into the line; two swept taps */
             int32_t sl = lfo_wave(LFO_SINE, cho_ph, 0), sr = lfo_wave(LFO_SINE, cho_ph + 0x40000000u, 0), wl, wr;
             uint32_t base = 309u << 16;         /* 7 ms */
@@ -174,8 +193,8 @@ static void fx_render(int32_t *out, uint32_t n)
             int32_t wob = (int32_t)(((int64_t)fxp.wow_depth * lfo_wave(LFO_SINE, wow_ph, 0)) >> 15), tl, tr, fl, fr;
             uint32_t d;
             if ((i & (BLK - 1u)) == 0u) {       /* the time glides (a change bends the repeats, as tape does) */
-                int32_t dd = (int32_t)(fxp.dly_time - dly_time_q8) >> 6;
-                dly_time_q8 = dd ? dly_time_q8 + (uint32_t)dd : fxp.dly_time;
+                int32_t dd = (int32_t)(dtime - dly_time_q8) >> 6;
+                dly_time_q8 = dd ? dly_time_q8 + (uint32_t)dd : dtime;
             }
             wow_ph += fxp.wow_inc;
             d = (dly_time_q8 << 8) + (uint32_t)wob;
@@ -183,8 +202,8 @@ static void fx_render(int32_t *out, uint32_t n)
             tr = rd_frac(dly_buf[1], DLY_N - 1u, dly_w, d);
             dly_lp[0] += ((tl - dly_lp[0]) * fxp.dly_tone) >> 15;   /* the repeats darken */
             dly_lp[1] += ((tr - dly_lp[1]) * fxp.dly_tone) >> 15;
-            fl = (dly_lp[0] * fxp.dly_fb) >> 15;
-            fr = (dly_lp[1] * fxp.dly_fb) >> 15;
+            fl = (dly_lp[0] * dfb) >> 15;
+            fr = (dly_lp[1] * dfb) >> 15;
             if (fxp.dly_ratio != 65536u) {      /* SHIFT: each repeat a step up or down */
                 fl = shift(&sh_dly[0], fl, fxp.dly_ratio);
                 fr = shift(&sh_dly[1], fr, fxp.dly_ratio);
@@ -220,8 +239,8 @@ static void fx_render(int32_t *out, uint32_t n)
             b2 = ln_rd(&rv_d2[1], L_D2R);
             if (fxp.rev_shim)                   /* shimmer: the left end, partly an octave up, feeds the right */
                 a += ((shift(&sh_rev, a, 131072u) - a) * fxp.rev_shim) >> 15;
-            sl = x + ((b2 * fxp.rev_decay) >> 15);   /* each side fed by the other's end */
-            sr = x + ((a * fxp.rev_decay) >> 15);
+            sl = x + ((b2 * rdec) >> 15);   /* each side fed by the other's end */
+            sr = x + ((a * rdec) >> 15);
             sl = allpass(&rv_ap1[0], sl, -22938, e0);   /* -0.70: decay diffusion 1, swept */
             sr = allpass(&rv_ap1[1], sr, -22938, e1);
             a = ln_rd(&rv_d1[0], L_D1L);
@@ -230,8 +249,8 @@ static void fx_render(int32_t *out, uint32_t n)
             ln_wr(&rv_d1[1], sr);
             rv_lp[0] += ((a - rv_lp[0]) * fxp.rev_damp) >> 15;   /* damping */
             rv_lp[1] += ((b2 - rv_lp[1]) * fxp.rev_damp) >> 15;
-            a = allpass(&rv_ap2[0], (rv_lp[0] * fxp.rev_decay) >> 15, 16384, 0);   /* 0.5: decay diffusion 2 */
-            b2 = allpass(&rv_ap2[1], (rv_lp[1] * fxp.rev_decay) >> 15, 16384, 0);
+            a = allpass(&rv_ap2[0], (rv_lp[0] * rdec) >> 15, 16384, 0);   /* 0.5: decay diffusion 2 */
+            b2 = allpass(&rv_ap2[1], (rv_lp[1] * rdec) >> 15, 16384, 0);
             ln_wr(&rv_d2[0], a);
             ln_wr(&rv_d2[1], b2);
             /* the outputs: Dattorro's taps, scaled */

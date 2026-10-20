@@ -234,6 +234,20 @@ check("lfo cutoff", max(br) > 5 * (min(br) + 1e-9), f"bright energy {min(br):.2f
 x = load("lfo_amp")
 env = np.array([rms(x, t0, t0 + 0.01) for t0 in np.arange(0.1, 1.8, 0.01)])
 check("lfo tremolo", env.min() < 0.1 * env.max(), f"level {env.min() / env.max():.3f} .. 1 of its peak")
+def trem_hz(name):                              # the tremolo's rate: the envelope's strongest frequency
+    e = np.array([rms(load(name), t0, t0 + 0.005) for t0 in np.arange(0.1, 2.9, 0.005)])
+    f = np.fft.rfft((e - e.mean()) * np.hanning(len(e)), 16 * len(e))
+    return np.fft.rfftfreq(16 * len(e), 0.005)[int(np.argmax(np.abs(f)))]
+h4, h16, hf_ = trem_hz("l2_sync4"), trem_hz("l2_sync16"), trem_hz("l2_free")
+check("lfo2 sync", 1.95 < h4 < 2.05 and 7.8 < h16 < 8.2, f"at 120 BPM: 1/4 {h4:.2f} Hz (want 2), 1/16 {h16:.2f} Hz (want 8)")
+check("lfo2 free rate", 2.8 < hf_ < 2.96, f"{hf_:.2f} Hz (rate 77: 2.88 Hz)")
+x = load("l2_lvl1")
+env = np.array([rms(x, t0, t0 + 0.01) for t0 in np.arange(0.1, 1.8, 0.01)])
+check("lfo2 level", env.min() < 0.2 * env.max(), f"level {env.min() / env.max():.3f} .. 1 of its peak")
+pk = [level_db(*spectrum(load("l2_res"), t0, t0 + 0.1), 990, 15) for t0 in np.arange(0.1, 1.8, 0.05)]
+check("lfo2 resonance", max(pk) - min(pk) > 8, f"990 Hz (at the cutoff) {min(pk):.1f} .. {max(pk):.1f} dB over the sweep")
+ld, l0 = rms(load("l2_dly"), 0.15, 1.2), rms(load("fx_dry"), 0.15, 1.2)
+check("lfo2 effect", ld > 20 * (l0 + 1e-6), f"after the note: {ld:.4f} with LFO 2 opening the delay (mix 0), {l0:.5f} dry")
 x = load("lfo_wave1")
 h = [level_db(*spectrum(x, t0, t0 + 0.1), 1320) for t0 in (0.05, 0.55, 1.05, 1.55)]   # 1.04 Hz square: + - + -
 check("lfo wave position", max(h) - min(h) > 30, "3rd harmonic " + ", ".join(f"{v:.0f}" for v in h) + " dB by half cycle")

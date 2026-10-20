@@ -55,6 +55,14 @@
 2660 enc 4 3
 2670 enc 5 -20
 2700 shot
+2710 enc 0 3
+2720 enc 2 4
+2725 enc 4 5
+2750 shot
+2755 enc 0 1
+2760 enc 2 26
+2765 enc 3 40
+2790 shot
 # the FX page: chorus on; delay with ping-pong and a shift; reverb with shimmer; every row
 2800 btn 2
 2850 enc 4 60

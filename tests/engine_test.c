@@ -222,6 +222,14 @@ int main(void)
         render("lfo_cut", &p, A2, 1, 1900, 2000);
         p = solo(); p.lfo_dest[0] = DEST_AMP; p.lfo_amt[0] = 127; p.lfo_rate = 77;   /* 3 Hz tremolo */
         render("lfo_amp", &p, A4, 1, 1900, 2000);
+        p = solo(); p.lfo2_dest = DEST_AMP; p.lfo2_amt = 127; p.lfo2_wave = LFO_SINE;   /* LFO 2 in time: 120 BPM */
+        p.lfo2_sync = 5; p.arp_bpm = 80; render("l2_sync4", &p, A4, 1, 2900, 3000);   /* 1/4: 2 Hz */
+        p.lfo2_sync = 9; render("l2_sync16", &p, A4, 1, 2900, 3000);                  /* 1/16: 8 Hz */
+        p.lfo2_sync = 0; p.lfo2_rate = 77; render("l2_free", &p, A4, 1, 2900, 3000);  /* free: 2.88 Hz */
+        p = solo(); p.lfo2_dest = DEST_LVL1; p.lfo2_amt = 127; p.lfo2_rate = 77;   /* the MIX page's level 1 */
+        render("l2_lvl1", &p, A4, 1, 1900, 2000);
+        p = saw_through(71, 0); p.lfo2_dest = DEST_RES; p.lfo2_amt = 127; p.lfo2_rate = 77;   /* resonance swept */
+        render("l2_res", &p, (const uint8_t[]){45}, 1, 1900, 2000);
         p = solo(); p.lfo_wave = LFO_SQR; p.lfo_dest[0] = DEST_WAVE1; p.lfo_amt[0] = 127; p.lfo_rate = 57;   /* 1 Hz */
         render("lfo_wave1", &p, A4, 1, 1900, 2000);
         p = solo(); p.osc[0].amt[0] = 60; p.lfo_wave = LFO_SQR; p.lfo_dest[0] = DEST_MOD1; p.lfo_amt[0] = 127;
@@ -425,6 +433,9 @@ int main(void)
         render("fx_bypass", &q, A4, 1, 60, 1500);   /* all mixes 0: the same as dry, whatever the rest */
         q = p; q.dly_mix = 127; q.dly_time = 34; q.dly_fb = 80; q.dly_ping = 0; q.dly_tone = 127;   /* ~200 ms */
         render("fx_dly", &q, A4, 1, 60, 1500);
+        q = p; q.dly_mix = 0; q.dly_time = 34; q.dly_fb = 80; q.dly_tone = 127;   /* LFO 2 opens the delay's mix */
+        q.lfo2_dest = DEST_DELAY; q.lfo2_amt = 127; q.lfo2_rate = 36; q.lfo2_wave = LFO_SINE;   /* 0.33 Hz: up first */
+        render("l2_dly", &q, A4, 1, 60, 1500);
         q.dly_ping = 1;
         render("fx_ping", &q, A4, 1, 60, 1500);
         q.dly_ping = 0; q.dly_shift = 24; q.dly_fb = 110;   /* +12 st a repeat */
@@ -495,6 +506,7 @@ int main(void)
             p.dly_wdepth = p.rev_mdepth = 127;
         }
         p.hp_cut = 40; p.flt_type = getenv("PRYSM_LP24") ? FLT_LP24 : FLT_COMBP; p.res = 120; p.comb_spread = 100;   /* the high-pass, the comb, spread */
+        p.lfo2_dest = DEST_RES; p.lfo2_amt = 127; p.lfo2_rate = 100;   /* LFO 2 on RES: the comb's, each block */
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
         memset(voice, 0, sizeof voice);
         engine_init();

@@ -130,6 +130,20 @@ int main(void)
         CHECK(patch_get(4, &a) == 0 && !memcmp(&a, &c, PATCH_V7_SIZE) && bank.version == PATCH_VERSION,
               "format 7: slot 5's sound and sequence kept");
         CHECK(a.hp_cut == 0 && a.flt_type == FLT_LP12, "format 7: no high-pass, the filter LP 12 as before");
+    }
+    {                                           /* format 8 (with the comb, before LFO 2) -> 9 */
+        static struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V8_SIZE]; } v8;
+        patch_t c = PATCH_INIT;
+        c.flt_type = FLT_COMBM; c.comb_spread = 77; c.hp_cut = 9; c.seq_len = 12;
+        memset(&v8, 0, sizeof v8);
+        v8.version = 8;
+        v8.used[6] = 1; memcpy(v8.p[6], &c, PATCH_V8_SIZE);
+        store_save(&v8, sizeof v8);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(6, &a) == 0 && !memcmp(&a, &c, PATCH_V8_SIZE) && bank.version == PATCH_VERSION,
+              "format 8: slot 7's sound and comb kept");
+        CHECK(a.lfo2_dest == DEST_OFF && a.lfo2_amt == 64, "format 8: LFO 2 comes in with nowhere to go");
         CHECK(sizeof bank <= STORE_MAX, "the bank fits the store (%u of %u bytes)", (unsigned)sizeof bank, (unsigned)STORE_MAX);
     }
     printf(fails ? "%d failed\n" : "all passed\n", fails);

@@ -36,7 +36,7 @@
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
        K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
-       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST };   /* (the step kinds: the step under the cursor) */
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC };   /* (the step kinds: the step under the cursor) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -56,7 +56,8 @@ static uint8_t gset_dirty;                      /* changed: the app saves it (wh
 
 enum { LIT_C = 1, LIT_M1 = 2, LIT_M2 = 4, LIT_A1 = 8, LIT_A2 = 16, LIT_CURVE = 32, LIT_ENV = 64, LIT_ALL = 127,
        LIT_AR = 128,                            /* (OSC pages: the mods' AR shapes under their boxes, not the names) */
-       LIT_MENV = 256 };                        /* (the LFO page: the mod envelope's picture, not the LFO's) */
+       LIT_MENV = 256,                          /* (the LFO page: the mod envelope's picture, not the LFO's) */
+       LIT_L2 = 512 };                          /* (the LFO page: LFO 2's picture) */
 #define OO(f) ((uint16_t)__builtin_offsetof(patch_t, osc[0].f))
 #define PO(f) ((uint16_t)__builtin_offsetof(patch_t, f))
 #define NOPRM {0, 0, 0, K_NONE}
@@ -100,6 +101,10 @@ static const row_t LFO_ROWS[] = {
                {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_NUM}}, LIT_MENV | LIT_ENV},
     {"M.DST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
                {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_MENV | LIT_CURVE},
+    {"LFO2", {{"WAVE", PO(lfo2_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo2_rate), 127, K_RATE},
+              {"SYNC", PO(lfo2_sync), L2SYNC_N - 1u, K_L2SYNC}, NOPRM}, LIT_L2 | LIT_CURVE},
+    {"L2.DST", {{"DEST", PO(lfo2_dest), DEST2_N - 1u, K_L2DEST}, {"AMT", PO(lfo2_amt), 127, K_BIP}, NOPRM, NOPRM},
+     LIT_L2 | LIT_ENV},
 };
 static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cursor) */
     {"STEP", {{"STEP", 0, 63, K_CURSOR}, {"NOTE", PO(seq_note), 127, K_SNOTE},
@@ -211,6 +216,8 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_SEMI: put(snum(s, (int32_t)*v - 24), "st"); break;
     case K_LFOW: put(s, LFO_NAME[*v < LFO_N ? *v : 0u]); break;
     case K_DEST: case K_LDEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
+    case K_L2DEST: put(s, DEST_NAME[*v < DEST2_N ? *v : 0u]); break;
+    case K_L2SYNC: put(s, L2SYNC_NAME[*v < L2SYNC_N ? *v : 0u]); break;
     case K_ONOFF: put(s, *v ? "ON" : "OFF"); break;
     case K_DMS: put(num(s, (441u + (uint32_t)*v * (DLY_N - 1100u) / 127u) * 1000u / 44100u), "ms"); break;
     case K_PMS: put(num(s, (1u + (uint32_t)*v * (PRE_N - 2u) / 127u) * 1000u / 44100u), "ms"); break;
@@ -450,8 +457,10 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
         return;
     }
     const int32_t x0 = 4, w = 232, mid = G_H / 2 - 2, amp = G_H / 2 - 8;
-    int32_t fade_w = (int32_t)edit.lfo_delay * 70 / 127, px, py = mid;
-    uint32_t cycles = 1u + (uint32_t)edit.lfo_rate * 7u / 127u, rng = 12345u, wv = edit.lfo_wave < LFO_N ? edit.lfo_wave : 0u;
+    uint32_t l2 = lit & LIT_L2, wave = l2 ? edit.lfo2_wave : edit.lfo_wave;   /* (LFO 2: no delay, no retrig) */
+    uint32_t rate = l2 ? (edit.lfo2_sync ? 127u - edit.lfo2_sync * 10u : edit.lfo2_rate) : edit.lfo_rate;
+    int32_t fade_w = l2 ? 0 : (int32_t)edit.lfo_delay * 70 / 127, px, py = mid;
+    uint32_t cycles = 1u + rate * 7u / 127u, rng = 12345u, wv = wave < LFO_N ? wave : 0u;
     int32_t sh = lfo_random(&rng);
     uint32_t last_ph = 0;
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
@@ -470,7 +479,7 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
     if (fade_w)                                 /* the delay: where it has faded in */
         for (py = 2; py < (int32_t)G_H - 4; py += 3)
             cv_pset(x0 + fade_w, py, C_FAINT);
-    if (edit.lfo_retrig)                        /* retrig: each note starts it here */
+    if (!l2 && edit.lfo_retrig)                 /* retrig: each note starts it here */
         cv_rect(x0, 2, 2, G_H - 6, lit & LIT_CURVE ? C_ACC : C_MID);
 }
 
@@ -1099,7 +1108,8 @@ static int ui_input(uint32_t buttons)
         v = pval(page, p);
         x = (int32_t)*v + d;
         x = x < (p->kind == K_SLEN ? 1 : 0) ? (p->kind == K_SLEN ? 1 : 0) : x > p->max ? p->max : x;
-        if (p->kind == K_LDEST && !DEST_LFO_OK(x))   /* the LFO: past the mod envelope's own (LFORATE, LFOAMT) */
+        if ((p->kind == K_LDEST || p->kind == K_L2DEST) && (x == DEST_LFORATE || x == DEST_LFOAMT))
+            /* the LFOs: past the mod envelope's own (LFORATE, LFOAMT) */
             x = d > 0 ? DEST_SPREAD : DEST_MIX;
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */

@@ -182,6 +182,8 @@ One LFO per voice (or one for all voices, free-running), on the **LFO** page (th
 | DEST | destination 1 | amount 1 (bipolar) | destination 2 | amount 2 (bipolar) |
 | M.ENV | mod envelope A | D | S | R |
 | M.DST | LOOP ON / OFF | destination | amount (bipolar) | |
+| LFO2 | wave | rate 0.05 .. 40 Hz | sync: OFF, 4/1 .. 1/32 (with triplets) | |
+| L2.DST | destination | amount (bipolar) | | |
 
 - **Retrig ON**: each note starts its voice's LFO from the beginning (and a new S&H value); **OFF**: one LFO runs
   free and the voices share it.
@@ -205,6 +207,21 @@ An ADSR per voice (rows M.ENV, M.DST), started by each note:
   amp, mix). With retrig off, the shared LFO follows the newest note's envelope.
 - The graphic, on these two rows: 2 s with the key held 1.5 s, simulated with the engine's own steps: the
   envelope, and with LFORATE / LFOAMT the LFO under it as the envelope moves it.
+
+### LFO 2
+
+One for all the voices, free-running (patch format 9: `lfo2_*`), computed once a block before the voices (`g2[]`,
+like the shared LFO's phases):
+
+- **SYNC**: a cycle is `L2SYNC_TICKS` MIDI-clock ticks (24 a beat) of the arp's tempo, or the MIDI clock's period
+  when the arp follows one; the phase step a block is 2^32 / (blocks a cycle), worked out each render (32-bit only:
+  2^32 / Q8 blocks, << 8). It restarts when the sequencer or the MIDI clock starts.
+- **Destinations**: the LFO's (through `mod_add`, the same value for every voice), plus `DEST_RES` ..
+  `DEST_REVSIZE` (after `DEST_N`, so the LFO's and the mod envelope's lists stay as they were): each moves its knob
+  by up to +-127 (`knob_moved`) and the ISR derives the value from it as engine_set would (`hp_g_of`, `comb_of`,
+  `damp_of`, `drive_of`; the effects' in fx_render, block by block, from the knobs fx_set keeps in `fxp`). FENV adds
+  to the envelope's depth (+-60 st), DETUNE to osc 2's pitch (+-1 st), MENVAMT to the mod envelope's amount.
+- An effect with its mix at 0 is still run when LFO 2 is on its mix (CHORUS, DELAY, REVERB).
 
 ## Effects
 
@@ -249,11 +266,12 @@ The **SAVE** button opens the PATCH screen:
   formats convert when read (format 1, before the LFO: the LFO comes in with no amount; format 2, before the
   effects: they come in off; format 3, before the mod envelope: it comes in with no amount; format 4, before velocity: it comes in as the
   default sound has it; format 5, before glide and the arp: off; format 6, before the sequencer: an empty
-  16-step pattern).
+  16-step pattern; format 7, before the high-pass and the comb: off, LP 12; format 8, before LFO 2: no
+  destination).
 
 ## Not in the first version
 
-MIDI clock out, song mode (chained patterns), a second LFO, patch names.
+MIDI clock out, song mode (chained patterns), patch names.
 
 ## Budget
 
