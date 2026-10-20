@@ -14,7 +14,7 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.6</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.7</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
 LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
@@ -22,8 +22,8 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 <li><a href="#installing">Installing</a></li>
 <li><a href="#playing">Playing</a></li>
 <li><a href="#finding-your-way-around">Finding your way around</a></li>
-<li><a href="#the-pages">The pages</a>: <a href="#osc-1--osc-2">OSC 1 / OSC 2</a>, <a href="#filter">FILTER</a>, <a href="#amp">AMP</a>, <a href="#lfo">LFO</a>,
-  <a href="#mix">MIX</a>, <a href="#arp">ARP</a>, <a href="#seq">SEQ</a>, <a href="#fx">FX</a>, <a href="#setup">SETUP</a></li>
+<li><a href="#the-pages">The pages</a>: <a href="#osc-1--osc-2">OSC 1 / OSC 2</a>, <a href="#filter">FILTER</a>, <a href="#amp">AMP</a>, <a href="#lfo">LFO</a>, <a href="#lfo-2">LFO 2</a>,
+  <a href="#mix">MIX</a>, <a href="#arp">ARP</a>, <a href="#seq">SEQ</a>, <a href="#fx">FX</a> (CHORUS, DELAY, REVERB), <a href="#setup">SETUP</a></li>
 <li><a href="#patches">Patches</a></li>
 <li><a href="#the-oscilloscope">The oscilloscope</a></li>
 <li><a href="#usb-audio-and-midi">USB: audio and MIDI</a></li>
@@ -36,7 +36,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.6.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.7.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -46,7 +46,7 @@ community firmware; Prysm answers its updater like the others.</p>
 <p>Prysm is a community firmware, not made or supported by M-VAVE. Installing it is at your own risk.</p>
 <hr />
 <h2 id="playing">Playing</h2>
-<p>When the FM-1 starts you see the splash picture for a moment (press any key or button to skip it), then the
+<p>When the FM-1 starts, rainbow static collapses into the word PRYSM (press any key or button to skip it), then the
 <strong>OSC 1</strong> page. The sound is the last patch you saved or loaded.</p>
 <table>
 <thead>
@@ -78,13 +78,19 @@ community firmware; Prysm answers its updater like the others.</p>
 <hr />
 <h2 id="finding-your-way-around">Finding your way around</h2>
 <p>Every page works the same way:</p>
-<pre><code> OSC 1  WAVE                    3*  1/7  22%      &lt;- page, row     slot, unsaved (*), page number, CPU
- [carrier] &lt;- [ mod 1 ] &lt;- [ mod 2 ]              &lt;- the page's picture: what the row touches is lit
-    BANK    WAVE    BANK    WAVE                  &lt;- the selected row's four knobs, over their values
- * BASIC   SINE    BASIC   SINE                   &lt;- the selected row (filled marker)
- o BASIC   SINE                                   &lt;- the other rows
- o  x1      x2      x1      0c
+<pre><code> OSC 1 &gt; WAVE              3* [###   ]     &lt;- page &gt; row          slot, unsaved (*), CPU bar
+ ----------------------------------------
+  CAR       MOD1      MOD2
+ [carrier] &lt;- [ mod 1 ] &lt;- [ mod 2 ]       &lt;- the page's picture: what the row touches is white
+ ----------------------------------------
+  BANK     WAVE     BANK     WAVE          &lt;- the selected row: its four knobs' names,
+  BASIC    SINE     BASIC    SINE          &lt;- their values, large,
+  ---      ----                            &lt;- and a bar under each level
+ ----------------------------------------
+  [WAVE]  WAVE2  RATIO  MODE  ENV          &lt;- the page's rows: SELECT moves along them
 </code></pre>
+<p>Turning a knob shows its name and value large in the picture's top right corner for a moment (PRESETS too: the
+cutoff).</p>
 <table>
 <thead>
 <tr>
@@ -99,11 +105,11 @@ community firmware; Prysm answers its updater like the others.</p>
 </tr>
 <tr>
 <td><strong>PRESETS</strong></td>
-<td>the filter's cutoff, from any page (the header shows the value for a moment)</td>
+<td>the filter's cutoff, from any page (shown large for a moment)</td>
 </tr>
 <tr>
 <td><strong>SELECT</strong></td>
-<td>the row</td>
+<td>the row (the tabs along the bottom)</td>
 </tr>
 <tr>
 <td><strong>KNOB1 .. KNOB4</strong></td>
@@ -123,7 +129,7 @@ community firmware; Prysm answers its updater like the others.</p>
 </tr>
 <tr>
 <td><strong>LFO</strong></td>
-<td>LFO</td>
+<td>LFO (press again: LFO 2)</td>
 </tr>
 <tr>
 <td><strong>GLO</strong></td>
@@ -147,7 +153,7 @@ community firmware; Prysm answers its updater like the others.</p>
 </tr>
 <tr>
 <td><strong>FX</strong></td>
-<td>FX</td>
+<td>CHORUS (press again: DELAY, then REVERB)</td>
 </tr>
 <tr>
 <td><strong>HOME</strong></td>
@@ -159,8 +165,8 @@ community firmware; Prysm answers its updater like the others.</p>
 </tr>
 </tbody>
 </table>
-<p>The header's <strong>CPU</strong> figure is how much of the FM-1's time the sound takes (its peak over the last half second).
-Keep it under about 70 %: near 100 % the sound starts to crackle.</p>
+<p>The header's <strong>CPU</strong> bar is how much of the FM-1's time the sound takes (its peak over the last half second); it
+turns bright past 70 %. Keep it under that: near 100 % the sound starts to crackle.</p>
 <p>Values go from 0 to 127 unless the page says otherwise. Bipolar values (shown with a sign, like <code>+24</code>) are 0 in the
 middle of their knob.</p>
 <hr />
@@ -367,7 +373,7 @@ are on / off), so they always play at full velocity and these settings do not ch
 much a softer note is quieter (by the square of its velocity, as it sounds natural), darker (up to 36 semitones of
 cutoff) or less modulated (less FM brightness: the classic expressive FM touch). At 0, velocity changes nothing.</p>
 <h3 id="lfo">LFO</h3>
-<p>One LFO per voice (or one shared, free-running), and a mod envelope that can loop.</p>
+<p>One LFO per voice (or one shared, free-running) and a mod envelope that can loop. LFO 2 has a page of its own (below).</p>
 <table>
 <thead>
 <tr>
@@ -489,6 +495,99 @@ higher sustain a shallower cycle. Its destination can be any of the LFO's, plus 
 </table>
 <p>On the M.ENV and M.DST rows the picture shows two seconds of the envelope (the key held for 1.5 s, the dotted line
 where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the envelope moves it.</p>
+<h3 id="lfo-2">LFO 2</h3>
+<p>Press <strong>LFO</strong> again for LFO 2: one for all the voices, simpler than the LFO, but with many more destinations, and it
+can run in time with the tempo.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LFO</td>
+<td>wave (as the LFO's)</td>
+<td>rate (0.05 .. 40 Hz)</td>
+<td>sync: OFF, 4/1, 2/1, 1/1, 1/2, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/32</td>
+<td></td>
+</tr>
+<tr>
+<td>DEST</td>
+<td>destination</td>
+<td>amount</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>LFO 2</strong> runs free, one for all the voices (so every note moves together). With <strong>SYNC</strong> on a division it ignores
+RATE and runs in time with the arp and sequencer's tempo (the BPM on the ARP page, or the MIDI clock when it follows
+one): 1/4 is a cycle a beat, 1/1 a bar, 4/1 four bars; T, triplets. It starts from the top when the sequencer or the
+MIDI clock starts. Its destination can be any of the LFO's, or one of these (each moves the knob up and down from where
+it is set, as far as the whole knob):</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RES</td>
+<td>the filter's resonance (or the comb's feedback)</td>
+</tr>
+<tr>
+<td>DRIVE</td>
+<td>the filter's drive</td>
+</tr>
+<tr>
+<td>HPF</td>
+<td>the high-pass cutoff</td>
+</tr>
+<tr>
+<td>DAMP</td>
+<td>the comb's damping</td>
+</tr>
+<tr>
+<td>FENV</td>
+<td>the filter envelope's amount, up to +-60 semitones</td>
+</tr>
+<tr>
+<td>LEVEL1, LEVEL2</td>
+<td>the oscillators' levels (the MIX page's)</td>
+</tr>
+<tr>
+<td>DETUNE</td>
+<td>osc 2, up to +-1 semitone</td>
+</tr>
+<tr>
+<td>MENVAMT</td>
+<td>the mod envelope's amount</td>
+</tr>
+<tr>
+<td>CHORUS, DELAY, REVERB</td>
+<td>the effects' mixes (from 0: an effect that comes and goes)</td>
+</tr>
+<tr>
+<td>DLYTIME</td>
+<td>the delay time (the repeats bend, as tape does)</td>
+</tr>
+<tr>
+<td>DLYFDBK</td>
+<td>the delay's feedback</td>
+</tr>
+<tr>
+<td>REVSIZE</td>
+<td>the reverb's size</td>
+</tr>
+</tbody>
+</table>
 <h3 id="mix">MIX</h3>
 <table>
 <thead>
@@ -567,11 +666,13 @@ from its first note, <strong>STOP</strong> stops it, <strong>CONTINUE</strong> g
 millisecond, one audio buffer (5.8 ms) later. The BPM cell then shows the clock's tempo (<strong>EXT</strong> while none comes);
 swing and gate still apply. With CLOCK = MIDI and no clock running, the arpeggiator waits.</p>
 <h3 id="fx">FX</h3>
-<p>Stereo effects after the voices: <strong>chorus -&gt; delay -&gt; reverb</strong>. Each one is off while its <strong>MIX</strong> is 0. The picture
-draws the chain, with a mix bar under each effect.</p>
+<p>Stereo effects after the voices: <strong>chorus -&gt; delay -&gt; reverb</strong>, a page each: <strong>FX</strong> steps through CHORUS, DELAY
+and REVERB. Each one is off while its <strong>MIX</strong> is 0. The picture draws the chain, with a mix bar under each effect
+and the page's own effect lit.</p>
 <table>
 <thead>
 <tr>
+<th>Page</th>
 <th>Row</th>
 <th>KNOB1</th>
 <th>KNOB2</th>
@@ -582,6 +683,7 @@ draws the chain, with a mix bar under each effect.</p>
 <tbody>
 <tr>
 <td>CHORUS</td>
+<td>CHORUS</td>
 <td>rate</td>
 <td>depth</td>
 <td>mix</td>
@@ -589,12 +691,14 @@ draws the chain, with a mix bar under each effect.</p>
 </tr>
 <tr>
 <td>DELAY</td>
+<td>DELAY</td>
 <td>time (10 .. 735 ms)</td>
 <td>feedback</td>
 <td>mix</td>
 <td>PING ON / OFF</td>
 </tr>
 <tr>
+<td>DELAY</td>
 <td>D.MOD</td>
 <td>wow rate</td>
 <td>wow depth</td>
@@ -603,12 +707,14 @@ draws the chain, with a mix bar under each effect.</p>
 </tr>
 <tr>
 <td>REVERB</td>
+<td>REVERB</td>
 <td>size</td>
 <td>damping</td>
 <td>mix</td>
 <td>pre-delay (up to 93 ms)</td>
 </tr>
 <tr>
+<td>REVERB</td>
 <td>R.MOD</td>
 <td>rate</td>
 <td>depth</td>
@@ -634,7 +740,7 @@ draws the chain, with a mix bar under each effect.</p>
 <p>A step sequencer of up to <strong>64 steps</strong>, one note each, 303-style: notes, rests, <strong>accents</strong> and <strong>slides</strong>. It plays
 alongside the keys (and the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock.
 Each patch has its own pattern.</p>
-<p>The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a lilac one a note, a white one an
+<p>The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white one an
 accent; a little bar joins a sliding step to the next; past the length, dots. The cursor is ringed (white while
 recording); a mark under a square shows the step playing.</p>
 <table>
@@ -694,7 +800,7 @@ so you can type a line in. MIDI notes enter the same way. Press REC again to pla
 <td>IN: OMNI or 1 .. 16</td>
 <td>OUT: 1 .. 16</td>
 <td>CLOCK: INT / MIDI</td>
-<td></td>
+<td>BEND: OFF, +-1 .. +-24 semitones</td>
 </tr>
 </tbody>
 </table>
@@ -702,11 +808,14 @@ so you can type a line in. MIDI notes enter the same way. Press REC again to pla
 <li><strong>IN</strong>: the channel Prysm plays from (OMNI: all of them).</li>
 <li><strong>OUT</strong>: the channel the FM-1's keys send their notes on.</li>
 <li><strong>CLOCK</strong>: the arpeggiator's tempo: its own (<strong>INT</strong>, the BPM on the ARP page) or the <strong>MIDI</strong> clock.</li>
+<li><strong>BEND</strong>: how far a MIDI keyboard's pitch wheel bends every note, either way (2 at first; OFF ignores it).</li>
 </ul>
 <hr />
 <h2 id="patches">Patches</h2>
 <p>Press <strong>SAVE</strong> for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
-osc 1 wave (a dash: empty). The selected slot has a double edge; a dot marks the slot the current sound came from.</p>
+osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
+them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
+tabs SAVE, LOAD, INIT.</p>
 <table>
 <thead>
 <tr>
@@ -746,7 +855,7 @@ osc 1 wave (a dash: empty). The selected slot has a double edge; a dot marks the
 <hr />
 <h2 id="the-oscilloscope">The oscilloscope</h2>
 <p>Press <strong>HOME</strong> for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
-down): <strong>left in white, right in lilac</strong> (the chorus and a ping-pong delay show as the two apart).</p>
+down): <strong>left in white, right in grey</strong> (the chorus and a ping-pong delay show as the two apart).</p>
 <ul>
 <li>It locks onto the <strong>newest note</strong>: the trace shows that many of its cycles, starting on a rising zero, so the
   wave stands still whatever you play. <strong>KNOB1</strong> sets how many cycles (1 .. 8; it starts at 2).</li>
