@@ -2,7 +2,7 @@
 /* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, ARP, SEQ, FX, SETUP.
  *
  *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX / SETUP, ARP = ARP
- *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = FX)
+ *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = FX, the SELECT button = FILTER)
  *   PLAY             the sequencer: run / stop (anywhere; its LED shows it)
  *   REC              step entry on the SEQ page: a key writes its note at the cursor, which moves on
  *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
@@ -1040,7 +1040,7 @@ static int ui_input(uint32_t buttons)
         (void)fm1_enc_take(ENC_SELECT);
         if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
         if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return (int)changed; }
-        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
                          1u << BTN_SEQ)))
             return (int)changed;                /* (else a page button: on to that page, below) */
     } else if (buttons & (1u << BTN_HOME) && page != PG_PATCH) {
@@ -1049,7 +1049,7 @@ static int ui_input(uint32_t buttons)
     }
     if (page == PG_PATCH) {                     /* the PATCH screen: HOME, a page button or ALGORITHM leave it */
         if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(pa_back); return (int)changed; }
-        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
                          1u << BTN_SEQ)))
             return pa_input(buttons) | (int)changed;   /* (else a page button: on to that page, below) */
     } else if (buttons & (1u << BTN_SAVE)) {
@@ -1059,6 +1059,7 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_EDIT)) ui_page(page == PG_OSC1 ? PG_OSC2 : PG_OSC1);
     if (buttons & (1u << BTN_FX)) ui_page(PG_FX);
     if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
+    if (buttons & (1u << BTN_SEL)) ui_page(PG_FILTER);   /* SELECT (the button): straight to FILTER */
     if (buttons & (1u << BTN_LFO)) ui_page(PG_LFO);
     if (buttons & (1u << BTN_ARP)) {            /* ARP: its page; on its page, the arp on / off */
         if (page == PG_ARP) {

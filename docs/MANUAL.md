@@ -77,6 +77,7 @@ Every page works the same way:
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
 | **EDIT** | OSC 1 (press again: OSC 2) |
 | **ENV** | AMP (press again: FILTER) |
+| **SELECT** (the button) | FILTER |
 | **LFO** | LFO |
 | **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |

@@ -86,4 +86,6 @@
 3960 enc 2 2
 3970 enc 4 60
 4000 shot
-4100 end
+4050 btn 3
+4100 shot
+4200 end
