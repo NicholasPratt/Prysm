@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Prysm's sound engine: 4 voices, each 2 oscillators, each a wavetable carrier modulated by a series chain of two
  * wavetable modulators (mod 2 -> mod 1 -> carrier), each modulator with its own AR envelope and a mode (FM, RING,
- * MIX); the two oscillators mixed, driven, through a comb tuned to the note, a 2-pole low-pass with its own ADSR and a
- * 2-pole high-pass (no resonance), then the amp ADSR. An LFO
+ * MIX); the two oscillators mixed, driven, through a comb (many resonant peaks: its frequency keytracked and moved
+ * by the filter envelope, SPREAD stretching the upper peaks apart), a 2-pole low-pass with its own ADSR and a 2-pole
+ * high-pass (no resonance), then the amp ADSR. An LFO
  * per voice (or one for all, free-running) modulates two destinations: pitch, wave positions, mod amounts, the
- * modulators' pitch, cutoff, amp, the oscillators' mix. A mod envelope per voice (ADSR; LOOP: attack-decay again
+ * modulators' pitch, cutoff, amp, the oscillators' mix, the comb's frequency and spread. A mod envelope per voice (ADSR; LOOP: attack-decay again
  * and again until the key is let go) modulates one: the LFO's rate or depth, or any of the LFO's. Glide slides each
  * new note from the last one. The arpeggiator (in the ISR: its notes start and stop on the exact 16-frame block)
  * plays the held notes in turn; the sequencer (beside it, on the same clock) plays up to 64 steps, 303-style: a
@@ -33,6 +34,7 @@ static const char *const LFO_NAME[LFO_N] = {"SINE", "TRI", "SAW UP", "SAW DN", "
 enum { DEST_OFF, DEST_PITCH, DEST_PITCH2, DEST_WAVE1, DEST_WAVE2, DEST_MWAVE1, DEST_MWAVE2, DEST_MOD1, DEST_MOD2,
        DEST_MPITCH, DEST_CUTOFF, DEST_AMP, DEST_MIX,
        DEST_LFORATE, DEST_LFOAMT,               /* (the mod envelope's only: the LFO itself) */
+       DEST_COMB, DEST_SPREAD,                  /* (after: the saved numbers above stay) */
        DEST_N };
 enum { ARP_UP, ARP_DOWN, ARP_UPDN, ARP_RAND, ARP_ORDER, ARP_N };
 static const char *const ARP_NAME[ARP_N] = {"UP", "DOWN", "UPDN", "RAND", "ORDER"};
@@ -42,7 +44,9 @@ static const uint8_t DIV_SPB[DIV_N] = {1, 2, 3, 4, 6, 8};   /* steps per beat */
 enum { GLIDE_ALWAYS, GLIDE_LEGATO, GLIDE_N };
 static const char *const GLIDE_NAME[GLIDE_N] = {"ALWAYS", "LEGATO"};
 static const char *const DEST_NAME[DEST_N] = {"OFF", "PITCH", "PITCH2", "WAVE1", "WAVE2", "MWAVE1", "MWAVE2",
-                                              "MOD1", "MOD2", "MPITCH", "CUTOFF", "AMP", "MIX", "LFORATE", "LFOAMT"};
+                                              "MOD1", "MOD2", "MPITCH", "CUTOFF", "AMP", "MIX", "LFORATE", "LFOAMT",
+                                              "COMB", "SPREAD"};
+#define DEST_LFO_OK(d) ((d) < DEST_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)   /* the LFO's own (not itself) */
 
 /* ---- the patch: what the pages edit (all small integers, 0..127 unless said) */
 typedef struct {
@@ -111,9 +115,12 @@ typedef struct {
     uint8_t seq_slide[64];                      /* 1: held into the next step, which it glides to (no new attack) */
     /* (added in patch format 8: the high-pass and the comb) */
     uint8_t hp_cut;                             /* the high-pass (12 dB/oct, no resonance): 0 = off; 16 Hz .. 4.2 kHz */
-    uint8_t comb_tune;                          /* the comb's pitch: 0..48 = -24..+24 semitones from the note */
+    uint8_t comb_freq;                          /* the comb's frequency: MIDI 12 + 0.75 per step (64 = C4, 262 Hz) */
+    uint8_t comb_key;                           /* keytrack: 64 = 100 % (on the note), 127 = 198 % */
+    uint8_t comb_env;                           /* the filter envelope's amount: 64 = none, +-60 semitones */
     uint8_t comb_fb;                            /* 64 = none; + peaks on its harmonics, - between them (hollow) */
     uint8_t comb_damp;                          /* the repeats: 0 bright .. 127 dark */
+    uint8_t comb_spread;                        /* 0 = even peaks; up: the upper ones stretched apart (bells, metal) */
     uint8_t comb_mix;                           /* 0 = off */
 } patch_t;
 enum { SEQ_REST, SEQ_NOTE, SEQ_ACCENT, SEQ_TRIGS };
@@ -149,7 +156,8 @@ static const patch_t PATCH_INIT = {
     .seq_note = {48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
                  48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
                  48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48},
-    .hp_cut = 0, .comb_tune = 24, .comb_fb = 110, .comb_damp = 30, .comb_mix = 0,   /* both off */
+    .hp_cut = 0, .comb_freq = 64, .comb_key = 64, .comb_env = 64,   /* both off; the comb on the note */
+    .comb_fb = 110, .comb_damp = 30, .comb_spread = 0, .comb_mix = 0,
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -168,7 +176,10 @@ static volatile struct {
     uint32_t f_k;                               /* damping, Q24 */
     int32_t drive;                              /* gain Q12; 0 = no drive stage */
     int32_t hp_g;                               /* the high-pass's one-poles: g / (1 + g), Q15; 0 = off */
-    int32_t comb_tune16;                        /* the comb's pitch from the note, 1/16 semitones */
+    int32_t comb_p16;                           /* the comb's frequency, MIDI in 1/16 semitones (for note 60) */
+    int32_t comb_key;                           /* its keytrack, Q8 (256: on the note) */
+    int32_t comb_env;                           /* the filter envelope's depth, 1/16 semitones at full envelope */
+    int32_t comb_spread;                        /* 0..127 */
     int32_t comb_fb, comb_in;                   /* feedback (Q15, signed); the input's share, 1 - |fb| (its peaks: 1) */
     int32_t comb_dk;                            /* the damping one-pole in the loop, Q15 (32767: none) */
     int32_t comb_mix;                           /* Q15; 0 = off */
@@ -231,6 +242,7 @@ static struct {
     int32_t hp1, hp2, hp_gs;                    /* the high-pass: its two one-poles' states; its coefficient, smoothed */
     int32_t cd_q8;                              /* the comb: its delay the last block ended on (frames Q8; 0: none) */
     int32_t clp, cfb, cdk, cmix;                /* its damping state; feedback, damping, mix (smoothed) */
+    int32_t apx[4], apy[4];                     /* SPREAD's four allpasses: their last input, output */
     uint16_t cw;                                /* where it writes next */
     uint8_t comb_live;                          /* its line holds this note's sound (else cleared first) */
     int32_t amp_q15, mod_q15[NOSC][2];          /* the levels now (per frame, gliding to each block's target) */
@@ -364,6 +376,16 @@ static int32_t glide(int32_t now, int32_t to)   /* one block's step of a ~12 ms 
     return d ? now + d : to;
 }
 
+static uint32_t msb32(uint32_t v)               /* the highest set bit (0 for 0 and 1) */
+{
+    uint32_t n = 0;
+    if (v >> 16) { v >>= 16; n += 16; }
+    if (v >> 8) { v >>= 8; n += 8; }
+    if (v >> 4) { v >>= 4; n += 4; }
+    if (v >> 2) { v >>= 2; n += 2; }
+    return n + (v >> 1);
+}
+
 static int32_t hp_q(uint32_t c)                 /* HPF CUT 1..127 -> quarter semitones: MIDI 12 .. 108 (16 Hz .. 4.2 kHz) */
 {
     return 48 + ((int32_t)(c & 127u) - 1) * 384 / 126;
@@ -403,6 +425,7 @@ typedef struct {
     int32_t cut;                                /* cutoff: quarter semitones */
     int32_t amp;                                /* amp: a factor, Q15 */
     int32_t mix;                                /* towards osc 2 (+) or osc 1 (-), Q15 */
+    int32_t comb16, spread;                     /* the comb: its frequency, 1/16 semitones; its spread, + -127..127 */
     int32_t vmod;                               /* velocity's factor on the mod amounts, Q15 */
 } lfo_mod_t;
 
@@ -430,6 +453,8 @@ static void mod_add(lfo_mod_t *m, uint32_t dest, int32_t a, int32_t s, int uni)
         break;
     }
     case DEST_MIX: m->mix += x; break;
+    case DEST_COMB: m->comb16 += (x * 768) >> 15; break;                 /* +-48 semitones */
+    case DEST_SPREAD: m->spread += pz; break;                            /* +- the whole knob */
     default: break;
     }
 }
@@ -870,7 +895,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 l = l > 32767 ? 32767 : l < -32767 ? -32767 : l;
             }
             lfo_mods(l, &m);
-            if (eg.me_dest < DEST_LFORATE)      /* any of the LFO's destinations */
+            if (DEST_LFO_OK(eg.me_dest))        /* any of the LFO's destinations */
                 mod_add(&m, eg.me_dest, eg.me_amt, me, 1);
             m.vmod = 32767;                     /* velocity: softer notes quieter (by its square), darker, less bright */
             if (voice[v].vel < 127u) {          /* (127, the keys: exactly as without velocity) */
@@ -959,21 +984,46 @@ static void engine_render(int32_t *out, uint32_t n)
                 int32_t fe = env_step(&voice[v].flt, gate, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
                 int32_t f[3], a1, a2, a3, d1, d2, d3, ic1 = voice[v].ic1, ic2 = voice[v].ic2, drive = eg.drive;
                 int32_t hg, hp1 = voice[v].hp1, hp2 = voice[v].hp2;
-                int32_t cmix, cfb = 0, cin = 0, cdk = 0, cd = 0, dd = 0, clp = voice[v].clp;
+                int32_t cmix, cfb = 0, cin = 0, cdk = 0, cd = 0, dd = 0, clp = voice[v].clp, ap_a = 0;
+                int32_t ax0 = 0, ax1 = 0, ax2 = 0, ax3 = 0, ay0 = 0, ay1 = 0, ay2 = 0, ay3 = 0;
                 uint32_t cw = voice[v].cw;
                 int16_t *cb = comb_buf[v];
                 voice[v].f_cs = glide(voice[v].f_cs, eg.f_cut << 8);   /* knob moves glide, they do not step */
                 voice[v].f_ks = glide(voice[v].f_ks, (int32_t)eg.f_k);
                 voice[v].hp_gs = hg = glide(voice[v].hp_gs, eg.hp_g);
                 voice[v].cmix = cmix = glide(voice[v].cmix, eg.comb_mix);
-                if (cmix) {                     /* the comb: its delay one period of the note (moved as the pitch is) */
-                    uint32_t base = INC_C9[voice[v].note % 12u] >> (10u - voice[v].note / 12u);
-                    uint32_t inc = rate_moved(base, m.pitch16[0] + (voice[v].glide_q8 >> 8) + eg.comb_tune16) >> 8;
-                    int32_t d = inc ? (int32_t)(0xFFFFFFFFu / inc) : (int32_t)((COMB_N - 2u) << 8);   /* 2^40 / inc */
+                if (cmix) {                     /* the comb: its frequency (keytracked, the envelope, the mods) -> a delay */
+                    int32_t trk = (((int32_t)voice[v].note - 60) * 16 + (voice[v].glide_q8 >> 8) + m.pitch16[0]) * eg.comb_key;
+                    int32_t p16 = eg.comb_p16 + (trk >> 8) + (int32_t)(((int64_t)eg.comb_env * fe) >> 24) + m.comb16;
+                    int32_t sp = eg.comb_spread + m.spread, d, per;
+                    uint32_t inc;
+                    p16 = p16 < 16 * 16 ? 16 * 16 : p16 > 127 * 16 ? 127 * 16 : p16;   /* (MIDI 16 .. 127) */
+                    inc = rate_moved(INC_C9[(p16 >> 4) % 12u] >> (10u - (uint32_t)(p16 >> 4) / 12u), p16 & 15) >> 8;
+                    per = inc ? (int32_t)(0xFFFFFFFFu / inc) : (int32_t)((COMB_N - 2u) << 8);   /* a period: 2^40 / inc */
+                    d = per;
+                    sp = sp < 0 ? 0 : sp > 127 ? 127 : sp;
+                    if (sp) {                   /* SPREAD: four allpasses, their corner above f0 (60 .. 10 semitones) */
+                        int32_t q0 = p16 >> 2, qc = q0 + 240 - (sp - 1) * 200 / 126, sh;
+                        uint32_t t0, tc, x, fr;
+                        if (qc > (int32_t)PR_FILT_N - 1) qc = (int32_t)PR_FILT_N - 1;
+                        t0 = PR_FILT_G[q0];
+                        tc = PR_FILT_G[qc];
+                        ap_a = 16384 - (int32_t)((0xFFFFFFFFu / ((tc + (1u << 24)) >> 8)) >> 1);   /* (tc-1)/(tc+1), Q14 */
+                        if (!ap_a) ap_a = 1;    /* (0: a plain frame's delay each, still to be run) */
+                        sh = (int32_t)msb32(tc) - 15;   /* t0 / tc (<= 1), Q16, in 32 bits */
+                        if (sh < 0) sh = 0;
+                        x = ((t0 >> sh) << 16) / ((tc >> sh) | 1u);
+                        x = x > 65536u ? 65536u : x;
+                        fr = x >> 10;           /* (4 / pi) atan(x): how much of a period they delay f0 by */
+                        x = PR_ATAN4_Q15[fr] + (((PR_ATAN4_Q15[fr < 64u ? fr + 1u : 64u] - PR_ATAN4_Q15[fr]) * (x & 1023u)) >> 10);
+                        d = per - (int32_t)((((uint32_t)per >> 4) * x) >> 11);   /* the line: the rest of the period */
+                    }
                     if (d < (int32_t)(2u << 8)) d = 2 << 8;
                     if (d > (int32_t)((COMB_N - 2u) << 8)) d = (int32_t)((COMB_N - 2u) << 8);
                     if (!voice[v].comb_live) {  /* (turned on, or a new note from silence: no old sound in the line) */
                         memset(cb, 0, sizeof comb_buf[0]);
+                        memset(voice[v].apx, 0, sizeof voice[v].apx);
+                        memset(voice[v].apy, 0, sizeof voice[v].apy);
                         clp = 0;
                         voice[v].cd_q8 = d;
                         voice[v].comb_live = 1;
@@ -986,6 +1036,10 @@ static void engine_render(int32_t *out, uint32_t n)
                     cin = 32767 - (cfb < 0 ? -cfb : cfb);
                 } else
                     voice[v].comb_live = 0;
+                if (ap_a) {
+                    ax0 = voice[v].apx[0]; ax1 = voice[v].apx[1]; ax2 = voice[v].apx[2]; ax3 = voice[v].apx[3];
+                    ay0 = voice[v].apy[0]; ay1 = voice[v].apy[1]; ay2 = voice[v].apy[2]; ay3 = voice[v].apy[3];
+                }
                 filter_coefs(voice[v].note, fe, voice[v].f_cs + (m.cut << 8), (uint32_t)voice[v].f_ks, f);
                 if (voice[v].fc[0] < 0) {       /* (a voice from silence: no previous block to glide from) */
                     voice[v].fc[0] = f[0]; voice[v].fc[1] = f[1]; voice[v].fc[2] = f[2];
@@ -1002,6 +1056,12 @@ static void engine_render(int32_t *out, uint32_t n)
                         uint32_t pos = (cw << 8) - (uint32_t)cd, ri = (pos >> 8) & COMB_MASK;
                         int32_t c0 = cb[ri], y, u;
                         u = c0 + (((cb[(ri + 1u) & COMB_MASK] - c0) * (int32_t)(pos & 255u)) >> 8);
+                        if (ap_a) {             /* SPREAD: y = a (x - y1) + x1, four times (in registers) */
+#define AP(x, y) do { int32_t t = (((u - y) * ap_a) >> 14) + x; x = u; \
+                      y = u = t > 32767 ? 32767 : t < -32767 ? -32767 : t; } while (0)
+                            AP(ax0, ay0); AP(ax1, ay1); AP(ax2, ay2); AP(ax3, ay3);
+#undef AP
+                        }
                         clp += ((u - clp) * cdk) >> 15;
                         y = ((s * cin) >> 15) + ((clp * cfb) >> 15);
                         y = y > 32767 ? 32767 : y < -32767 ? -32767 : y;
@@ -1035,6 +1095,10 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].hp1 = hg ? hp1 : 0;
                 voice[v].hp2 = hg ? hp2 : 0;
                 voice[v].clp = clp;
+                if (ap_a) {
+                    voice[v].apx[0] = ax0; voice[v].apx[1] = ax1; voice[v].apx[2] = ax2; voice[v].apx[3] = ax3;
+                    voice[v].apy[0] = ay0; voice[v].apy[1] = ay1; voice[v].apy[2] = ay2; voice[v].apy[3] = ay3;
+                }
                 voice[v].cw = (uint16_t)cw;
                 voice[v].fc[0] = f[0]; voice[v].fc[1] = f[1]; voice[v].fc[2] = f[2];
             }
@@ -1132,7 +1196,10 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.hp_g = (int32_t)((g << 7) / (((1u << 24) + g) >> 8));
     } else
         eg.hp_g = 0;
-    eg.comb_tune16 = ((int32_t)(patch.comb_tune <= 48u ? patch.comb_tune : 24u) - 24) * 16;
+    eg.comb_p16 = 12 * 16 + (int32_t)(patch.comb_freq & 127u) * 12;   /* MIDI 12 + 0.75 a step */
+    eg.comb_key = (int32_t)(patch.comb_key & 127u) * 4;
+    eg.comb_env = ((int32_t)(patch.comb_env & 127u) - 64) * 960 / 63;
+    eg.comb_spread = patch.comb_spread & 127u;
     eg.comb_fb = ((int32_t)(patch.comb_fb & 127u) - 64) * 32112 / 64;   /* +-0.98 */
     eg.comb_dk = 32767 - (int32_t)(patch.comb_damp & 127u) * 30000 / 127;
     eg.comb_mix = (int32_t)(patch.comb_mix & 127u) * 32767 / 127;
@@ -1146,7 +1213,7 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
     for (k = 0; k < 2u; k++) {
         int32_t d = (int32_t)(patch.lfo_amt[k] & 127u) - 64, mag = d < 0 ? -d : d;   /* 0..64 */
         int32_t q = PR_CURVE_Q15[mag * 127 / 64];
-        eg.lfo_dest[k] = patch.lfo_dest[k] < DEST_LFORATE ? patch.lfo_dest[k] : DEST_OFF;   /* (not itself) */
+        eg.lfo_dest[k] = DEST_LFO_OK(patch.lfo_dest[k]) ? patch.lfo_dest[k] : DEST_OFF;   /* (not itself) */
         eg.lfo_amt[k] = eg.lfo_dest[k] == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
     eg.me_att = PR_ENV_ATT[patch.menv_a & 127u];

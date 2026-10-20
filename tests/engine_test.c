@@ -177,9 +177,16 @@ int main(void)
         p = solo(); p.comb_mix = 127; p.comb_fb = 127; p.comb_damp = 0;   /* a sine on A4 into the comb */
         render("comb_on", &p, A4, 1, 900, 1000);   /* on the note: 440 a peak */
         p.comb_fb = 0; render("comb_neg", &p, A4, 1, 900, 1000);   /* - : the peaks between: 440 a notch */
-        p.comb_fb = 127; p.comb_tune = 31; render("comb_5th", &p, A4, 1, 900, 1000);   /* 659 Hz: 440 between */
+        p.comb_fb = 127; p.comb_key = 0;       /* no keytrack: FREQ alone */
+        p.comb_freq = 76; render("comb_abs", &p, A4, 1, 900, 1000);   /* MIDI 69: 440 a peak */
+        p.comb_freq = 80; render("comb_off", &p, A4, 1, 900, 1000);   /* MIDI 72 (523 Hz): 440 between */
+        p = saw_through(127, 0); p.comb_mix = 127; p.comb_fb = 120; p.comb_damp = 0;   /* a saw on A2, on the note */
+        render("comb_even", &p, A2, 1, 1400, 1500);
+        p.comb_spread = 127; render("comb_spread", &p, A2, 1, 1400, 1500);   /* the upper peaks off the harmonics */
         p = saw_through(127, 0); p.comb_mix = 127; p.comb_fb = 127; p.comb_damp = 0; p.drive = 127;
         p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 127; p.glide = 90;   /* the worst: driven, swept, at full */
+        p.lfo_dest[1] = DEST_SPREAD; p.lfo_amt[1] = 0; p.comb_spread = 64;
+        p.menv_dest = DEST_COMB; p.menv_amt = 127; p.menv_loop = 1; p.comb_env = 0;
         {
             static const uint8_t LOW[] = {12, 100};
             render("comb_stable", &p, LOW, 2, 1500, 2000);
@@ -481,7 +488,7 @@ int main(void)
             p.cho_mix = p.dly_mix = p.rev_mix = 127; p.dly_shift = 0; p.rev_shimmer = 127;
             p.dly_wdepth = p.rev_mdepth = 127;
         }
-        p.hp_cut = 40; p.comb_mix = 127; p.comb_fb = 120;   /* the high-pass and the comb, on every voice */
+        p.hp_cut = 40; p.comb_mix = 127; p.comb_fb = 120; p.comb_spread = 100;   /* the high-pass, the comb, spread */
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
         memset(voice, 0, sizeof voice);
         engine_init();

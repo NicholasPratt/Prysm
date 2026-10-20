@@ -36,7 +36,7 @@
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
        K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
-       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF };   /* (the step kinds: the step under the cursor) */
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_CFREQ, K_CKEY, K_LDEST };   /* (the step kinds: the step under the cursor) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -83,8 +83,10 @@ static const row_t FILTER_ROWS[] = {
              {"S", PO(flt_s), 127, K_NUM}, {"R", PO(flt_r), 127, K_NUM}}, LIT_ENV},
     {"DRIVE", {{"DRIVE", PO(drive), 127, K_NUM}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},
     {"HPF", {{"CUT", PO(hp_cut), 127, K_HPF}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},
-    {"COMB", {{"TUNE", PO(comb_tune), 48, K_SEMI}, {"FDBK", PO(comb_fb), 127, K_BIP},
-              {"DAMP", PO(comb_damp), 127, K_NUM}, {"MIX", PO(comb_mix), 127, K_NUM}}, LIT_CURVE},
+    {"COMB", {{"FREQ", PO(comb_freq), 127, K_CFREQ}, {"KEY", PO(comb_key), 127, K_CKEY},
+              {"ENV", PO(comb_env), 127, K_BIP}, {"MIX", PO(comb_mix), 127, K_NUM}}, LIT_ENV},
+    {"C.RES", {{"FDBK", PO(comb_fb), 127, K_BIP}, {"DAMP", PO(comb_damp), 127, K_NUM},
+               {"SPREAD", PO(comb_spread), 127, K_NUM}, NOPRM}, LIT_CURVE},
 };
 static const row_t AMP_ROWS[] = {
     {"ENV", {{"A", PO(amp_a), 127, K_NUM}, {"D", PO(amp_d), 127, K_NUM},
@@ -95,8 +97,8 @@ static const row_t AMP_ROWS[] = {
 static const row_t LFO_ROWS[] = {
     {"LFO", {{"WAVE", PO(lfo_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo_rate), 127, K_RATE},
              {"DELAY", PO(lfo_delay), 127, K_NUM}, {"RETRIG", PO(lfo_retrig), 1, K_ONOFF}}, LIT_CURVE},
-    {"DEST", {{"DEST1", PO(lfo_dest[0]), DEST_MIX, K_DEST}, {"AMT1", PO(lfo_amt[0]), 127, K_BIP},
-              {"DEST2", PO(lfo_dest[1]), DEST_MIX, K_DEST}, {"AMT2", PO(lfo_amt[1]), 127, K_BIP}}, LIT_ENV},
+    {"DEST", {{"DEST1", PO(lfo_dest[0]), DEST_N - 1u, K_LDEST}, {"AMT1", PO(lfo_amt[0]), 127, K_BIP},
+              {"DEST2", PO(lfo_dest[1]), DEST_N - 1u, K_LDEST}, {"AMT2", PO(lfo_amt[1]), 127, K_BIP}}, LIT_ENV},
     {"M.ENV", {{"A", PO(menv_a), 127, K_NUM}, {"D", PO(menv_d), 127, K_NUM},
                {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_NUM}}, LIT_MENV | LIT_ENV},
     {"M.DST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
@@ -193,6 +195,13 @@ static uint32_t wave_index(uint32_t pos)        /* the nearest of the bank's 8 w
     return ((pos & 127u) * (PW_WAVES - 1u) * 256u / 127u + 128u) >> 8;
 }
 
+static void hz(char *s, int32_t q)              /* quarter semitones from MIDI 0 -> Hz (to the half semitone) */
+{
+    uint32_t h = ((8176u * PR_EXP2_24_Q12[(q % 48) >> 1]) >> 12) << (q / 48);   /* mHz: 8.176 Hz x 2^(q / 48) */
+    if (h < 1000000u) put(num(s, (h + 500u) / 1000u), "Hz");
+    else { char *e = num(s, h / 1000000u); *e++ = '.'; put(num(e, h / 100000u % 10u), "k"); }
+}
+
 static void fmt(char *s, const prm_t *p, const uint8_t *v)
 {
     switch (p->kind) {
@@ -204,7 +213,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_MODE: put(s, MODE_NAME[*v < MODE_N ? *v : 0u]); break;
     case K_SEMI: put(snum(s, (int32_t)*v - 24), "st"); break;
     case K_LFOW: put(s, LFO_NAME[*v < LFO_N ? *v : 0u]); break;
-    case K_DEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
+    case K_DEST: case K_LDEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
     case K_ONOFF: put(s, *v ? "ON" : "OFF"); break;
     case K_DMS: put(num(s, (441u + (uint32_t)*v * (DLY_N - 1100u) / 127u) * 1000u / 44100u), "ms"); break;
     case K_PMS: put(num(s, (1u + (uint32_t)*v * (PRE_N - 2u) / 127u) * 1000u / 44100u), "ms"); break;
@@ -235,15 +244,9 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_STRIG: put(s, SEQ_TRIG_NAME[*v < SEQ_TRIGS ? *v : 0u]); break;
     case K_SSLIDE: put(s, *v ? "ON" : "OFF"); break;
     case K_SLEN: num(s, *v); break;
-    case K_HPF:                                 /* OFF, or Hz (to the half semitone): 8.176 Hz x 2^(q / 48) */
-        if (*v) {
-            int32_t q = hp_q(*v);
-            uint32_t h = ((8176u * PR_EXP2_24_Q12[(q % 48) >> 1]) >> 12) << (q / 48);   /* mHz */
-            if (h < 1000000u) put(num(s, (h + 500u) / 1000u), "Hz");
-            else { char *e = num(s, h / 1000000u); *e++ = '.'; put(num(e, h / 100000u % 10u), "k"); }
-        } else
-            put(s, "OFF");
-        break;
+    case K_HPF: if (*v) hz(s, hp_q(*v)); else put(s, "OFF"); break;
+    case K_CFREQ: hz(s, 48 + 3 * (int32_t)*v); break;   /* (MIDI 12 + 0.75 a step) */
+    case K_CKEY: put(num(s, *v * 100u / 64u), "%"); break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
         uint32_t h = PR_LFO_HZ100[*v & 127u];
         char *e = num(s, h / 100u);
@@ -1090,6 +1093,8 @@ static int ui_input(uint32_t buttons)
         v = pval(page, p);
         x = (int32_t)*v + d;
         x = x < (p->kind == K_SLEN ? 1 : 0) ? (p->kind == K_SLEN ? 1 : 0) : x > p->max ? p->max : x;
+        if (p->kind == K_LDEST && !DEST_LFO_OK(x))   /* the LFO: past the mod envelope's own (LFORATE, LFOAMT) */
+            x = d > 0 ? DEST_COMB : DEST_MIX;
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;

@@ -31,55 +31,58 @@
 1615 enc 2 92
 1640 shot
 1650 enc 0 1
-1655 enc 2 7
-1660 enc 4 -10
-1665 enc 5 70
-1690 shot
-1700 btn 4
-1800 shot
-1900 btn 7
-2000 shot
+1660 enc 2 7
+1670 enc 4 -10
+1680 enc 5 70
+1710 shot
+1720 enc 0 1
+1730 enc 4 60
+1760 shot
+1800 btn 4
+1900 shot
+2000 btn 7
+2100 shot
 # the LFO page: sine with a delay; S&H fast; the destinations
-2100 btn 5
-2150 enc 4 60
-2200 shot
-2300 enc 2 10
-2310 enc 3 20
-2400 shot
-2500 enc 0 1
-2550 enc 3 30
-2560 enc 4 3
-2570 enc 5 -20
-2600 shot
+2200 btn 5
+2250 enc 4 60
+2300 shot
+2400 enc 2 10
+2410 enc 3 20
+2500 shot
+2600 enc 0 1
+2650 enc 3 30
+2660 enc 4 3
+2670 enc 5 -20
+2700 shot
 # the FX page: chorus on; delay with ping-pong and a shift; reverb with shimmer; every row
-2700 btn 2
-2750 enc 4 60
-2800 shot
-2850 enc 0 1
-2860 enc 4 60
-2870 enc 3 30
+2800 btn 2
+2850 enc 4 60
 2900 shot
 2950 enc 0 1
-2960 enc 4 4
+2960 enc 4 60
+2970 enc 3 30
 3000 shot
 3050 enc 0 1
-3060 enc 4 60
-3070 enc 2 20
+3060 enc 4 4
 3100 shot
 3150 enc 0 1
-3160 enc 4 50
+3160 enc 4 60
+3170 enc 2 20
 3200 shot
-3300 btn 4
-3400 shot
-3500 btn 4
-3600 shot
+3250 enc 0 1
+3260 enc 4 50
+3300 shot
+3400 btn 4
+3500 shot
+3600 btn 4
+3700 shot
 # the mod envelope on the LFO page: looping into the LFO's rate
-3700 btn 5
-3750 enc 0 1
-3760 enc 3 -10
-3800 shot
+3800 btn 5
 3850 enc 0 1
-3860 enc 2 2
-3870 enc 4 60
+3860 enc 3 -10
 3900 shot
-4000 end
+3950 enc 0 1
+3960 enc 2 2
+3970 enc 4 60
+4000 shot
+4100 end

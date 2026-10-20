@@ -91,15 +91,20 @@ OSC 1                              1/5
 | ENV | A | D | S | R |
 | DRIVE | drive | | | |
 | HPF | high-pass cutoff (0 = off) | | | |
-| COMB | tune (+-24 st from the note) | feedback (bipolar) | damping | mix (0 = off) |
+| COMB | frequency | keytrack (0 .. 198 %) | filter env amount | mix (0 = off) |
+| C.RES | feedback (bipolar) | damping | spread | |
 
 The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve *(default)*, with the high-pass's slope.
 
 Per voice: drive -> comb -> low-pass -> high-pass -> amp (patch format 8: `hp_cut`, `comb_*`). The **high-pass** is two
-TPT one-poles in series (12 dB / octave, no resonance), 16 Hz .. 4.2 kHz. The **comb** is a feedback comb, its delay one
-period of the note (with the voice's glide and LFO pitch; interpolated, Q8 frames), a one-pole damping in the loop,
-the input scaled by 1 - |feedback| so the peaks stay at unity; negative feedback puts the peaks between the harmonics
-(an octave down, hollow). Its lines are 4 x 2048 frames (down to 21.5 Hz) in RAM, not the pool (16 KB; .bss is then
+TPT one-poles in series (12 dB / octave, no resonance), 16 Hz .. 4.2 kHz. The **comb** is a feedback comb (the Blofeld's
+Comb+/-): its frequency = FREQ + keytrack x (the note, glide and LFO pitch, from C4) + the filter envelope + the mods
+(LFO / mod envelope destinations COMB and SPREAD, appended to the DEST list so saved numbers stay), its delay one
+period of it (interpolated, Q8 frames), a one-pole damping in the loop, the input scaled by 1 - |feedback| so the
+peaks stay at unity; negative feedback puts the peaks between (an octave down, hollow). **SPREAD** puts four
+first-order allpasses in the loop, their corner 60 .. 10 semitones above the comb's frequency: the peaks above the
+corner see less delay, so they stretch apart; the line is shortened by the allpasses' delay at the frequency itself,
+(4 / pi) atan(t0 / tc) of a period (`PR_ATAN4_Q15`, exact for the bilinear allpass), so the first peak stays in tune. Its lines are 4 x 2048 frames (down to 21.5 Hz) in RAM, not the pool (16 KB; .bss is then
 ~64 of 96 KB); cleared when it is turned on or a voice starts from silence.
 
 ### AMP

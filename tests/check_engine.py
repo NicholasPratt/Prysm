@@ -135,10 +135,15 @@ check("high-pass slope", -12.5 < h2 - h4 < -8.5, f"440 -> 220 Hz {h2 - h4:.1f} d
 check("high-pass passband", -1 < h40 < 0.3, f"4.4 kHz {h40:.1f} dB")
 hpk = max(atten("hp_880", "lp_open", 110, k) for k in range(2, 48))
 check("high-pass no resonance", hpk < 0.3, f"the most any harmonic gains: {hpk:+.2f} dB")
-cp, cn, c5 = (harm_db(n, 440, 1, 0.6, 0.9) - harm_db("sine", 440, 1, 0.6, 0.9) for n in ("comb_on", "comb_neg", "comb_5th"))
-check("comb on the note", -2 < cp < 1, f"440 Hz {cp:+.1f} dB (a peak)")
+cp, cn, ca, co = (harm_db(n, 440, 1, 0.6, 0.9) - harm_db("sine", 440, 1, 0.6, 0.9)
+                  for n in ("comb_on", "comb_neg", "comb_abs", "comb_off"))
+check("comb on the note", -2 < cp < 1, f"440 Hz {cp:+.1f} dB (a peak, keytrack 100 %)")
 check("comb negative", cn < -15, f"440 Hz {cn:+.1f} dB (between the peaks)")
-check("comb tune", c5 < -10, f"440 Hz {c5:+.1f} dB with the comb a 5th up")
+check("comb frequency", -2 < ca < 1 and co < -10, f"no keytrack: 440 Hz {ca:+.1f} dB at FREQ 440 Hz, {co:+.1f} dB at 523 Hz")
+s1 = harm_db("comb_spread", 110, 1, 0.8, 1.3) - harm_db("comb_even", 110, 1, 0.8, 1.3)
+s30 = np.mean([harm_db("comb_spread", 110, k, 0.8, 1.3) - harm_db("comb_even", 110, k, 0.8, 1.3) for k in range(24, 40)])
+check("comb spread", -4 < s1 < 2 and s30 < -6,
+      f"the fundamental {s1:+.1f} dB (still in tune), harmonics 24..39 {s30:+.1f} dB (the peaks moved off them)")
 cs = load("comb_stable")
 check("comb stable", np.isfinite(cs).all() and np.abs(cs[int(1.8 * FS):]).max() < 0.01,
       f"peak {np.abs(cs).max():.3f}; after the release {np.abs(cs[int(1.8 * FS):]).max():.4f}")

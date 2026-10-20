@@ -152,16 +152,23 @@ envelope. The picture draws the filters' actual response (cutoff, resonance and 
 | ENV | attack | decay | sustain | release |
 | DRIVE | drive (0 = clean) | | | |
 | HPF | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | | | |
-| COMB | tune (-24 .. +24 st from the note) | feedback (bipolar) | damping (0 bright .. 127 dark) | mix (0 = off) |
+| COMB | frequency (16 Hz .. 3.9 kHz) | keytrack (0 .. 198 %) | filter envelope amount (bipolar, +-60 st) | mix (0 = off) |
+| C.RES | feedback (bipolar) | damping (0 bright .. 127 dark) | spread | |
 
 Cutoff and resonance glide as you turn them, so sweeps are smooth. **Keytrack** at 100 % moves the cutoff with the
 note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.
 
-**HPF** is a gentle 12 dB / octave high-pass with no resonance: turn it up to thin out the low end. **COMB** is a comb
-filter tuned to the note you play (TUNE moves it up to two octaves either way; it follows glide and vibrato). Positive
-feedback rings on the note's harmonics, metallic and plucked as it rises; negative feedback rings between them, hollow
-and an octave down. DAMP darkens the ringing; MIX blends it with the dry sound. High feedback takes a moment to build
-up on low notes.
+**HPF** is a gentle 12 dB / octave high-pass with no resonance: turn it up to thin out the low end.
+
+**COMB** is a comb filter, as on a Waldorf: a row of resonant peaks at its frequency and every multiple of it. FREQ sets
+the first peak; KEY tracks the keyboard (at 100 %, the default, with FREQ at 262 Hz, the peaks sit on the note's own
+harmonics; 0 % keeps them fixed whatever you play); ENV sweeps it with the FILTER envelope. On **C.RES**, positive
+feedback rings on the peaks, metallic and plucked as it rises; negative feedback moves them halfway between,
+hollow and an octave down. DAMP darkens the ringing. **SPREAD** stretches the upper peaks further and further apart
+while the first stays put: from an even comb to bells, bars and metal. MIX blends it with the dry sound. High
+feedback takes a moment to build up on low notes.
+
+The LFO and the mod envelope can move the comb too: **COMB** (its frequency, +-48 semitones) and **SPREAD**.
 
 ### AMP
 
@@ -205,6 +212,8 @@ One LFO per voice (or one shared, free-running), and a mod envelope that can loo
 | CUTOFF | the filter, up to +-48 semitones |
 | AMP | tremolo |
 | MIX | the balance between the two oscillators |
+| COMB | the comb's frequency, up to +-48 semitones |
+| SPREAD | the comb's spread, up to the whole knob either way |
 
 **The mod envelope** (M.ENV, M.DST) is an ADSR started by each note. With **LOOP ON** it runs attack -> decay ->
 attack -> decay ... for as long as you hold the key, then releases: a sustain of 0 gives full up-and-down sweeps, a
