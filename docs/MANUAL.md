@@ -7,7 +7,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.
 - [Installing](#installing)
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
-- [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
+- [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo), [LFO 2](#lfo-2),
   [MIX](#mix), [ARP](#arp), [SEQ](#seq), [FX](#fx), [SETUP](#setup)
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
@@ -78,7 +78,7 @@ Every page works the same way:
 | **EDIT** | OSC 1 (press again: OSC 2) |
 | **ENV** | AMP (press again: FILTER) |
 | **SELECT** (the button) | FILTER |
-| **LFO** | LFO |
+| **LFO** | LFO (press again: LFO 2) |
 | **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
 | **SEQ** | SEQ |
@@ -189,8 +189,7 @@ cutoff) or less modulated (less FM brightness: the classic expressive FM touch).
 
 ### LFO
 
-One LFO per voice (or one shared, free-running), a mod envelope that can loop, and LFO 2: one for all the voices,
-simpler, but with many more destinations, and it can run in time with the tempo.
+One LFO per voice (or one shared, free-running) and a mod envelope that can loop. LFO 2 has a page of its own (below).
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
@@ -198,8 +197,6 @@ simpler, but with many more destinations, and it can run in time with the tempo.
 | DEST | destination 1 | amount 1 | destination 2 | amount 2 |
 | M.ENV | mod envelope attack | decay | sustain | release |
 | M.DST | LOOP ON / OFF | destination | amount | |
-| LFO2 | wave (as the LFO's) | rate (0.05 .. 40 Hz) | sync: OFF, 4/1, 2/1, 1/1, 1/2, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/32 | |
-| L2.DST | destination | amount | | |
 
 - **S&H** (sample and hold) jumps to a new random value each cycle.
 - **Delay**: from each note, the LFO fades in over this time (0: at once).
@@ -231,6 +228,16 @@ higher sustain a shallower cycle. Its destination can be any of the LFO's, plus 
 
 On the M.ENV and M.DST rows the picture shows two seconds of the envelope (the key held for 1.5 s, the dotted line
 where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the envelope moves it.
+
+### LFO 2
+
+Press **LFO** again for LFO 2: one for all the voices, simpler than the LFO, but with many more destinations, and it
+can run in time with the tempo.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| LFO | wave (as the LFO's) | rate (0.05 .. 40 Hz) | sync: OFF, 4/1, 2/1, 1/1, 1/2, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/32 | |
+| DEST | destination | amount | | |
 
 **LFO 2** runs free, one for all the voices (so every note moves together). With **SYNC** on a division it ignores
 RATE and runs in time with the arp and sequencer's tempo (the BPM on the ARP page, or the MIDI clock when it follows

@@ -182,8 +182,6 @@ One LFO per voice (or one for all voices, free-running), on the **LFO** page (th
 | DEST | destination 1 | amount 1 (bipolar) | destination 2 | amount 2 (bipolar) |
 | M.ENV | mod envelope A | D | S | R |
 | M.DST | LOOP ON / OFF | destination | amount (bipolar) | |
-| LFO2 | wave | rate 0.05 .. 40 Hz | sync: OFF, 4/1 .. 1/32 (with triplets) | |
-| L2.DST | destination | amount (bipolar) | | |
 
 - **Retrig ON**: each note starts its voice's LFO from the beginning (and a new S&H value); **OFF**: one LFO runs
   free and the voices share it.
@@ -210,7 +208,8 @@ An ADSR per voice (rows M.ENV, M.DST), started by each note:
 
 ### LFO 2
 
-One for all the voices, free-running (patch format 9: `lfo2_*`), computed once a block before the voices (`g2[]`,
+Its own page, **LFO 2** (the LFO button twice; ALGORITHM: after LFO): row LFO (wave, rate 0.05 .. 40 Hz, sync
+OFF / 4/1 .. 1/32 with triplets), row DEST (destination, amount). One for all the voices, free-running (patch format 9: `lfo2_*`), computed once a block before the voices (`g2[]`,
 like the shared LFO's phases):
 
 - **SYNC**: a cycle is `L2SYNC_TICKS` MIDI-clock ticks (24 a beat) of the arp's tempo, or the MIDI clock's period

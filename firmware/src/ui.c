@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, MIX, ARP, SEQ, FX, SETUP.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, LFO 2, MIX, ARP, SEQ, FX, SETUP.
  *
- *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO, GLO = MIX / SETUP, ARP = ARP
+ *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO / LFO 2, GLO = MIX / SETUP, ARP = ARP
  *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = FX, the SELECT button = FILTER)
  *   PLAY             the sequencer: run / stop (anywhere; its LED shows it)
  *   REC              step entry on the SEQ page: a key writes its note at the cursor, which moves on
@@ -101,9 +101,11 @@ static const row_t LFO_ROWS[] = {
                {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_NUM}}, LIT_MENV | LIT_ENV},
     {"M.DST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
                {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_MENV | LIT_CURVE},
-    {"LFO2", {{"WAVE", PO(lfo2_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo2_rate), 127, K_RATE},
+};
+static const row_t LFO2_ROWS[] = {               /* (one for all the voices; SYNC: the arp's tempo) */
+    {"LFO", {{"WAVE", PO(lfo2_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo2_rate), 127, K_RATE},
               {"SYNC", PO(lfo2_sync), L2SYNC_N - 1u, K_L2SYNC}, NOPRM}, LIT_L2 | LIT_CURVE},
-    {"L2.DST", {{"DEST", PO(lfo2_dest), DEST2_N - 1u, K_L2DEST}, {"AMT", PO(lfo2_amt), 127, K_BIP}, NOPRM, NOPRM},
+    {"DEST", {{"DEST", PO(lfo2_dest), DEST2_N - 1u, K_L2DEST}, {"AMT", PO(lfo2_amt), 127, K_BIP}, NOPRM, NOPRM},
      LIT_L2 | LIT_ENV},
 };
 static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cursor) */
@@ -140,11 +142,12 @@ static const row_t ARP_ROWS[] = {
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_MIX, PG_ARP, PG_SEQ, PG_FX, PG_SETUP, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_LFO2, PG_MIX, PG_ARP, PG_SEQ, PG_FX, PG_SETUP, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
-    {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
+    {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"LFO 2", LFO2_ROWS, NROWS(LFO2_ROWS), 0},
+    {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
     {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0}, {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
     {"SETUP", SETUP_ROWS, NROWS(SETUP_ROWS), G},
 };
@@ -658,6 +661,7 @@ static void draw_gfx(void)
     case PG_FILTER: gfx_filter(lit); break;
     case PG_AMP: cv_adsr(8, 4, 224, G_H - 10, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
     case PG_LFO: gfx_lfo(lit); break;
+    case PG_LFO2: gfx_lfo(lit | LIT_L2); break;
     case PG_FX: gfx_fx(lit); break;
     case PG_ARP: gfx_arp(lit); break;
     case PG_SETUP: gfx_setup(); break;
@@ -1069,7 +1073,7 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_FX)) ui_page(PG_FX);
     if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
     if (buttons & (1u << BTN_SEL)) ui_page(PG_FILTER);   /* SELECT (the button): straight to FILTER */
-    if (buttons & (1u << BTN_LFO)) ui_page(PG_LFO);
+    if (buttons & (1u << BTN_LFO)) ui_page(page == PG_LFO ? PG_LFO2 : PG_LFO);
     if (buttons & (1u << BTN_ARP)) {            /* ARP: its page; on its page, the arp on / off */
         if (page == PG_ARP) {
             edit.arp_on = !edit.arp_on;

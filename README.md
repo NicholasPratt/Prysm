@@ -51,7 +51,7 @@ envelopes, the LFO, the effects chain.
 | OSC 1, OSC 2 | EDIT | WAVE, WAVE2, RATIO, MODE, ENV, MIX |
 | FILTER | ENV (twice) | FILTER, ENV, TYPE, COMB |
 | AMP | ENV | ENV, VEL |
-| LFO | LFO | LFO, DEST, M.ENV, M.DST, LFO2, L2.DST |
+| LFO | LFO (twice: LFO 2) | LFO, DEST, M.ENV, M.DST; LFO 2: LFO, DEST |
 | MIX | GLO | OSC, GLIDE |
 | SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK |
 | ARP | ARP (again: on / off) | ARP, TIME |
