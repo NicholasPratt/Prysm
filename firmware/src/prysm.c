@@ -80,7 +80,17 @@ static void stop(uint32_t note)
 
 #define KEY0 53u                                /* key 0 = F3 */
 #include "patches.c"                            /* the 8 patch slots */
+static uint8_t cap_on;                          /* capture.c: a take is being recorded */
+static void cap_enc(uint32_t id, int32_t delta);
+static int32_t cap_enc_take(uint32_t e)         /* the encoders as the UI takes them: into a take too */
+{
+    int32_t d = fm1_enc_take(e);
+    if (d && cap_on) cap_enc(e, d);
+    return d;
+}
+#define fm1_enc_take cap_enc_take
 #include "ui.c"                                 /* the pages, the PATCH screen */
+#include "capture.c"                            /* performance capture: a take to film on a computer */
 /* ---- the splash: rainbow static that thins and closes in as its specks fly together into PRYSM (FONT_P, twice its size),
  * which fades to white, the version under it; 2.6 s, or until a key or button is pressed. Drawn whole each frame,
  * in two strips of the canvas. (Host mode skips it unless built with -DPRYSM_SPLASH: the UI scripts time their
@@ -216,6 +226,9 @@ static void app_main(void)
 #endif
     splash();
     ui_init(gset.slot);                          /* the sound of the slot last saved or loaded */
+#ifdef DINGHY_HOST
+    cap_restore();                              /* (tools/capture.py render: where the take started) */
+#endif
 
     for (;;) {
         uint32_t keys, down, up, rel, b, lit = 0, base = (uint32_t)(KEY0 + 12 * gset.oct);
@@ -223,6 +236,7 @@ static void app_main(void)
         platform_poll();
 
         keys = fm1_in.notes;                    /* bit k: key k (0 = F3 .. 26 = G5) */
+        if (keys != prev) cap_keys(keys);
         down = keys & ~prev;
         up = prev & ~keys;
         prev = keys;
@@ -237,6 +251,7 @@ static void app_main(void)
         }
 
         b = fm1_input_edges(&rel);              /* buttons pressed since the last call (bit = button id) */
+        cap_buttons(b);
         if (b & (1u << BTN_OCT_DOWN) && gset.oct > -2) { gset.oct--; dirty = 1; t_change = fm1_ms; }
         if (b & (1u << BTN_OCT_UP) && gset.oct < 2) { gset.oct++; dirty = 1; t_change = fm1_ms; }
         if (ui_input(b))                        /* the pages: the sound changed */
@@ -249,6 +264,11 @@ static void app_main(void)
         }
 
         while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI in, any channel */
+            if (st == 0xBFu && d1 == 119u) {    /* (tools/capture.py: a take starts or ends) */
+                if (d2) cap_start(keys); else cap_stop();
+                continue;
+            }
+            cap_midi(st, d1, d2);
 #if DINGHY_USB_LOG
             if (st == 0x9Fu && d1 == 0 && d2) { usblog_dump_start(); continue; }   /* DEBUG: tools/usblog.py */
 #endif

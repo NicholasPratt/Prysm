@@ -524,7 +524,7 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
     }
     const int32_t x0 = 4, w = 232, mid = G_H / 2, amp = G_H / 2 - 8;
     uint32_t l2 = lit & LIT_L2, wave = l2 ? edit.lfo2_wave : edit.lfo_wave;   /* (LFO 2: no delay, no retrig) */
-    uint32_t rate = l2 ? (edit.lfo2_sync ? 127u - edit.lfo2_sync * 10u : edit.lfo2_rate) : edit.lfo_rate;
+    uint32_t rate = l2 ? (edit.lfo2_sync ? 16u + edit.lfo2_sync * 10u : edit.lfo2_rate) : edit.lfo_rate;   /* (faster divisions: more cycles) */
     int32_t fade_w = l2 ? 0 : (int32_t)edit.lfo_delay * 70 / 127, px, py = mid;
     uint32_t cycles = 1u + rate * 7u / 127u, rng = 12345u, wv = wave < LFO_N ? wave : 0u;
     int32_t sh = lfo_random(&rng);

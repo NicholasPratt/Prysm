@@ -81,7 +81,7 @@ tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchai
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
 ./build.sh --release 0.7             # build/prysm-0.7.fwsc (identity FM-1_987, "0.7" on the splash)
-tools/make_site.py build/prysm-0.7.fwsc 0.4   # site/: the web installer and the manual (GitHub Pages)
+tools/make_site.py build/prysm-0.7.fwsc 0.7   # site/: the web installer and the manual (GitHub Pages)
 ```
 
 ### Tests (on the computer, no FM-1 needed)
@@ -106,6 +106,7 @@ tests/run_host.sh       # the whole app on the computer: build/host/prysm.wav an
 | `tools/gen_prysm_tables.py`, `tools/gen_prysm_font.py` | the wavetables and lookup tables; the UI's Terminus fonts (FONT_M, FONT_P) |
 | `tools/gen_splash.py` | the old splash picture (assets/splash.jpg; no longer shown) |
 | `web/`, `tools/make_site.py` | the web installer |
+| `firmware/src/capture.c`, `tools/capture.py` | performance capture: record a take on the FM-1, film it on the computer (MP4) |
 | `docs/` | the [manual](docs/MANUAL.md), the [design](docs/PRYSM-DESIGN.md), the platform's [API](docs/API.md) and [rules](docs/RULES.md) |
 
 ## Credits and licence

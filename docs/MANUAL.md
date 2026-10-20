@@ -423,6 +423,26 @@ Connected to a computer, the FM-1 shows up as **Prysm FM-1**:
 
 Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.
 
+### Filming a performance
+
+`tools/capture.py` makes a video of what you play: the screen exactly as the FM-1 draws it, with its sound, in sync.
+Connect the FM-1 by USB, then, in the `Prysm` folder:
+
+```
+.venv/bin/python3 tools/capture.py record mytake
+```
+
+Set the FM-1 up (the page and sound you want to start on, no keys held), press **Enter**, play, press **Enter**
+again. The FM-1 sends what it started from and everything you did (keys, buttons, knob turns, MIDI coming in) to the
+computer, which plays the take again through Prysm's own code, frame by frame, and writes `takes/mytake.mp4`
+(720 x 720, 30 fps) and `takes/mytake/audio.wav`. Options: `--fps 60`, `--size 1080`, `--tail 5` (seconds after the
+last thing you did, for the release and the reverb), `--splash` (start with the power-on animation);
+`tools/capture.py render takes/mytake --fps 60` films a take again. It needs ffmpeg
+(`.venv/bin/pip install imageio-ffmpeg`, or `brew install ffmpeg`).
+
+Not in the film: the **MASTER** knob (it is at full level), and the MIDI clock (a take played on CLOCK = MIDI
+uses the internal tempo).
+
 ---
 
 ## If something goes wrong
