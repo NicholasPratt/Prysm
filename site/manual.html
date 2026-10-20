@@ -14,9 +14,9 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.4</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.5</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
-little modulation chain of three wavetable operators. After them come a resonant low-pass filter, an amp envelope, an
+little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
 LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 <ul>
 <li><a href="#installing">Installing</a></li>
@@ -36,7 +36,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.3.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.5.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -271,8 +271,10 @@ holds while the key is down, and falls over the release. A slow mod 1 attack on 
 you hold it.</p>
 <p><strong>MIX row.</strong> The modulators' amounts (how much they change the next one) and the oscillator's own level.</p>
 <h3 id="filter">FILTER</h3>
-<p>A 2-pole (12 dB / octave) low-pass for each voice, with drive before it and its own envelope. The picture draws the
-filter's actual response (cutoff and resonance) and the envelope's shape.</p>
+<p>A filter for each voice, with drive before it, a high-pass after it, and its own envelope. TYPE picks what it is: a
+<strong>LP 12</strong> (2-pole, 12 dB / octave) or <strong>LP 24</strong> (4-pole, 24 dB / octave) low-pass, or a comb, <strong>COMB+</strong> or <strong>COMB-</strong>.
+The picture draws the filter's actual response (the low-pass's curve or the comb's peaks, and the high-pass) and the
+envelope's shape.</p>
 <table>
 <thead>
 <tr>
@@ -299,9 +301,16 @@ filter's actual response (cutoff and resonance) and the envelope's shape.</p>
 <td>release</td>
 </tr>
 <tr>
-<td>DRIVE</td>
+<td>TYPE</td>
+<td>LP 12, LP 24, COMB+, COMB-</td>
 <td>drive (0 = clean)</td>
+<td>high-pass cutoff (OFF, 16 Hz .. 4.2 kHz)</td>
 <td></td>
+</tr>
+<tr>
+<td>COMB</td>
+<td>damping (0 bright .. 127 dark)</td>
+<td>spread</td>
 <td></td>
 <td></td>
 </tr>
@@ -309,6 +318,17 @@ filter's actual response (cutoff and resonance) and the envelope's shape.</p>
 </table>
 <p>Cutoff and resonance glide as you turn them, so sweeps are smooth. <strong>Keytrack</strong> at 100 % moves the cutoff with the
 note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.</p>
+<p><strong>LP 24</strong> is steeper and darker than LP 12; its resonance is a little softer.</p>
+<p><strong>COMB+ / COMB-</strong> turn the filter into a comb, as on a Waldorf: a row of resonant peaks at a frequency and every
+multiple of it. The FILTER row then plays the comb: CUT sets the first peak (in 3/4-semitone steps: 64 is C4, 80 is
+C5), RES its feedback (from no effect to long ringing), ENV sweeps it with the envelope and KEY tracks the keyboard.
+With KEY at 127 (100 %) and CUT at 64, the peaks sit on each note's own harmonics: a plucked string from a short
+burst, with a long amp release. COMB+ rings on the peaks, metallic and plucked; COMB- puts them halfway between,
+hollow and an octave down. On the <strong>COMB</strong> row, DAMP darkens the ringing and <strong>SPREAD</strong> stretches the upper peaks
+further and further apart while the first stays put: from an even comb to bells, bars and metal. The peaks get
+louder as RES rises (up to about +17 dB, rounded off rather than clipped), so the comb keeps its level even when they
+miss the harmonics. High feedback takes a moment to build up on low notes.</p>
+<p>The LFO and the mod envelope move the comb through <strong>CUTOFF</strong>, and its spread through <strong>SPREAD</strong>.</p>
 <h3 id="amp">AMP</h3>
 <table>
 <thead>
@@ -426,7 +446,7 @@ cutoff) or less modulated (less FM brightness: the classic expressive FM touch).
 </tr>
 <tr>
 <td>CUTOFF</td>
-<td>the filter, up to +-48 semitones</td>
+<td>the filter (or the comb), up to +-48 semitones</td>
 </tr>
 <tr>
 <td>AMP</td>
@@ -435,6 +455,10 @@ cutoff) or less modulated (less FM brightness: the classic expressive FM touch).
 <tr>
 <td>MIX</td>
 <td>the balance between the two oscillators</td>
+</tr>
+<tr>
+<td>SPREAD</td>
+<td>the comb's spread, up to the whole knob either way</td>
 </tr>
 </tbody>
 </table>
