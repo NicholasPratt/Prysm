@@ -89,19 +89,21 @@ OSC 1                              1/5
 | --- | --- | --- | --- | --- |
 | FILTER | cutoff | resonance | env amount | keytrack |
 | ENV | A | D | S | R |
-| DRIVE | drive | | | |
-| HPF | high-pass cutoff (0 = off) | | | |
-| COMB | frequency | keytrack (0 .. 198 %) | filter env amount | mix (0 = off) |
-| C.RES | feedback (bipolar) | damping | spread | |
+| TYPE | LP 12, LP 24, COMB+, COMB- | drive | high-pass cutoff (0 = off) | |
+| COMB | damping | spread | | |
 
-The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve *(default)*, with the high-pass's slope.
+The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve *(default)* (LP 24: times its first
+stage's; the comb: in^2 / (1 + fb^2 - 2 fb cos(2 pi f / f0)), damping and spread left out), with the high-pass's slope.
 
-Per voice: drive -> comb -> low-pass -> high-pass -> amp (patch format 8: `hp_cut`, `comb_*`). The **high-pass** is two
-TPT one-poles in series (12 dB / octave, no resonance), 16 Hz .. 4.2 kHz. The **comb** is a feedback comb (the Blofeld's
-Comb+/-): its frequency = FREQ + keytrack x (the note, glide and LFO pitch, from C4) + the filter envelope + the mods
-(LFO / mod envelope destinations COMB and SPREAD, appended to the DEST list so saved numbers stay), its delay one
-period of it (interpolated, Q8 frames), a one-pole damping in the loop, the input scaled by 1 - |feedback| so the
-peaks stay at unity; negative feedback puts the peaks between (an octave down, hollow). **SPREAD** puts four
+Per voice: drive -> the filter (TYPE) -> high-pass -> amp (patch format 8: `hp_cut`, `flt_type`, `comb_damp`,
+`comb_spread`). **LP 24** puts a fixed Butterworth SVF (k = sqrt 2, its own coefficients glided the same way) before
+the resonant one. The **high-pass** is two TPT one-poles in series (12 dB / octave, no resonance), 16 Hz .. 4.2 kHz.
+The **comb** (the Blofeld's Comb+/-) replaces the low-pass and takes its knobs: its frequency = MIDI 12 + 0.75 x CUT
+(so 64 is C4 and 100 % keytrack is in tune) + the cutoff's own modulation (envelope, keytrack, velocity, LFO / mod
+envelope CUTOFF) + keytrack x (glide and LFO pitch); RES -> feedback 0.98 (1 - (1 - r)^2), negated for COMB-. Its
+delay is one period (interpolated, Q8 frames), a one-pole damping in the loop, the input scaled by sqrt(1 - |fb|):
+broadband about -3 dB whatever the feedback, the peaks up to +17 dB, a cubic soft clip in the loop rounding them off.
+**SPREAD** (also an LFO / mod envelope destination) puts four
 first-order allpasses in the loop, their corner 60 .. 10 semitones above the comb's frequency: the peaks above the
 corner see less delay, so they stretch apart; the line is shortened by the allpasses' delay at the frequency itself,
 (4 / pi) atan(t0 / tc) of a period (`PR_ATAN4_Q15`, exact for the bilinear allpass), so the first peak stays in tune. Its lines are 4 x 2048 frames (down to 21.5 Hz) in RAM, not the pool (16 KB; .bss is then

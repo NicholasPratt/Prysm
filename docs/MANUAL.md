@@ -1,7 +1,7 @@
 # Prysm manual
 
 Prysm is a 4-voice synthesizer firmware for the **M-VAVE FM-1**. Each voice has two oscillators, and each oscillator is a
-little modulation chain of three wavetable operators. After them come a comb, a resonant low-pass and a high-pass filter, an amp envelope, an
+little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
 LFO, a looping mod envelope and stereo chorus, delay and reverb.
 
 - [Installing](#installing)
@@ -143,32 +143,34 @@ you hold it.
 
 ### FILTER
 
-A 2-pole (12 dB / octave) low-pass for each voice, with drive and a comb before it, a high-pass after it, and its own
-envelope. The picture draws the filters' actual response (cutoff, resonance and the high-pass) and the envelope's shape.
+A filter for each voice, with drive before it, a high-pass after it, and its own envelope. TYPE picks what it is: a
+**LP 12** (2-pole, 12 dB / octave) or **LP 24** (4-pole, 24 dB / octave) low-pass, or a comb, **COMB+** or **COMB-**.
+The picture draws the filter's actual response (the low-pass's curve or the comb's peaks, and the high-pass) and the
+envelope's shape.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | FILTER | cutoff (16 Hz .. 20 kHz) | resonance | envelope amount (bipolar, +-60 semitones) | keytrack (0 .. 100 %) |
 | ENV | attack | decay | sustain | release |
-| DRIVE | drive (0 = clean) | | | |
-| HPF | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | | | |
-| COMB | frequency (16 Hz .. 3.9 kHz) | keytrack (0 .. 198 %) | filter envelope amount (bipolar, +-60 st) | mix (0 = off) |
-| C.RES | feedback (bipolar) | damping (0 bright .. 127 dark) | spread | |
+| TYPE | LP 12, LP 24, COMB+, COMB- | drive (0 = clean) | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | |
+| COMB | damping (0 bright .. 127 dark) | spread | | |
 
 Cutoff and resonance glide as you turn them, so sweeps are smooth. **Keytrack** at 100 % moves the cutoff with the
 note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.
 
-**HPF** is a gentle 12 dB / octave high-pass with no resonance: turn it up to thin out the low end.
+**LP 24** is steeper and darker than LP 12; its resonance is a little softer.
 
-**COMB** is a comb filter, as on a Waldorf: a row of resonant peaks at its frequency and every multiple of it. FREQ sets
-the first peak; KEY tracks the keyboard (at 100 %, the default, with FREQ at 262 Hz, the peaks sit on the note's own
-harmonics; 0 % keeps them fixed whatever you play); ENV sweeps it with the FILTER envelope. On **C.RES**, positive
-feedback rings on the peaks, metallic and plucked as it rises; negative feedback moves them halfway between,
-hollow and an octave down. DAMP darkens the ringing. **SPREAD** stretches the upper peaks further and further apart
-while the first stays put: from an even comb to bells, bars and metal. MIX blends it with the dry sound. High
-feedback takes a moment to build up on low notes.
+**COMB+ / COMB-** turn the filter into a comb, as on a Waldorf: a row of resonant peaks at a frequency and every
+multiple of it. The FILTER row then plays the comb: CUT sets the first peak (in 3/4-semitone steps: 64 is C4, 80 is
+C5), RES its feedback (from no effect to long ringing), ENV sweeps it with the envelope and KEY tracks the keyboard.
+With KEY at 127 (100 %) and CUT at 64, the peaks sit on each note's own harmonics: a plucked string from a short
+burst, with a long amp release. COMB+ rings on the peaks, metallic and plucked; COMB- puts them halfway between,
+hollow and an octave down. On the **COMB** row, DAMP darkens the ringing and **SPREAD** stretches the upper peaks
+further and further apart while the first stays put: from an even comb to bells, bars and metal. The peaks get
+louder as RES rises (up to about +17 dB, rounded off rather than clipped), so the comb keeps its level even when they
+miss the harmonics. High feedback takes a moment to build up on low notes.
 
-The LFO and the mod envelope can move the comb too: **COMB** (its frequency, +-48 semitones) and **SPREAD**.
+The LFO and the mod envelope move the comb through **CUTOFF**, and its spread through **SPREAD**.
 
 ### AMP
 
@@ -209,10 +211,9 @@ One LFO per voice (or one shared, free-running), and a mod envelope that can loo
 | MWAVE1, MWAVE2 | both modulators' wave positions |
 | MOD1, MOD2 | both modulators' amounts (FM brightness) |
 | MPITCH | the modulators' pitch: the FM sidebands slide |
-| CUTOFF | the filter, up to +-48 semitones |
+| CUTOFF | the filter (or the comb), up to +-48 semitones |
 | AMP | tremolo |
 | MIX | the balance between the two oscillators |
-| COMB | the comb's frequency, up to +-48 semitones |
 | SPREAD | the comb's spread, up to the whole knob either way |
 
 **The mod envelope** (M.ENV, M.DST) is an ADSR started by each note. With **LOOP ON** it runs attack -> decay ->

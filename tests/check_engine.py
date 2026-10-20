@@ -129,6 +129,10 @@ a4, a20, a40 = atten("lp_1k", "lp_open", 110, 4), atten("lp_1k", "lp_open", 110,
 check("filter passband", -3 < a4 < 0.5, f"440 Hz {a4:.1f} dB (want ~-1.5)")
 check("filter stopband", -32 < a40 < -21, f"4.4 kHz {a40:.1f} dB (want ~-26)")
 check("filter slope", -13 < a40 - a20 < -9, f"2.2 -> 4.4 kHz {a40 - a20:.1f} dB (want ~-11, -> 12 dB/oct)")
+b20, b40 = atten("lp24_1k", "lp_open", 110, 20), atten("lp24_1k", "lp_open", 110, 40)
+check("lp 24 slope", -27 < b40 - b20 < -20, f"2.2 -> 4.4 kHz {b40 - b20:.1f} dB (want ~-23, -> 24 dB/oct)")
+r24 = atten("lp24_res", "lp_open", 110, 9)
+check("lp 24 resonance", r24 > 10, f"990 Hz {r24:+.1f} dB at high resonance")
 h2, h4, h40 = atten("hp_880", "lp_open", 110, 2), atten("hp_880", "lp_open", 110, 4), atten("hp_880", "lp_open", 110, 40)
 check("high-pass stopband", -28 < h2 < -21, f"220 Hz {h2:.1f} dB (want ~-24.6)")
 check("high-pass slope", -12.5 < h2 - h4 < -8.5, f"440 -> 220 Hz {h2 - h4:.1f} dB (want ~-10.6, -> 12 dB/oct)")
@@ -144,6 +148,9 @@ s1 = harm_db("comb_spread", 110, 1, 0.8, 1.3) - harm_db("comb_even", 110, 1, 0.8
 s30 = np.mean([harm_db("comb_spread", 110, k, 0.8, 1.3) - harm_db("comb_even", 110, k, 0.8, 1.3) for k in range(24, 40)])
 check("comb spread", -4 < s1 < 2 and s30 < -6,
       f"the fundamental {s1:+.1f} dB (still in tune), harmonics 24..39 {s30:+.1f} dB (the peaks moved off them)")
+lo, lk, lf = (20 * np.log10(rms(load(n), 0.3, 0.8)) for n in ("lp_open", "comb_res127", "comb_res127_off"))
+check("comb level", lk > lo - 1 and lf > lo - 15,
+      f"full RES: {lk - lo:+.1f} dB on the harmonics, {lf - lo:+.1f} dB off them (vs the open low-pass)")
 cs = load("comb_stable")
 check("comb stable", np.isfinite(cs).all() and np.abs(cs[int(1.8 * FS):]).max() < 0.01,
       f"peak {np.abs(cs).max():.3f}; after the release {np.abs(cs[int(1.8 * FS):]).max():.4f}")

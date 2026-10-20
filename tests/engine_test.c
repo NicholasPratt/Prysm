@@ -174,23 +174,29 @@ int main(void)
         render("fenv", &p, A2, 1, 900, 1000);
         p = solo(); p.drive = 127; render("drive", &p, A4, 1, 900, 1000);
         p = saw_through(127, 0); p.hp_cut = 92; render("hp_880", &p, A2, 1, 900, 1000);   /* 883 Hz */
-        p = solo(); p.comb_mix = 127; p.comb_fb = 127; p.comb_damp = 0;   /* a sine on A4 into the comb */
-        render("comb_on", &p, A4, 1, 900, 1000);   /* on the note: 440 a peak */
-        p.comb_fb = 0; render("comb_neg", &p, A4, 1, 900, 1000);   /* - : the peaks between: 440 a notch */
-        p.comb_fb = 127; p.comb_key = 0;       /* no keytrack: FREQ alone */
-        p.comb_freq = 76; render("comb_abs", &p, A4, 1, 900, 1000);   /* MIDI 69: 440 a peak */
-        p.comb_freq = 80; render("comb_off", &p, A4, 1, 900, 1000);   /* MIDI 72 (523 Hz): 440 between */
-        p = saw_through(127, 0); p.comb_mix = 127; p.comb_fb = 120; p.comb_damp = 0;   /* a saw on A2, on the note */
+        p = solo(); p.flt_type = FLT_COMBP; p.cut = 64; p.res = 127; p.key = 127; p.comb_damp = 0;
+        render("comb_on", &p, A4, 1, 900, 1000);   /* a sine on A4, keytracked: 440 a peak */
+        p.flt_type = FLT_COMBM; render("comb_neg", &p, A4, 1, 900, 1000);   /* COMB-: the peaks between: a notch */
+        p.flt_type = FLT_COMBP; p.key = 0;     /* no keytrack: CUT alone */
+        p.cut = 76; render("comb_abs", &p, A4, 1, 900, 1000);   /* MIDI 69: 440 a peak */
+        p.cut = 80; render("comb_off", &p, A4, 1, 900, 1000);   /* MIDI 72 (523 Hz): 440 between */
+        p = saw_through(64, 100); p.flt_type = FLT_COMBP; p.key = 127; p.comb_damp = 0;   /* a saw on A2, on the note */
         render("comb_even", &p, A2, 1, 1400, 1500);
         p.comb_spread = 127; render("comb_spread", &p, A2, 1, 1400, 1500);   /* the upper peaks off the harmonics */
-        p = saw_through(127, 0); p.comb_mix = 127; p.comb_fb = 127; p.comb_damp = 0; p.drive = 127;
+        p = saw_through(64, 127); p.flt_type = FLT_COMBP; p.key = 127; p.comb_damp = 0; p.drive = 127;
         p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 127; p.glide = 90;   /* the worst: driven, swept, at full */
         p.lfo_dest[1] = DEST_SPREAD; p.lfo_amt[1] = 0; p.comb_spread = 64;
-        p.menv_dest = DEST_COMB; p.menv_amt = 127; p.menv_loop = 1; p.comb_env = 0;
+        p.menv_dest = DEST_CUTOFF; p.menv_amt = 127; p.menv_loop = 1; p.fenv = 127; p.flt_d = 50; p.flt_s = 0;
         {
             static const uint8_t LOW[] = {12, 100};
             render("comb_stable", &p, LOW, 2, 1500, 2000);
         }
+        p = saw_through(64, 0); p.flt_type = FLT_COMBP; p.key = 127; p.comb_damp = 0;
+        render("comb_res0", &p, A2, 1, 900, 1000);   /* the level as RES rises: broadband */
+        p.res = 127; render("comb_res127", &p, A2, 1, 900, 1000);
+        p.key = 0; p.cut = 70; render("comb_res127_off", &p, A2, 1, 900, 1000);   /* the peaks off the harmonics */
+        p = saw_through(71, 0); p.flt_type = FLT_LP24; render("lp24_1k", &p, A2, 1, 900, 1000);
+        p.res = 120; render("lp24_res", &p, A2, 1, 900, 1000);
         p = saw_through(10, 127);               /* the worst: full resonance, drive, the envelope sweeping it */
         p.drive = 127; p.fenv = 127; p.flt_d = 40; p.flt_s = 0; p.amp_r = 30;
         render("stable", &p, A5, 1, 700, 1500);
@@ -488,7 +494,7 @@ int main(void)
             p.cho_mix = p.dly_mix = p.rev_mix = 127; p.dly_shift = 0; p.rev_shimmer = 127;
             p.dly_wdepth = p.rev_mdepth = 127;
         }
-        p.hp_cut = 40; p.comb_mix = 127; p.comb_fb = 120; p.comb_spread = 100;   /* the high-pass, the comb, spread */
+        p.hp_cut = 40; p.flt_type = getenv("PRYSM_LP24") ? FLT_LP24 : FLT_COMBP; p.res = 120; p.comb_spread = 100;   /* the high-pass, the comb, spread */
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
         memset(voice, 0, sizeof voice);
         engine_init();

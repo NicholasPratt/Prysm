@@ -11,7 +11,7 @@
  *   5  + velocity (vel_amp .. vel_mod: 91 bytes)
  *   6  + glide and the arpeggiator (glide .. arp_swing: 101 bytes)
  *   7  + the sequencer (seq_len .. seq_slide: 297 bytes)
- *   8  + the high-pass and the comb (hp_cut .. comb_mix) */
+ *   8  + the high-pass, the filter's type, the comb (hp_cut .. comb_spread) */
 #define PATCH_SLOTS 8u
 #define PATCH_VERSION 8u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */

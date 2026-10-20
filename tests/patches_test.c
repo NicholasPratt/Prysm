@@ -129,7 +129,7 @@ int main(void)
         patches_load();
         CHECK(patch_get(4, &a) == 0 && !memcmp(&a, &c, PATCH_V7_SIZE) && bank.version == PATCH_VERSION,
               "format 7: slot 5's sound and sequence kept");
-        CHECK(a.hp_cut == 0 && a.comb_mix == 0, "format 7: the high-pass and the comb come in off");
+        CHECK(a.hp_cut == 0 && a.flt_type == FLT_LP12, "format 7: no high-pass, the filter LP 12 as before");
         CHECK(sizeof bank <= STORE_MAX, "the bank fits the store (%u of %u bytes)", (unsigned)sizeof bank, (unsigned)STORE_MAX);
     }
     printf(fails ? "%d failed\n" : "all passed\n", fails);

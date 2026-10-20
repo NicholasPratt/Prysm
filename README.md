@@ -5,7 +5,7 @@
 <p align="center"><img src="docs/screen.png" width="240" alt="Prysm's OSC 1 page: a VOCAL carrier modulated by a CMPLX wave"></p>
 
 Two oscillators per voice, each a chain of three wavetable operators (mod 2 -> mod 1 -> carrier) that modulate
-each other by FM, ring or mix; a resonant filter with drive, a high-pass and a comb; an LFO with six shapes and two destinations; a mod
+each other by FM, ring or mix; a resonant filter (12 / 24 dB low-pass or a comb) with drive and a high-pass; an LFO with six shapes and two destinations; a mod
 envelope that can loop and modulate the LFO's rate; stereo chorus, delay (with wow and pitch-shifting repeats) and
 a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; USB audio and MIDI.
 
@@ -22,7 +22,7 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | --- | --- |
 | **Voices** | 4, polyphonic |
 | **Oscillators** | 2 per voice; each a carrier modulated by mod 1, modulated by mod 2. Each operator: 6 banks x 8 morphing waves (BASIC, HARM, PULSE, VOCAL, DIGI, CMPLX), a ratio to the note (0.5 .. 16); each modulator: FM / RING / MIX, an amount, its own AR envelope |
-| **Filter** | 2-pole state-variable low-pass (zero-delay feedback), resonance, drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance); a Blofeld-style comb (frequency, keytrack, envelope, feedback +-, damping, spread; LFO / mod envelope destinations) |
+| **Filter** | state-variable low-pass, 12 or 24 dB/oct (zero-delay feedback), or a Blofeld-style comb (COMB+ / COMB-: the cutoff its frequency, resonance its feedback, plus damping and spread); drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance) |
 | **Amp** | ADSR |
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch, cutoff, amp, mix) |
 | **Mod envelope** | ADSR with LOOP (attack-decay until release); into the LFO's rate or depth, or any LFO destination |
@@ -48,7 +48,7 @@ envelopes, the LFO, the effects chain.
 | Page | Button | Rows |
 | --- | --- | --- |
 | OSC 1, OSC 2 | EDIT | WAVE, WAVE2, RATIO, MODE, ENV, MIX |
-| FILTER | ENV (twice) | FILTER, ENV, DRIVE, HPF, COMB, C.RES |
+| FILTER | ENV (twice) | FILTER, ENV, TYPE, COMB |
 | AMP | ENV | ENV, VEL |
 | LFO | LFO | LFO, DEST, M.ENV, M.DST |
 | MIX | GLO | OSC, GLIDE |

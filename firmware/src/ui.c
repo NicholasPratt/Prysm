@@ -36,7 +36,7 @@
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
        K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
-       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_CFREQ, K_CKEY, K_LDEST };   /* (the step kinds: the step under the cursor) */
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST };   /* (the step kinds: the step under the cursor) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -81,12 +81,9 @@ static const row_t FILTER_ROWS[] = {
                 {"ENV", PO(fenv), 127, K_BIP}, {"KEY", PO(key), 127, K_NUM}}, LIT_CURVE},
     {"ENV", {{"A", PO(flt_a), 127, K_NUM}, {"D", PO(flt_d), 127, K_NUM},
              {"S", PO(flt_s), 127, K_NUM}, {"R", PO(flt_r), 127, K_NUM}}, LIT_ENV},
-    {"DRIVE", {{"DRIVE", PO(drive), 127, K_NUM}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},
-    {"HPF", {{"CUT", PO(hp_cut), 127, K_HPF}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},
-    {"COMB", {{"FREQ", PO(comb_freq), 127, K_CFREQ}, {"KEY", PO(comb_key), 127, K_CKEY},
-              {"ENV", PO(comb_env), 127, K_BIP}, {"MIX", PO(comb_mix), 127, K_NUM}}, LIT_ENV},
-    {"C.RES", {{"FDBK", PO(comb_fb), 127, K_BIP}, {"DAMP", PO(comb_damp), 127, K_NUM},
-               {"SPREAD", PO(comb_spread), 127, K_NUM}, NOPRM}, LIT_CURVE},
+    {"TYPE", {{"TYPE", PO(flt_type), FLT_N - 1u, K_FTYPE}, {"DRIVE", PO(drive), 127, K_NUM},
+              {"HPF", PO(hp_cut), 127, K_HPF}, NOPRM}, LIT_CURVE},
+    {"COMB", {{"DAMP", PO(comb_damp), 127, K_NUM}, {"SPREAD", PO(comb_spread), 127, K_NUM}, NOPRM, NOPRM}, LIT_CURVE},
 };
 static const row_t AMP_ROWS[] = {
     {"ENV", {{"A", PO(amp_a), 127, K_NUM}, {"D", PO(amp_d), 127, K_NUM},
@@ -245,8 +242,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_SSLIDE: put(s, *v ? "ON" : "OFF"); break;
     case K_SLEN: num(s, *v); break;
     case K_HPF: if (*v) hz(s, hp_q(*v)); else put(s, "OFF"); break;
-    case K_CFREQ: hz(s, 48 + 3 * (int32_t)*v); break;   /* (MIDI 12 + 0.75 a step) */
-    case K_CKEY: put(num(s, *v * 100u / 64u), "%"); break;
+    case K_FTYPE: put(s, FLT_NAME[*v < FLT_N ? *v : 0u]); break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
         uint32_t h = PR_LFO_HZ100[*v & 127u];
         char *e = num(s, h / 100u);
@@ -367,11 +363,11 @@ static int32_t lg2_q8(uint64_t v)               /* log2(v) in Q8 (a straight lin
 
 static void gfx_filter(uint32_t lit)
 {
-    /* the response: |H|^2 = 1 / ((1 - x^2)^2 + k^2 x^2), x = f / fc, over MIDI 16 .. 135, +24 .. -36 dB; with the
-     * high-pass, each of its one-poles x^2 / (1 + x^2) */
+    /* the response: |H|^2 = 1 / ((1 - x^2)^2 + k^2 x^2), x = f / fc (LP 24: and 1 / (1 + x^4); the comb: its peaks),
+     * over MIDI 16 .. 135, +24 .. -36 dB; with the high-pass, each of its one-poles x^2 / (1 + x^2) */
     const int32_t W = 160, top = 2, h = G_H - 4;
     uint64_t k12 = eg.f_k >> 12;
-    int32_t px, py = 0, cx = (eg.f_cut - 64) * (W - 1) / 476, hq = edit.hp_cut ? hp_q(edit.hp_cut) : 0;
+    int32_t px, py = 0, fq = eg.flt_type >= FLT_COMBP ? eg.comb_p16 >> 2 : eg.f_cut, cx = (fq - 64) * (W - 1) / 476, hq = edit.hp_cut ? hp_q(edit.hp_cut) : 0;
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
     for (px = 0; px < W; px += 8)               /* the 0 dB line, dotted; the cutoff */
         cv_pset(px, top + 24, C_FAINT);
@@ -380,9 +376,18 @@ static void gfx_filter(uint32_t lit)
     for (px = 0; px < W; px++) {
         int32_t q = 64 + px * 476 / (W - 1), db, y;
         uint64_t x2 = x2_at(q - eg.f_cut), den, one = 4096;
-        den = (x2 > one ? (x2 - one) * (x2 - one) : (one - x2) * (one - x2)) + ((k12 * k12 * x2) >> 12);
-        if (!den) den = 1;
-        db = (-(lg2_q8(den) - 24 * 256) * 3083) / (1024 * 256);   /* -10 log10(den / 2^24) = -3.0103 log2(...) */
+        if (eg.flt_type >= FLT_COMBP) {         /* the comb: |H|^2 = in^2 / (1 + fb^2 - 2 fb cos(2 pi f / f0)) */
+            uint32_t ph = (uint32_t)x2_at((q - fq) / 2) << 20;   /* f / f0 (Q12) -> a phase */
+            int64_t fb = eg.comb_fb, cs = lfo_wave(LFO_SINE, ph + 0x40000000u, 0);
+            den = (uint64_t)((1LL << 30) + fb * fb - 2 * fb * cs);
+            db = ((lg2_q8((uint64_t)eg.comb_in * (uint64_t)eg.comb_in) - lg2_q8(den ? den : 1)) * 3083) / (1024 * 256);
+        } else {
+            den = (x2 > one ? (x2 - one) * (x2 - one) : (one - x2) * (one - x2)) + ((k12 * k12 * x2) >> 12);
+            if (!den) den = 1;
+            db = (-(lg2_q8(den) - 24 * 256) * 3083) / (1024 * 256);   /* -10 log10(den / 2^24) = -3.0103 log2(...) */
+            if (eg.flt_type == FLT_LP24)        /* its first stage: 1 / (1 + x^4) */
+                db -= ((lg2_q8(one * one + x2 * x2) - 24 * 256) * 3083) / (1024 * 256);
+        }
         if (hq) {                               /* the high-pass: -2 x 10 log10((1 + x^2) / x^2) */
             uint64_t xh = x2_at(q - hq);
             db = xh ? db - 2 * (lg2_q8(xh + one) - lg2_q8(xh)) * 3083 / (1024 * 256) : -99;
@@ -1094,7 +1099,7 @@ static int ui_input(uint32_t buttons)
         x = (int32_t)*v + d;
         x = x < (p->kind == K_SLEN ? 1 : 0) ? (p->kind == K_SLEN ? 1 : 0) : x > p->max ? p->max : x;
         if (p->kind == K_LDEST && !DEST_LFO_OK(x))   /* the LFO: past the mod envelope's own (LFORATE, LFOAMT) */
-            x = d > 0 ? DEST_COMB : DEST_MIX;
+            x = d > 0 ? DEST_SPREAD : DEST_MIX;
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;
