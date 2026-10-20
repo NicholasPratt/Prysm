@@ -55,9 +55,10 @@ Status: release 0.2 (site/: the web installer and the manual). User manual: docs
 - **Pages** are stepped through with **ALGORITHM**, or reached directly with buttons:
   - **EDIT**: OSC 1, press again for OSC 2;
   - **ENV**: AMP, press again for FILTER;
-  - **LFO**: LFO;
-  - **GLO**: MIX;
-  - **FX**: the effects.
+  - **LFO**: LFO, press again for LFO 2;
+  - **GLO**: MIX, press again for SETUP;
+  - **FX**: CHORUS, then DELAY, then REVERB;
+  - **SELECT** (the button): FILTER.
 - **PRESETS** is the filter's cutoff on every page but PATCH (the header shows it for 1.2 s).
 - **MASTER** stays the output volume (platform).
 - **OCT- / OCT+** set the keyboard octave (kept).
@@ -155,10 +156,12 @@ MIDI note writes its note at the cursor and moves it on. The page draws 64 squar
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| MIDI | in: OMNI, 1 .. 16 | out: 1 .. 16 | the arp's clock: INT / MIDI | |
+| MIDI | in: OMNI, 1 .. 16 | out: 1 .. 16 | the arp's clock: INT / MIDI | pitch bend range: OFF, +-1 .. 24 st |
 
-Global, not per patch: `gset` (ui.c), saved in the settings sector with the octave and the last slot (an older,
-2-byte record still loads).
+Global, not per patch: `gset` (ui.c), saved in the settings sector with the octave and the last slot (an older
+record still loads: 5 bytes, before BEND, which then comes in at +-2; or 2 bytes). MIDI pitch bend (0xE0, any
+channel the IN setting lets through) -> `engine_bend`: +-range semitones on both oscillators (as the LFO's PITCH, so
+the comb's keytrack follows).
 
 ### SCOPE (HOME)
 
@@ -225,7 +228,9 @@ like the shared LFO's phases):
 ## Effects
 
 After the voices, in stereo: **chorus -> delay -> reverb** (`firmware/src/fx.c`), saved with each patch. Each is
-off while its mix is 0 (the dry sound passes untouched, at no cost). The **FX** page (the FX button):
+off while its mix is 0 (the dry sound passes untouched, at no cost). A page each, **CHORUS** (CHORUS),
+**DELAY** (DELAY, D.MOD), **REVERB** (REVERB, R.MOD), the FX button stepping through them; the same picture of the
+chain on each, its own effect lit:
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |

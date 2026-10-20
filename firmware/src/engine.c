@@ -288,6 +288,7 @@ static int32_t lfo_sh;
 static int32_t lfo_rate16;                      /* its rate moved by the newest note's mod envelope (last render) */
 static uint32_t l2_ph, l2_rng = 0x6C8E9CF5u;    /* LFO 2 (free-running, one for all) */
 static int32_t l2_sh;
+static volatile int32_t bend16;                 /* MIDI pitch bend, 1/16 semitones (the main loop's: engine_bend) */
 static volatile uint8_t l2_restart;             /* the sequencer / MIDI clock started: LFO 2 from the top */
 static int32_t last_note = -1;                  /* glide: the note the next one slides from */
 
@@ -995,6 +996,8 @@ static void engine_render(int32_t *out, uint32_t n)
             if (DEST_LFO_OK(eg.me_dest))        /* any of the LFO's destinations */
                 mod_add(&m, eg.me_dest, me_amt, me, 1);
             mod_add(&m, eg.l2_dest, eg.l2_amt, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
+            m.pitch16[0] += bend16;             /* pitch bend: every note (and the comb's keytrack with it) */
+            m.pitch16[1] += bend16;
             m.vmod = 32767;                     /* velocity: softer notes quieter (by its square), darker, less bright */
             if (voice[v].vel < 127u) {          /* (127, the keys: exactly as without velocity) */
                 int32_t vel = voice[v].vel, vf = vel * 258, soft = 32767 - vf;   /* vf: 0 .. 32508 */
@@ -1510,6 +1513,12 @@ static void arp_key_up(uint32_t note)
             held_change();
             return;
         }
+}
+
+static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16383 (8192: none), +-range st */
+{
+    int32_t d = (int32_t)v14 - 8192;
+    bend16 = d * (int32_t)range * 16 / (d > 0 ? 8191 : 8192);   /* (up: 8191 is the top) */
 }
 
 static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */

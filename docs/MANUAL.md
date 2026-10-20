@@ -8,7 +8,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
 - [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo), [LFO 2](#lfo-2),
-  [MIX](#mix), [ARP](#arp), [SEQ](#seq), [FX](#fx), [SETUP](#setup)
+  [MIX](#mix), [ARP](#arp), [SEQ](#seq), [FX](#fx) (CHORUS, DELAY, REVERB), [SETUP](#setup)
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
@@ -84,7 +84,7 @@ Every page works the same way:
 | **SEQ** | SEQ |
 | **PLAY** | the sequencer: run / stop (from any page; its LED shows it) |
 | **REC** | step entry on the SEQ page (its LED shows it) |
-| **FX** | FX |
+| **FX** | CHORUS (press again: DELAY, then REVERB) |
 | **HOME** | the oscilloscope |
 | **SAVE** | the PATCH screen |
 
@@ -299,16 +299,17 @@ swing and gate still apply. With CLOCK = MIDI and no clock running, the arpeggia
 
 ### FX
 
-Stereo effects after the voices: **chorus -> delay -> reverb**. Each one is off while its **MIX** is 0. The picture
-draws the chain, with a mix bar under each effect.
+Stereo effects after the voices: **chorus -> delay -> reverb**, a page each: **FX** steps through CHORUS, DELAY
+and REVERB. Each one is off while its **MIX** is 0. The picture draws the chain, with a mix bar under each effect
+and the page's own effect lit.
 
-| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
-| --- | --- | --- | --- | --- |
-| CHORUS | rate | depth | mix | |
-| DELAY | time (10 .. 735 ms) | feedback | mix | PING ON / OFF |
-| D.MOD | wow rate | wow depth | shift (-12 .. +12 st) | tone |
-| REVERB | size | damping | mix | pre-delay (up to 93 ms) |
-| R.MOD | rate | depth | shimmer | |
+| Page | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- | --- |
+| CHORUS | CHORUS | rate | depth | mix | |
+| DELAY | DELAY | time (10 .. 735 ms) | feedback | mix | PING ON / OFF |
+| DELAY | D.MOD | wow rate | wow depth | shift (-12 .. +12 st) | tone |
+| REVERB | REVERB | size | damping | mix | pre-delay (up to 93 ms) |
+| REVERB | R.MOD | rate | depth | shimmer | |
 
 - **Chorus**: left and right swept against each other, for width. Full mix is half wet: the classic chorus.
 - **Delay**: **ping** sends the repeats from side to side. **Tone** darkens each repeat. Turning the time while it
@@ -356,11 +357,12 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| MIDI | IN: OMNI or 1 .. 16 | OUT: 1 .. 16 | CLOCK: INT / MIDI | |
+| MIDI | IN: OMNI or 1 .. 16 | OUT: 1 .. 16 | CLOCK: INT / MIDI | BEND: OFF, +-1 .. +-24 semitones |
 
 - **IN**: the channel Prysm plays from (OMNI: all of them).
 - **OUT**: the channel the FM-1's keys send their notes on.
 - **CLOCK**: the arpeggiator's tempo: its own (**INT**, the BPM on the ARP page) or the **MIDI** clock.
+- **BEND**: how far a MIDI keyboard's pitch wheel bends every note, either way (2 at first; OFF ignores it).
 
 ---
 

@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, LFO 2, MIX, ARP, SEQ, FX, SETUP.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, LFO 2, MIX, ARP, SEQ, CHORUS, DELAY,
+ * REVERB, SETUP.
  *
  *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO / LFO 2, GLO = MIX / SETUP, ARP = ARP
- *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = FX, the SELECT button = FILTER)
+ *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = CHORUS / DELAY / REVERB,
+ *                    the SELECT button = FILTER)
  *   PLAY             the sequencer: run / stop (anywhere; its LED shows it)
  *   REC              step entry on the SEQ page: a key writes its note at the cursor, which moves on
  *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
@@ -36,7 +38,7 @@
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
        K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
-       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC };   /* (the step kinds: the step under the cursor) */
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC, K_BEND };   /* (the step kinds: the step under the cursor) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -48,8 +50,10 @@ typedef struct {
     uint8_t midi_in;                            /* 0 = OMNI, 1 .. 16 */
     uint8_t midi_out;                           /* 0 .. 15 = channel 1 .. 16 */
     uint8_t clock;                              /* the arp: 0 its own, 1 the MIDI clock */
+    uint8_t bend;                               /* MIDI pitch bend's range: 0 .. 24 semitones */
 } gset_t;
-static gset_t gset = {0, -1, 0, 0, 0};
+#define GSET_V1_SIZE 5u                         /* (before bend) */
+static gset_t gset = {0, -1, 0, 0, 0, 2};
 static uint8_t gset_dirty;                      /* changed: the app saves it (when quiet) */
 #define G 3u                                    /* (page_t.osc: the page edits gset) */
 #define GO(f) ((uint16_t)__builtin_offsetof(gset_t, f))
@@ -116,15 +120,21 @@ static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cu
 };
 static const row_t SETUP_ROWS[] = {
     {"MIDI", {{"IN", GO(midi_in), 16, K_MCHI}, {"OUT", GO(midi_out), 15, K_MCHO},
-              {"CLOCK", GO(clock), 1, K_CLK}, NOPRM}, LIT_ALL},
+              {"CLOCK", GO(clock), 1, K_CLK}, {"BEND", GO(bend), 24, K_BEND}}, LIT_ALL},
 };
-static const row_t FX_ROWS[] = {                /* lit: LIT_C = the chorus, LIT_M1 = the delay, LIT_M2 = the reverb */
+/* the effects, a page each (the FX button steps through them); lit: LIT_C the chorus, LIT_M1 the delay, LIT_M2 the
+ * reverb */
+static const row_t CHO_ROWS[] = {
     {"CHORUS", {{"RATE", PO(cho_rate), 127, K_RATE}, {"DEPTH", PO(cho_depth), 127, K_NUM},
                 {"MIX", PO(cho_mix), 127, K_NUM}, NOPRM}, LIT_C},
+};
+static const row_t DLY_ROWS[] = {
     {"DELAY", {{"TIME", PO(dly_time), 127, K_DMS}, {"FDBK", PO(dly_fb), 127, K_NUM},
                {"MIX", PO(dly_mix), 127, K_NUM}, {"PING", PO(dly_ping), 1, K_ONOFF}}, LIT_M1},
     {"D.MOD", {{"WOW", PO(dly_wrate), 127, K_RATE}, {"DEPTH", PO(dly_wdepth), 127, K_NUM},
                {"SHIFT", PO(dly_shift), 24, K_SHIFT}, {"TONE", PO(dly_tone), 127, K_NUM}}, LIT_M1},
+};
+static const row_t REV_ROWS[] = {
     {"REVERB", {{"SIZE", PO(rev_size), 127, K_NUM}, {"DAMP", PO(rev_damp), 127, K_NUM},
                 {"MIX", PO(rev_mix), 127, K_NUM}, {"PRE", PO(rev_pre), 127, K_PMS}}, LIT_M2},
     {"R.MOD", {{"RATE", PO(rev_mrate), 127, K_RATE}, {"DEPTH", PO(rev_mdepth), 127, K_NUM},
@@ -142,13 +152,15 @@ static const row_t ARP_ROWS[] = {
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_LFO2, PG_MIX, PG_ARP, PG_SEQ, PG_FX, PG_SETUP, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_LFO2, PG_MIX, PG_ARP, PG_SEQ, PG_CHO, PG_DLY, PG_REV, PG_SETUP, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
     {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"LFO 2", LFO2_ROWS, NROWS(LFO2_ROWS), 0},
     {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
-    {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0}, {"FX", FX_ROWS, NROWS(FX_ROWS), 0},
+    {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0}, 
+    {"CHORUS", CHO_ROWS, NROWS(CHO_ROWS), 0}, {"DELAY", DLY_ROWS, NROWS(DLY_ROWS), 0},
+    {"REVERB", REV_ROWS, NROWS(REV_ROWS), 0},
     {"SETUP", SETUP_ROWS, NROWS(SETUP_ROWS), G},
 };
 
@@ -242,6 +254,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_MCHI: if (*v) num(s, *v); else put(s, "OMNI"); break;
     case K_MCHO: num(s, *v + 1u); break;
     case K_CLK: put(s, *v ? "MIDI" : "INT"); break;
+    case K_BEND: if (*v) put(num(put(s, "+-"), *v), "st"); else put(s, "OFF"); break;
     case K_CURSOR: num(s, *v + 1u); break;
     case K_SNOTE: {
         static const char *const NM[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -594,15 +607,18 @@ static void gfx_setup(void)                     /* the MIDI setup, in words */
     e = put(s, "MIDI IN ");
     if (gset.midi_in) e = num(put(e, "CH "), gset.midi_in); else e = put(e, "OMNI");
     put(num(put(e, "   OUT CH "), gset.midi_out + 1u), "");
-    cv_text(8, 6, &FONT_S, s, C_MID);
+    cv_text(8, 0, &FONT_S, s, C_MID);
     e = put(s, gset.clock ? "ARP CLOCK: MIDI " : "ARP CLOCK: ITS OWN");
     if (gset.clock) {
         uint32_t b = mc_bpm10;
         if (b) { e = num(e, b / 10u); *e++ = '.'; put(num(e, b % 10u), " BPM"); }
         else put(e, "(NONE YET)");
     }
-    cv_text(8, 26, &FONT_S, s, gset.clock ? C_ACC : C_MID);
-    cv_text(8, 46, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
+    cv_text(8, 16, &FONT_S, s, gset.clock ? C_ACC : C_MID);
+    e = put(s, "PITCH BEND ");
+    if (gset.bend) put(num(put(e, "+-"), gset.bend), " SEMITONES"); else put(e, "OFF");
+    cv_text(8, 32, &FONT_S, s, C_MID);
+    cv_text(8, 48, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
 }
 
 /* the sequencer: 64 squares, 16 a row: a rest empty, a note lilac, an accent white, a slide joined to the next;
@@ -662,7 +678,7 @@ static void draw_gfx(void)
     case PG_AMP: cv_adsr(8, 4, 224, G_H - 10, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
     case PG_LFO: gfx_lfo(lit); break;
     case PG_LFO2: gfx_lfo(lit | LIT_L2); break;
-    case PG_FX: gfx_fx(lit); break;
+    case PG_CHO: case PG_DLY: case PG_REV: gfx_fx(lit); break;
     case PG_ARP: gfx_arp(lit); break;
     case PG_SETUP: gfx_setup(); break;
     case PG_SEQ: gfx_seq(lit); break;
@@ -1070,7 +1086,8 @@ static int ui_input(uint32_t buttons)
         return (int)changed;
     }
     if (buttons & (1u << BTN_EDIT)) ui_page(page == PG_OSC1 ? PG_OSC2 : PG_OSC1);
-    if (buttons & (1u << BTN_FX)) ui_page(PG_FX);
+    if (buttons & (1u << BTN_FX))               /* FX: CHORUS, DELAY, REVERB in turn */
+        ui_page(page == PG_CHO ? PG_DLY : page == PG_DLY ? PG_REV : PG_CHO);
     if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
     if (buttons & (1u << BTN_SEL)) ui_page(PG_FILTER);   /* SELECT (the button): straight to FILTER */
     if (buttons & (1u << BTN_LFO)) ui_page(page == PG_LFO ? PG_LFO2 : PG_LFO);

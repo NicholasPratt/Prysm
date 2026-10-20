@@ -111,8 +111,11 @@ static void app_main(void)
 {
     uint32_t prev = 0, k, t_change = 0, dirty = 0;
     uint8_t held[27] = {0};                     /* the note each key plays */
-    if (settings_load(&gset, sizeof gset) != 0)  /* the settings; an older, shorter record (the octave, the slot) */
+    uint32_t bend = 8192;                       /* the last MIDI pitch bend (the range may change under it) */
+    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; an older, shorter record (before BEND; the */
+        settings_load(&gset, GSET_V1_SIZE) != 0)    /* octave, the slot) */
         settings_load(&gset, 2);
+    if (gset.bend > 24u) gset.bend = 2;
     if (gset.oct < -2 || gset.oct > 2) gset.oct = 0;
     if (gset.midi_in > 16u) gset.midi_in = 0;
     if (gset.midi_out > 15u) gset.midi_out = 0;
@@ -167,7 +170,9 @@ static void app_main(void)
                 play(d1, d2);
             }
             else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) stop(d1);
+            else if ((st & 0xF0u) == 0xE0u) bend = d1 | (uint32_t)d2 << 7;   /* pitch bend */
         }
+        engine_bend(bend, gset.bend);
 #if DINGHY_USB_LOG
         usblog_pump();
 #endif

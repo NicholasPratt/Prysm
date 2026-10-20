@@ -58,6 +58,8 @@ print("engine checks")
 boot = float(np.abs(load2("boot")).max())
 check("silent at power-on", boot == 0, f"peak {boot:.4f} with no note (rendered before engine_init too)")
 
+bu, bd = peak_hz(*spectrum(load("bend_up"))), peak_hz(*spectrum(load("bend_down")))
+check("pitch bend", abs(bu - 880) < 2 and abs(bd - 392) < 1.5, f"full up at +-12: {bu:.1f} Hz (880); full down at +-2: {bd:.1f} Hz (392)")
 f, s = spectrum(load("sine"))
 hz = peak_hz(f, s)
 worst = max(level_db(f, s, 440 * h) for h in range(2, 8))

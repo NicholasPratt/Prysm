@@ -122,6 +122,9 @@ int main(void)
 
     p = solo();                                 /* a pure sine: 440 Hz */
     render("sine", &p, A4, 1, 900, 1000);
+    engine_bend(16383, 12); render("bend_up", &p, A4, 1, 900, 1000);   /* pitch bend: full up, +-12: an octave */
+    engine_bend(0, 2); render("bend_down", &p, A4, 1, 900, 1000);      /* full down, +-2: G4 */
+    engine_bend(8192, 2);
 
     p = solo();                                 /* FM: mod 1 at x1 into the carrier: harmonics of 440 */
     p.osc[0].amt[0] = 100;
