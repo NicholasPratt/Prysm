@@ -341,7 +341,33 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
 }
 extern void isr_alnk0(void);
 
-/* ---- the main loop's duties: watchdog, USB, the installer's update request, the MASTER knob */
+/* ---- the battery: ADC ch3 (a divider from the cell), smoothed. The stock firmware's thresholds 531 / 561 / 591 give
+ * 0 .. 3 bars. There is no charger status line: on USB power (a host has configured us) the reading is the charger's,
+ * so fm1_batt() says 4 then. */
+static int32_t fm1_batt_raw;                    /* the smoothed reading, 0..1023 (0: not read yet) */
+static uint32_t fm1_batt_lvl;
+static uint32_t fm1_batt(void)                  /* 0 .. 3 bars, or 4: on USB power */
+{
+    if (usb.config && !usb.suspended)
+        return 4;
+    return fm1_batt_lvl;
+}
+static void fm1_batt_poll(void)                 /* every 100 ms */
+{
+    static const int32_t T[3] = {531, 561, 591};
+    static uint32_t next;
+    int32_t b;
+    if (fm1_ms < next || (b = fm1_adc_read(FM1_ADC_BATT)) <= 0)
+        return;
+    next = fm1_ms + 100u;
+    fm1_batt_raw = fm1_batt_raw ? fm1_batt_raw + (b - fm1_batt_raw) / 16 : b;
+    while (fm1_batt_lvl < 3u && fm1_batt_raw >= T[fm1_batt_lvl] + 3)   /* (3 either side of a threshold: no flicker) */
+        fm1_batt_lvl++;
+    while (fm1_batt_lvl > 0u && fm1_batt_raw < T[fm1_batt_lvl - 1u] - 3)
+        fm1_batt_lvl--;
+}
+
+/* ---- the main loop's duties: watchdog, USB, the installer's update request, the MASTER knob, the battery */
 #ifdef APP_SYSEX                                /* (an app's own SysEx, F0 7D ...: the app defines APP_SYSEX first) */
 static void APP_SYSEX(const uint8_t *p, uint32_t n);
 #endif
@@ -378,6 +404,7 @@ static void platform_poll(void)
     }
     if (fm1_ms >= 30000u && bootguard.pending)
         bootguard_clear(&bootguard);            /* 30 s up: this firmware boots */
+    fm1_batt_poll();
     if ((a = fm1_adc_read(FM1_ADC_MASTER)) >= 0) {
         uint32_t k10;
         knob_avg += (a * 16 - knob_avg) / 8;

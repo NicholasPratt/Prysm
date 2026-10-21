@@ -31,6 +31,8 @@ static int32_t host_enc[7];
 static int32_t fm1_enc_take(uint32_t e) { int32_t d = e < 7u ? host_enc[e] : 0; if (e < 7u) host_enc[e] = 0; return d; }
 static uint8_t web_led[48];                     /* the LEDs (key and button ids), for the page */
 static void fm1_led_key(uint32_t id, int on) { if (id < sizeof web_led) web_led[id] = (uint8_t)(on != 0); }
+static int32_t fm1_batt_raw = 600;              /* the battery (platform.c): on a computer, a charged one */
+static uint32_t fm1_batt(void) { return 3u; }
 
 /* the screen: 240 x 240 RGB565, as the ST7789 gets it */
 static uint16_t fb[240 * 240];

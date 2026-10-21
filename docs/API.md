@@ -68,6 +68,7 @@ The panel is scanned at 10 kHz in the background and debounced.
 | `fm1_enc_take(ENC_...)` | detents turned since the last call, + = clockwise |
 | `fm1_adc_read(FM1_ADC_MASTER)` | the MASTER knob, 0..1023 (-1 = not ready). platform.c already makes it the volume |
 | `fm1_adc_read(FM1_ADC_BATT)` | the battery voltage, raw |
+| `fm1_batt()`, `fm1_batt_raw` | the battery: 0 .. 3 bars (the stock firmware's thresholds 531 / 561 / 591 on the smoothed reading), 4 on USB power (no charger status line: a configured USB host counts as power); the smoothed reading |
 
 Buttons (ids 0..13):
 

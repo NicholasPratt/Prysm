@@ -184,9 +184,16 @@ static void spl_frame(uint32_t t)               /* the screen at t ms */
                         cv_rect(x, y, 2, 2, RGB(r, g, b));
                     }
                 }
-        if (t >= SPL_DONE_MS && strip == 1u) {  /* the version, under the word */
+        if (t >= SPL_DONE_MS && strip == 1u) {  /* the version, under the word; the battery under it */
             static const char V[] = "v" APP_VER;
+            uint32_t b = fm1_batt();
+            const char *w = b == 4u ? "USB POWER" : b == 0u ? "BATTERY LOW" : "";
+            int32_t bw = 34 + (*w ? 10 + text_w(&FONT_S, w) : 0), bx = (240 - bw) / 2;
             cv_text((240 - text_w(&FONT_S, V)) / 2, 172 - y0, &FONT_S, V, t >= SPL_DONE_MS + 200u ? C_MID : C_FAINT);
+            if (t >= SPL_DONE_MS + 200u) {
+                cv_batt(bx, 200 - y0, b, 2);
+                if (*w) cv_text(bx + 44, 200 - y0, &FONT_S, w, b == 0u ? C_BRIGHT : C_MID);
+            }
         }
         cv_blit(0, (uint32_t)y0);
     }

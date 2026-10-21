@@ -96,6 +96,10 @@ cutoff).
 | **HOME** | the oscilloscope |
 | **SAVE** | the PATCH screen |
 
+The header's battery shows **0 to 3 bars**; empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
+**bolt** (USB power) instead, as the FM-1 cannot tell its charge while it is charging. The splash shows it too, and the
+SETUP page in words, with the raw reading (ADC).
+
 The header's **CPU** bar is how much of the FM-1's time the sound takes (its peak over the last half second); it
 turns bright past 70 %. Keep it under that: near 100 % the sound starts to crackle.
 

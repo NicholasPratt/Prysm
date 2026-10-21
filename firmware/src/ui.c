@@ -310,6 +310,26 @@ static void cv_frame(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)   /
     cv_rect(x, y, 1, h, c); cv_rect(x + w - 1, y, 1, h, c);
 }
 
+/* the battery (fm1_batt: 0 .. 3 bars, 4 on USB power: a bolt), 17 x 9 px times s; empty, it blinks */
+static void cv_batt(int32_t x, int32_t y, uint32_t lvl, int32_t s)
+{
+    static const char BOLT[6][14] = {".......##....", "......##.....", ".....######..", "........##...",
+                                     ".......##....", "......#......"};
+    uint16_t c = lvl == 0u ? ((fm1_ms / 500u) & 1u ? C_BRIGHT : C_FAINT) : C_MID;
+    int32_t i, j;
+    cv_rect(x, y, 15 * s, 9 * s, c);            /* the case, and its tip */
+    cv_rect(x + s, y + s, 13 * s, 7 * s, C_BLACK);
+    cv_rect(x + 15 * s, y + 3 * s, 2 * s, 3 * s, c);
+    if (lvl == 4u) {
+        for (j = 0; j < 6; j++)
+            for (i = 0; i < 13; i++)
+                if (BOLT[j][i] == '#') cv_rect(x + (1 + i) * s, y + (2 + j) * s, s, s, C_BRIGHT);
+        return;
+    }
+    for (i = 0; i < (int32_t)lvl && i < 3; i++)
+        cv_rect(x + (2 + 4 * i) * s, y + 2 * s, 3 * s, 5 * s, C_BRIGHT);
+}
+
 static void cv_hdots(int32_t x0, int32_t x1, int32_t y, int32_t step)   /* a guide: dotted, faint */
 {
     for (; x0 < x1; x0 += step) cv_pset(x0, y, C_FAINT);
@@ -661,19 +681,29 @@ static void gfx_setup(void)                     /* the MIDI setup, in words */
     e = put(s, "MIDI IN ");
     if (gset.midi_in) e = num(put(e, "CH "), gset.midi_in); else e = put(e, "OMNI");
     put(num(put(e, "   OUT CH "), gset.midi_out + 1u), "");
-    cv_text(8, 10, &FONT_S, s, C_MID);
+    cv_text(8, 6, &FONT_S, s, C_MID);
     e = put(s, gset.clock ? "ARP CLOCK: MIDI " : "ARP CLOCK: ITS OWN");
     if (gset.clock) {
         uint32_t b = mc_bpm10;
         if (b) { e = num(e, b / 10u); *e++ = '.'; put(num(e, b % 10u), " BPM"); }
         else put(e, "(NONE YET)");
     }
-    cv_text(8, 34, &FONT_S, s, gset.clock ? C_ACC : C_MID);
+    cv_text(8, 28, &FONT_S, s, gset.clock ? C_ACC : C_MID);
     e = put(s, "PITCH BEND ");
     if (gset.bend) put(num(put(e, "+-"), gset.bend), " SEMITONES"); else put(e, "OFF");
-    cv_text(8, 58, &FONT_S, s, C_MID);
-    cv_rect(8, 90, 224, 1, C_BOX);
-    cv_text(8, 98, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
+    cv_text(8, 50, &FONT_S, s, C_MID);
+    {                                           /* the battery: its bars, and the reading (stock thresholds 531 / 561 / 591) */
+        uint32_t b = fm1_batt();
+        int32_t x;
+        cv_batt(8, 76, b, 1);
+        e = b == 4u ? put(s, "USB POWER") : b == 0u ? put(s, "BATTERY LOW") : num(put(s, "BATTERY "), b);
+        if (b && b < 4u) put(e, "/3");
+        x = cv_text(32, 72, &FONT_S, s, b == 0u ? C_BRIGHT : C_MID);
+        e = num(put(s, "ADC "), (uint32_t)(fm1_batt_raw > 0 ? fm1_batt_raw : 0));
+        cv_text(x + 12, 72, &FONT_S, s, C_FAINT);
+    }
+    cv_rect(8, 98, 224, 1, C_BOX);
+    cv_text(8, 104, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
 }
 
 /* the sequencer: 64 squares, 16 a row: a rest empty, a note grey, an accent white, a slide joined to the next;
@@ -795,7 +825,8 @@ static void draw_hdr(void)
     if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
     else e = put(e, "-");
     if (modified()) e = put(e, "*");
-    cv_text(196 - text_w(&FONT_S, s), 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
+    cv_text(176 - text_w(&FONT_S, s), 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
+    cv_batt(181, 5, fm1_batt(), 1);             /* the battery, before the CPU */
 #ifndef DINGHY_HOST
     cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak */
     cpu_max = 0;
@@ -1284,9 +1315,9 @@ static void ui_init(int32_t slot)                /* the sound in that slot (the 
 static void ui_draw(void)                       /* from the main loop: what changed, at most every UI_FRAME_MS */
 {
     static uint32_t last, last_hdr;
-    if (fm1_ms - last_hdr >= 500u) {            /* the CPU in the header, twice a second */
+    if (fm1_ms - last_hdr >= 500u) {            /* the CPU and the battery in the header, twice a second */
         last_hdr = fm1_ms;
-        dirty |= D_HDR;
+        dirty |= D_HDR | (page == PG_SETUP ? D_GFX : 0u);   /* (SETUP: the battery's reading too) */
     }
     if (page == PG_SCOPE) {                     /* the scope: the trace every SC_FRAME_MS, the text when it changes */
         static uint32_t last_sc;
