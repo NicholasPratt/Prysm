@@ -11,6 +11,8 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 
 - **See it**: [the demo video](https://www.youtube.com/watch?v=mpHz8HwsCX0) (2½ minutes: the screen and the sound)
 - **Install it**: [the web installer](https://nicholaspratt.github.io/Prysm/) (Chrome or Edge), or `tools/fm1_install.py` (below)
+- **Try it in a browser**: [the editor](https://nicholaspratt.github.io/Prysm/editor/): Prysm itself, running in the page, with every
+  parameter on screen; connected to an FM-1 (0.8 or later) the two stay in step
 - **Use it**: [the manual](docs/MANUAL.md) ([as a page](https://nicholaspratt.github.io/Prysm/manual.html))
 - **Build it**: [SETUP-MACOS.md](SETUP-MACOS.md), and below
 
@@ -35,6 +37,7 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Sequencer** | up to 64 steps, 303-style: notes, rests, accents, slides (legato glide, no new attack); step entry from the keys (REC); PLAY runs it; its own or the MIDI clock |
 | **Oscilloscope** | on HOME: left and right, locked to the newest note, auto-zoom |
 | **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on |
+| **Editor** | [in the browser](https://nicholaspratt.github.io/Prysm/editor/): the firmware itself running in the page (screen, knobs, keys, sound), every parameter, patch files; in sync with a connected FM-1 both ways |
 | **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out, with channel select and clock |
 
 Everything runs in fixed point on the FM-1's JieLi AC791N (no FPU); the header shows how much of the audio budget
@@ -65,7 +68,7 @@ envelopes, the LFO, the effects chain.
 
 ```sh
 pip3 install mido python-rtmidi
-python3 tools/fm1_install.py prysm-0.7.fwsc       # asks before it writes; restarts into Prysm
+python3 tools/fm1_install.py prysm-0.8.fwsc       # asks before it writes; restarts into Prysm
 python3 tools/fm1_install.py --info               # what the connected FM-1 runs
 ```
 
@@ -81,8 +84,9 @@ The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](S
 tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchain, the AC79 SDK, a Python venv
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
-./build.sh --release 0.7             # build/prysm-0.7.fwsc (identity FM-1_987, "0.7" on the splash)
-tools/make_site.py build/prysm-0.7.fwsc 0.7   # site/: the web installer and the manual (GitHub Pages)
+./build.sh --release 0.8             # build/prysm-0.8.fwsc (identity FM-1_988, "0.8" on the splash)
+tools/make_site.py build/prysm-0.8.fwsc 0.8   # site/: the web installer and the manual (GitHub Pages)
+APP_VER=0.8 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
 ```
 
 ### Tests (on the computer, no FM-1 needed)
@@ -108,6 +112,8 @@ tests/run_host.sh       # the whole app on the computer: build/host/prysm.wav an
 | `tools/gen_splash.py` | the old splash picture (assets/splash.jpg; no longer shown) |
 | `web/`, `tools/make_site.py` | the web installer |
 | `firmware/src/capture.c`, `tools/capture.py` | performance capture: record a take on the FM-1, film it on the computer (MP4) |
+| `firmware/src/editor.c`, `emu/`, `web/editor/` | the editor: parameters over USB-MIDI (SysEx); the firmware compiled for a browser; the page |
+| `tools/demo.py` | the demo video: its patches (sent to an FM-1), its scenes scripted and filmed |
 | `docs/` | the [manual](docs/MANUAL.md), the [design](docs/PRYSM-DESIGN.md), the platform's [API](docs/API.md) and [rules](docs/RULES.md) |
 
 ## Credits and licence

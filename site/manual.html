@@ -14,7 +14,7 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.7</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.8</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
 LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
@@ -27,6 +27,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 <li><a href="#patches">Patches</a></li>
 <li><a href="#the-oscilloscope">The oscilloscope</a></li>
 <li><a href="#usb-audio-and-midi">USB: audio and MIDI</a></li>
+<li><a href="#the-editor">The editor</a></li>
 <li><a href="#if-something-goes-wrong">If something goes wrong</a></li>
 <li><a href="#sound-ideas">Sound ideas</a></li>
 </ul>
@@ -36,7 +37,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.7.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.8.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -873,6 +874,31 @@ down): <strong>left in white, right in grey</strong> (the chorus and a ping-pong
   out on its OUT channel; the MIDI clock can drive the arpeggiator.</li>
 </ul>
 <p>Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.</p>
+<h3 id="filming-a-performance">Filming a performance</h3>
+<p><code>tools/capture.py</code> makes a video of what you play: the screen exactly as the FM-1 draws it, with its sound, in sync.
+Connect the FM-1 by USB, then, in the <code>Prysm</code> folder:</p>
+<pre><code>.venv/bin/python3 tools/capture.py record mytake
+</code></pre>
+<p>Set the FM-1 up (the page and sound you want to start on, no keys held), press <strong>Enter</strong>, play, press <strong>Enter</strong>
+again. The FM-1 sends what it started from and everything you did (keys, buttons, knob turns, MIDI coming in) to the
+computer, which plays the take again through Prysm's own code, frame by frame, and writes <code>takes/mytake.mp4</code>
+(720 x 720, 30 fps) and <code>takes/mytake/audio.wav</code>. Options: <code>--fps 60</code>, <code>--size 1080</code>, <code>--tail 5</code> (seconds after the
+last thing you did, for the release and the reverb), <code>--splash</code> (start with the power-on animation);
+<code>tools/capture.py render takes/mytake --fps 60</code> films a take again. It needs ffmpeg
+(<code>.venv/bin/pip install imageio-ffmpeg</code>, or <code>brew install ffmpeg</code>).</p>
+<p>Not in the film: the <strong>MASTER</strong> knob (it is at full level), and the MIDI clock (a take played on CLOCK = MIDI
+uses the internal tempo).</p>
+<hr />
+<h2 id="the-editor">The editor</h2>
+<p><a href="https://nicholaspratt.github.io/Prysm/editor/">The editor</a> (Chrome or Edge) is Prysm itself, running in the
+page: the screen, the knobs (drag or scroll), the buttons and the keys (or your computer's keys, A W S E D ... from C4),
+with the sound. Beside it, a tab for every page with every parameter, the sequencer's 64 steps as a grid, and patch
+files to save and load. The browser keeps its own 8 slots between visits.</p>
+<p><strong>With an FM-1</strong> (Prysm 0.8 or later): connect it by USB and press <strong>Connect FM-1</strong> (allow MIDI when the browser
+asks). The editor takes the FM-1's current sound, and from then on the two stay in step: what you change in the editor
+the FM-1 plays (its knob's value shows in the corner, as if you had turned it), and what you turn on the FM-1 shows up
+in the editor. <strong>Store on FM-1</strong> saves the sound in one of its slots. Another MIDI keyboard connected to the computer
+plays the browser's Prysm.</p>
 <hr />
 <h2 id="if-something-goes-wrong">If something goes wrong</h2>
 <ul>

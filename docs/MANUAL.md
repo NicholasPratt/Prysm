@@ -12,6 +12,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
+- [The editor](#the-editor)
 - [If something goes wrong](#if-something-goes-wrong)
 - [Sound ideas](#sound-ideas)
 
@@ -26,7 +27,7 @@ restart. Do not unplug it while it writes.
 **From the command line** (a built package, see the README):
 
 ```sh
-python3 tools/fm1_install.py prysm-0.7.fwsc
+python3 tools/fm1_install.py prysm-0.8.fwsc
 ```
 
 **Coming from another firmware.** Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
@@ -442,6 +443,21 @@ last thing you did, for the release and the reverb), `--splash` (start with the 
 
 Not in the film: the **MASTER** knob (it is at full level), and the MIDI clock (a take played on CLOCK = MIDI
 uses the internal tempo).
+
+---
+
+## The editor
+
+[The editor](https://nicholaspratt.github.io/Prysm/editor/) (Chrome or Edge) is Prysm itself, running in the
+page: the screen, the knobs (drag or scroll), the buttons and the keys (or your computer's keys, A W S E D ... from C4),
+with the sound. Beside it, a tab for every page with every parameter, the sequencer's 64 steps as a grid, and patch
+files to save and load. The browser keeps its own 8 slots between visits.
+
+**With an FM-1** (Prysm 0.8 or later): connect it by USB and press **Connect FM-1** (allow MIDI when the browser
+asks). The editor takes the FM-1's current sound, and from then on the two stay in step: what you change in the editor
+the FM-1 plays (its knob's value shows in the corner, as if you had turned it), and what you turn on the FM-1 shows up
+in the editor. **Store on FM-1** saves the sound in one of its slots. Another MIDI keyboard connected to the computer
+plays the browser's Prysm.
 
 ---
 

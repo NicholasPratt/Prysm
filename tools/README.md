@@ -28,7 +28,7 @@ $PY tools/fm1_install.py build/prysm.fwsc
 ```
 
 It asks before it writes, then the FM-1 restarts into the new firmware. To install a release instead, give its
-file: `$PY tools/fm1_install.py prysm-0.7.fwsc`. To see what the connected FM-1 is running:
+file: `$PY tools/fm1_install.py prysm-0.8.fwsc`. To see what the connected FM-1 is running:
 `$PY tools/fm1_install.py --info`.
 
 If the FM-1 does not start after an update, hold **OCT-** while switching it on to get the rescue updater, then
@@ -137,4 +137,6 @@ playing. Everything else is the same.
 | `gen_prysm_tables.py` | regenerates `firmware/gen/prysm_tables.h`: the wavetables and the engine's lookup tables (needs numpy) |
 | `gen_prysm_font.py` | regenerates the screen's large fonts from Terminus BDF files: `gen_prysm_font.py ter-u22b.bdf M` (the values) and `gen_prysm_font.py ter-u32b.bdf P` (the pop-up) |
 | `gen_splash.py` | the old power-on picture, `assets/splash.jpg`. No longer shown: the power-on animation replaced it. |
+| `demo.py` | the demo video: `send` puts its 7 sounds in the FM-1's slots (0.8 or later), `film` scripts and films its scenes on the computer |
+| `../emu/build.sh` | Prysm in a browser and the editor: `site/editor/` (needs emscripten: `~/emsdk`, `source ~/emsdk/emsdk_env.sh`) |
 | `usblog.py` | debugging only: reads a USB log from firmware built with `DINGHY_USB_LOG` |
