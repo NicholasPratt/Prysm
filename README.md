@@ -77,6 +77,59 @@ python3 tools/fm1_install.py --info               # what the connected FM-1 runs
 From ETCH: restore the official firmware first (ETCH only accepts its own updates). Back to the official firmware
 or another one: the [FM-1 Firmware Hub](https://thefirmwarehub.com).
 
+## Installing the CLAP plugin
+
+Prysm in your DAW, as an instrument ([what it does](plugin/README.md)). It needs a DAW that loads CLAP plugins (Reaper and
+Bitwig Studio among them). To keep an FM-1 in step with it, the FM-1 needs Prysm 0.8 or later.
+
+1. Download the zip for your system from the [latest release](https://github.com/NicholasPratt/Prysm/releases/latest):
+   `Prysm-clap-macos.zip`, `Prysm-clap-windows.zip` or `Prysm-clap-linux.zip`.
+2. Unzip it: you get `Prysm.clap`.
+3. Put `Prysm.clap` in your CLAP folder, as below for your system.
+4. In your DAW, rescan the plugins (Reaper: *Options*, *Preferences*, *Plug-ins*, *CLAP*, *Re-scan*), then add
+   **Prysm** to a track as an instrument.
+
+**macOS** (10.15 or later, Intel or Apple Silicon)
+
+- In Finder, *Go*, *Go to Folder...*, type `~/Library/Audio/Plug-Ins/CLAP` (if there is no `CLAP` folder, make one in
+  `Plug-Ins`) and move `Prysm.clap` into it.
+- The plugin is not notarized by Apple, so macOS blocks it until you clear the download mark. In Terminal:
+
+  ```sh
+  xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/CLAP/Prysm.clap
+  ```
+
+**Windows** (10 or 11, 64-bit)
+
+- Move `Prysm.clap` into `C:\Program Files\Common Files\CLAP` (make the `CLAP` folder if there is none; Windows asks
+  for permission).
+- Its window uses Microsoft's Edge WebView2, which Windows 11 has, as does Windows 10 with its updates. If the window
+  stays empty, install the
+  [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
+- With an FM-1: Windows lets only one program at a time use a MIDI port. In the DAW's MIDI settings, switch the FM-1's
+  input and output off, so that Prysm can reach it (Reaper: *Preferences*, *MIDI Devices*, the FM-1, *Disabled*).
+
+**Linux** (x86-64)
+
+- Install GTK 3 and WebKitGTK 4.1, on Debian or Ubuntu:
+
+  ```sh
+  sudo apt install libgtk-3-0 libwebkit2gtk-4.1-0
+  ```
+
+- Then put the plugin in your CLAP folder:
+
+  ```sh
+  mkdir -p ~/.clap && cp Prysm.clap ~/.clap/
+  ```
+
+**With an FM-1:** connect it by USB before you open the project, or any time after. The plugin finds it by itself, and
+its window's status line says when it is connected. The project's sound then goes to the FM-1, and what you turn on the
+FM-1 comes back as the plugin's parameters.
+
+**One Prysm per process:** a second Prysm in the same project stays silent, and its window says so. To use more than
+one, run each in a process of its own (Reaper: the FX window's menu, *Run as*, *Separate process*).
+
 ## Building
 
 The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](SETUP-MACOS.md) has the details;

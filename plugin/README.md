@@ -17,8 +17,9 @@ The project keeps the whole sound, the sequencer's pattern included.
 
 ## Installing
 
-Download `Prysm-clap-<your system>.zip` from the [releases](https://github.com/NicholasPratt/Prysm/releases), unzip it and
-put `Prysm.clap` in your CLAP folder, then rescan plugins in your DAW.
+Step by step: [Installing the CLAP plugin](../README.md#installing-the-clap-plugin). In short: download
+`Prysm-clap-<your system>.zip` from the [releases](https://github.com/NicholasPratt/Prysm/releases), unzip it, put
+`Prysm.clap` in your CLAP folder, then rescan plugins in your DAW.
 
 | System | CLAP folder | Notes |
 | --- | --- | --- |
