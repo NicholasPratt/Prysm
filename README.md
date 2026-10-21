@@ -9,6 +9,7 @@ each other by FM, ring or mix; a resonant filter (12 / 24 dB low-pass or a comb)
 envelope that can loop and modulate the LFO's rate; stereo chorus, delay (with wow and pitch-shifting repeats) and
 a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; USB audio and MIDI.
 
+- **See it**: [the demo video](https://www.youtube.com/watch?v=mpHz8HwsCX0) (2½ minutes: the screen and the sound)
 - **Install it**: [the web installer](https://nicholaspratt.github.io/Prysm/) (Chrome or Edge), or `tools/fm1_install.py` (below)
 - **Use it**: [the manual](docs/MANUAL.md) ([as a page](https://nicholaspratt.github.io/Prysm/manual.html))
 - **Build it**: [SETUP-MACOS.md](SETUP-MACOS.md), and below
