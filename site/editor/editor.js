@@ -6,7 +6,12 @@
 // differences (SysEx F0 7D 50 'V' offset value, one at a time, each answered: firmware/src/editor.c); what is turned
 // on the FM-1 comes back ('C') and is set in the emulator. So the editor's controls, the emulator's own knobs and the
 // FM-1's all meet in one place.
+//
+// Inside the Prysm plugin (plugin/src/plugin.cpp, which serves this page in its window) the plugin makes the sound:
+// the page then sends it every change and every key (prysm_set, prysm_note) instead of playing or using MIDI itself,
+// and takes what changed in the plugin (automation, a connected FM-1) through window.prysmNative.
 "use strict";
+const PLUGIN = typeof window.prysm_hello === "function";
 
 const BTNS = [["OCT-", 0], ["OCT+", 1], ["EDIT", 6], ["ENV", 4], ["LFO", 5], ["GLO", 7], ["FX", 2],
               ["ARP", 10], ["SEQ", 11], ["SELECT", 3], ["HOME", 8], ["SAVE", 9], ["PLAY", 12], ["REC", 13]];
@@ -44,6 +49,7 @@ Prysm({
   readParams();
   buildFm1();
   buildTabs();
+  if (PLUGIN) pluginMode();
   requestAnimationFrame(frame);
 });
 
@@ -134,20 +140,24 @@ function buildFm1() {
   }
   const keyAt = (ev) => { const t = document.elementFromPoint(ev.clientX, ev.clientY); return t && t.dataset.k !== undefined && t.parentNode.id === "keys" ? +t.dataset.k : -1; };
   const kb = $("keys");
-  kb.onpointerdown = (ev) => { const k = keyAt(ev); if (k < 0) return; kb.setPointerCapture(ev.pointerId); held.set(ev.pointerId, k); M._web_key(k, 1); };
+  kb.onpointerdown = (ev) => { const k = keyAt(ev); if (k < 0) return; kb.setPointerCapture(ev.pointerId); held.set(ev.pointerId, k); key(k, 1); };
   kb.onpointermove = (ev) => {
     if (!held.has(ev.pointerId)) return;
     const k = keyAt(ev), was = held.get(ev.pointerId);
-    if (k >= 0 && k !== was) { M._web_key(was, 0); M._web_key(k, 1); held.set(ev.pointerId, k); }
+    if (k >= 0 && k !== was) { key(was, 0); key(k, 1); held.set(ev.pointerId, k); }
   };
-  kb.onpointerup = kb.onpointercancel = (ev) => { if (held.has(ev.pointerId)) { M._web_key(held.get(ev.pointerId), 0); held.delete(ev.pointerId); } };
+  kb.onpointerup = kb.onpointercancel = (ev) => { if (held.has(ev.pointerId)) { key(held.get(ev.pointerId), 0); held.delete(ev.pointerId); } };
   const typing = () => ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName) && document.activeElement.type !== "range";
   addEventListener("keydown", (ev) => {
     const i = KEYMAP.indexOf(ev.key.toLowerCase());
     if (i < 0 || ev.repeat || ev.metaKey || ev.ctrlKey || typing()) return;
-    M._web_key(7 + i, 1);
+    key(7 + i, 1);
   });
-  addEventListener("keyup", (ev) => { const i = KEYMAP.indexOf(ev.key.toLowerCase()); if (i >= 0) M._web_key(7 + i, 0); });
+  addEventListener("keyup", (ev) => { const i = KEYMAP.indexOf(ev.key.toLowerCase()); if (i >= 0) key(7 + i, 0); });
+}
+function key(k, down) {                         // a key of the FM-1's 27 (0 = F3): the emulator, and the plugin's sound
+  M._web_key(k, down);
+  if (PLUGIN) prysm_note(53 + 12 * M._web_oct() + k, down ? 127 : 0);
 }
 
 // ---- the editor: a tab a page, a box a row, a control a knob
@@ -261,7 +271,7 @@ function frame() {
   const pt = patch();
   if (!lastPatch || pt.some((v, i) => v !== lastPatch[i])) { refresh(pt); lastPatch = pt.slice(); }
   if (M._web_store_gen() !== lastStore) { lastStore = M._web_store_gen(); keep(); }
-  dev.sync(pt);
+  (PLUGIN ? plug : dev).sync(pt);
   requestAnimationFrame(frame);
 }
 
@@ -353,6 +363,7 @@ $("send-slot").onchange = async () => {
   const s = +$("send-slot").value;
   $("send-slot").value = "";
   if (!s) return;
+  if (PLUGIN) return prysm_store(s);           // (the plugin's FM-1 link stores it; its status says how it went)
   if (!dev.shadow) return alertLine("connect the FM-1 first");
   if (!confirm(`Store this sound in slot ${s} of the FM-1? What is in the slot now is replaced.`)) return;
   dev.busy = true;
@@ -369,3 +380,37 @@ $("send-slot").onchange = async () => {
   status(rc === 0 ? `FM-1: stored in slot ${s}` : `FM-1: storing failed (${rc})`);
 };
 const alertLine = (s) => status(s);
+
+// ---- inside the plugin
+const plug = {
+  shadow: null,                                 // the sound as the plugin has it
+  async hello() {
+    const r = JSON.parse(await prysm_hello());
+    const b = Uint8Array.from(r.patch);
+    if (b.length !== size) return status("the plugin and this page differ in patch format");
+    M.HEAPU8.set(b, M._web_patch());
+    M._web_load(M._web_patch(), size, -1);
+    this.shadow = b.slice();
+    status(r.status || "");
+  },
+  sync(pt) {                                    // what the plugin does not have yet
+    if (!this.shadow) return;
+    const out = [];
+    for (let o = 0; o < size; o++) if (pt[o] !== this.shadow[o]) { this.shadow[o] = pt[o]; out.push(o, pt[o]); }
+    if (out.length) prysm_set(...out);
+  },
+};
+window.prysmNative = {
+  changes(list) {                               // [offset, value, ...]: changed in the plugin (automation, the FM-1)
+    if (!plug.shadow) return;
+    for (let i = 0; i + 1 < list.length; i += 2) { plug.shadow[list[i]] = list[i + 1]; M._web_set(list[i], list[i + 1]); }
+  },
+  status(s) { status(s); },
+  reload() { plug.shadow = null; plug.hello(); },   // (the project loaded another sound)
+};
+function pluginMode() {
+  for (const id of ["connect", "save-file", "load-file", "start"]) $(id).remove();
+  $("vol").parentNode.remove();
+  document.querySelector("footer").remove();
+  plug.hello();
+}

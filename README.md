@@ -13,6 +13,8 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 - **Install it**: [the web installer](https://nicholaspratt.github.io/Prysm/) (Chrome or Edge), or `tools/fm1_install.py` (below)
 - **Try it in a browser**: [the editor](https://nicholaspratt.github.io/Prysm/editor/): Prysm itself, running in the page, with every
   parameter on screen; connected to an FM-1 (0.8 or later) the two stay in step
+- **In your DAW**: [the CLAP plugin](plugin/README.md) (macOS, Windows, Linux): Prysm's engine as an instrument, every
+  parameter automatable, the editor as its window, a connected FM-1 kept in step
 - **Use it**: [the manual](docs/MANUAL.md) ([as a page](https://nicholaspratt.github.io/Prysm/manual.html))
 - **Build it**: [SETUP-MACOS.md](SETUP-MACOS.md), and below
 
@@ -113,6 +115,7 @@ tests/run_host.sh       # the whole app on the computer: build/host/prysm.wav an
 | `web/`, `tools/make_site.py` | the web installer |
 | `firmware/src/capture.c`, `tools/capture.py` | performance capture: record a take on the FM-1, film it on the computer (MP4) |
 | `firmware/src/editor.c`, `emu/`, `web/editor/` | the editor: parameters over USB-MIDI (SysEx); the firmware compiled for a browser; the page |
+| `plugin/` | the CLAP plugin: the firmware as a library, the editor as its window, the FM-1 over USB-MIDI |
 | `tools/demo.py` | the demo video: its patches (sent to an FM-1), its scenes scripted and filmed |
 | `docs/` | the [manual](docs/MANUAL.md), the [design](docs/PRYSM-DESIGN.md), the platform's [API](docs/API.md) and [rules](docs/RULES.md) |
 

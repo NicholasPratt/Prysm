@@ -1,0 +1,61 @@
+# Build the Prysm CLAP plugin (plugin/) for macOS (Intel and Apple Silicon in one), Windows and Linux. Each run keeps
+# the three as artifacts; a published release gets them attached as zips.
+name: plugin
+on:
+  push:
+    branches: [main]
+    paths: ["plugin/**", "firmware/src/**", "firmware/gen/**", "emu/**", "site/editor/**", "tests/host.c",
+            ".github/workflows/plugin.yml"]
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macos
+            configure: -G Ninja -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          - os: windows-2022
+            name: windows
+            configure: -G "Visual Studio 17 2022" -A x64 -T ClangCL
+          - os: ubuntu-22.04
+            name: linux
+            configure: -G Ninja
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgtk-3-dev libwebkit2gtk-4.1-dev libasound2-dev libx11-dev
+      - if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Build
+        shell: bash
+        run: |
+          cmake -B build/plugin -S plugin -DCMAKE_BUILD_TYPE=Release ${{ matrix.configure }}
+          cmake --build build/plugin --config Release
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "${{ runner.os }}" = macOS ]; then
+            codesign --force --deep -s - build/plugin/Prysm.clap
+            ditto -c -k --keepParent build/plugin/Prysm.clap out/Prysm-clap-${{ matrix.name }}.zip
+          else
+            f=$(find build/plugin -name Prysm.clap -type f | head -1)
+            cp "$f" out/Prysm.clap
+            (cd out && cmake -E tar cf Prysm-clap-${{ matrix.name }}.zip --format=zip Prysm.clap && rm Prysm.clap)
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Prysm-clap-${{ matrix.name }}
+          path: out/*.zip
+      - if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" out/*.zip --clobber -R "${{ github.repository }}"

@@ -50,69 +50,14 @@ WEB uint8_t *web_settings(void) { return host_store; }
 WEB uint32_t web_settings_size(void) { return sizeof host_store; }
 WEB uint32_t web_store_gen(void) { return store_gen; }
 
-/* the parameters: every knob of the sound's pages (not SETUP's, the sequencer's steps or its cursor) */
-static const prm_t *web_prm(uint32_t i, uint32_t *pg_, uint32_t *row_, uint32_t *k_)
-{
-    uint32_t pg, r, k, n = 0;
-    for (pg = 0; pg < PG_N; pg++)
-        for (r = 0; PAGES[pg].osc != G && r < PAGES[pg].n; r++)
-            for (k = 0; k < 4u; k++) {
-                const prm_t *p = &PAGES[pg].rows[r].p[k];
-                if (p->kind == K_NONE || p->kind == K_CURSOR || p->kind == K_SNOTE || p->kind == K_STRIG ||
-                    p->kind == K_SSLIDE)
-                    continue;
-                if (n++ == i) {
-                    *pg_ = pg; *row_ = r; *k_ = k;
-                    return p;
-                }
-            }
-    return 0;
-}
-
-static char web_txt[64];
-WEB uint32_t web_nparams(void)
-{
-    uint32_t n = 0, a, b, c;
-    while (web_prm(n, &a, &b, &c)) n++;
-    return n;
-}
-/* parameter i: "page|row|label|knob|offset|max|min|kind" (offset: in patch_t) */
-WEB const char *web_param(uint32_t i)
-{
-    uint32_t pg, r, k;
-    const prm_t *p = web_prm(i, &pg, &r, &k);
-    char *s = web_txt;
-    if (!p) return "";
-    s = put(put(put(put(put(s, PAGES[pg].name), "|"), PAGES[pg].rows[r].name), "|"), p->label);
-    s = num(put(s, "|"), k);
-    s = num(put(s, "|"), (uint32_t)(pval(pg, p) - (uint8_t *)&edit));
-    s = num(put(s, "|"), p->max);
-    s = num(put(s, "|"), p->kind == K_SLEN ? 1u : 0u);
-    num(put(s, "|"), p->kind);
-    return web_txt;
-}
-/* parameter i's value v as the FM-1 shows it (with the rest of the sound as it is: a wave's name needs its bank) */
-WEB const char *web_fmt(uint32_t i, uint32_t v)
-{
-    static patch_t t;
-    uint32_t pg, r, k;
-    const prm_t *p = web_prm(i, &pg, &r, &k);
-    uint8_t *at;
-    if (!p) return "";
-    t = edit;
-    at = (uint8_t *)&t + (pval(pg, p) - (uint8_t *)&edit);
-    *at = (uint8_t)v;
-    fmt(web_txt, p, at);
-    return web_txt;
-}
+#include "params.c"                             /* the parameters (shared with the plugin) */
+WEB uint32_t web_nparams(void) { return prm_n(); }
+WEB const char *web_param(uint32_t i) { return prm_info(i); }
+WEB const char *web_fmt(uint32_t i, uint32_t v) { return prm_fmt(i, v); }
 
 /* where the screen is (the editor follows it, and moves it: ALGORITHM and SELECT by the difference) */
 WEB uint32_t web_page(void) { return page; }
 WEB uint32_t web_row(void) { return page < PG_N ? row[page] : 0u; }
 WEB uint32_t web_npages(void) { return PG_N; }
-/* the sequencer's steps: where their notes, triggers and slides are in patch_t */
-WEB uint32_t web_seq_off(uint32_t which)
-{
-    return which == 0 ? __builtin_offsetof(patch_t, seq_note) : which == 1 ? __builtin_offsetof(patch_t, seq_trig)
-                                                                           : __builtin_offsetof(patch_t, seq_slide);
-}
+WEB uint32_t web_seq_off(uint32_t which) { return prm_seq_off(which); }
+WEB int32_t web_oct(void) { return gset.oct; }
