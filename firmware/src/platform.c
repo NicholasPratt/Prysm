@@ -23,7 +23,9 @@ enum { BTN_OCT_DOWN = 0, BTN_OCT_UP = 1, BTN_FX = 2, BTN_SEL = 3, BTN_ENV = 4, B
 enum { ENC_SELECT = 0, ENC_ALGORITHM = 1, ENC_KNOB1 = 2, ENC_KNOB2 = 3, ENC_KNOB3 = 4, ENC_KNOB4 = 5, ENC_PRESETS = 6 };
 #define KEY_LED(k) (14u + (k))
 
-#ifdef DINGHY_HOST
+#if defined(DINGHY_HOST) && defined(DINGHY_WEB)
+#include "../../emu/wasm.c"                    /* in a browser: a fake FM-1 (emu/wasm.c) */
+#elif defined(DINGHY_HOST)
 #include "../../tests/host.c"                  /* on a computer: a fake FM-1 (tests/host.c) */
 #else
 #include <stdint.h>
@@ -340,12 +342,25 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
 extern void isr_alnk0(void);
 
 /* ---- the main loop's duties: watchdog, USB, the installer's update request, the MASTER knob */
+#ifdef APP_SYSEX                                /* (an app's own SysEx, F0 7D ...: the app defines APP_SYSEX first) */
+static void APP_SYSEX(const uint8_t *p, uint32_t n);
+#endif
 static void platform_poll(void)
 {
     static int32_t knob_avg = 512 * 16;
     int32_t a;
     fm1_wdt_feed();
     usb_retry(fm1_ms);
+#ifdef APP_SYSEX
+    {
+        const uint8_t *p;
+        uint32_t n;
+        if (ota_frame_get(&p, &n) && n && p[0] == 0x7Du) {   /* 7D: non-commercial, never the updater's */
+            APP_SYSEX(p, n);
+            ota_frame_done();
+        }
+    }
+#endif
     ota_service();
     if (usb.ota_req) {
         usb.ota_req = 0;

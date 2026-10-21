@@ -93,7 +93,7 @@ def record(name):
     return d
 
 
-def render(d, fps, size, tail, splash):
+def render(d, fps, size, tail, splash, ver=None):
     d = Path(d)
     cc = shutil.which("cc") or sys.exit("no C compiler (cc)")
     ffmpeg = shutil.which("ffmpeg")
@@ -107,7 +107,8 @@ def render(d, fps, size, tail, splash):
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
     exe = work / "prysm"
-    ver = subprocess.run(["git", "describe", "--tags", "--always"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    ver = ver or subprocess.run(["git", "describe", "--tags", "--always"], cwd=ROOT, capture_output=True,
+                                text=True).stdout.strip()   # (the splash's version)
     flags = ["-O2", "-w", "-DDINGHY_HOST", f'-DAPP_VER="{ver or "dev"}"', f"-I{ROOT / 'firmware/src'}",
              f"-I{ROOT / 'firmware/gen'}"] + (["-DPRYSM_SPLASH"] if splash else [])
     subprocess.run([cc, *flags, "-o", str(exe), str(ROOT / "firmware/src/prysm.c")], check=True)

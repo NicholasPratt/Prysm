@@ -17,6 +17,7 @@
  * What platform.c offers: docs/API.md. The chip's rules: docs/RULES.md. */
 #define APP_NAME "PRYSM"          /* the home, rescue and crash screens say this */
 #define CV_MAX (240u * 132u)      /* the canvas: the OSC pages' six rows (ui.c) */
+#define APP_SYSEX cap_sysex       /* SysEx F0 7D 50 ... from the computer: patches to the slots, the editor (capture.c) */
 #include "platform.c"
 
 #include "engine.c"                             /* the sound: voices, oscillators, modulators, envelopes */
@@ -91,6 +92,10 @@ static int32_t cap_enc_take(uint32_t e)         /* the encoders as the UI takes 
 #define fm1_enc_take cap_enc_take
 #include "ui.c"                                 /* the pages, the PATCH screen */
 #include "capture.c"                            /* performance capture: a take to film on a computer */
+#include "editor.c"                             /* the editor: parameters set over USB, changes reported back */
+#ifdef DINGHY_WEB
+#include "../../emu/exports.c"                  /* (in a browser: what the page calls) */
+#endif
 /* ---- the splash: rainbow static that thins and closes in as its specks fly together into PRYSM (FONT_P, twice its size),
  * which fades to white, the version under it; 2.6 s, or until a key or button is pressed. Drawn whole each frame,
  * in two strips of the canvas. (Host mode skips it unless built with -DPRYSM_SPLASH: the UI scripts time their
@@ -299,6 +304,7 @@ static void app_main(void)
         fm1_led_key(BTN_REC, seq_rec);          /* step entry */
 
         ui_draw();
+        ed_poll();                              /* (an editor connected: what changed here) */
 
         if (gset_dirty) {                       /* the SETUP page changed something: save it too */
             gset_dirty = 0;

@@ -1,0 +1,121 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prysm Editor</title>
+<meta name="description" content="Prysm in your browser: the FM-1 firmware running for real, and an editor for every parameter, in sync with your FM-1 over USB-MIDI.">
+<style>
+  :root { --bg: #000; --fg: #fff; --mid: #969696; --faint: #484848; --box: #383838; --sel: #282828;
+          color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 16px;
+           border-bottom: 1px solid var(--box); }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .25em; }
+  header .grow { flex: 1; }
+  #status { color: var(--mid); }
+  button, select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--box);
+                   padding: 5px 10px; border-radius: 0; cursor: pointer; }
+  button:hover, select:hover { border-color: var(--mid); }
+  button.on { background: var(--fg); color: var(--bg); }
+  main { display: grid; grid-template-columns: minmax(300px, 520px) 1fr; gap: 24px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  h2 { font-size: 12px; font-weight: normal; color: var(--mid); letter-spacing: .15em; margin: 0 0 8px; }
+
+  /* the FM-1 */
+  #fm1 { display: flex; flex-direction: column; gap: 14px; }
+  #screen-wrap { position: relative; width: 100%; aspect-ratio: 1; border: 1px solid var(--box); }
+  #screen { width: 100%; height: 100%; image-rendering: pixelated; display: block; }
+  #start { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+           background: rgba(0, 0, 0, .7); font-size: 16px; letter-spacing: .1em; cursor: pointer; border: 0; }
+  .encs { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .enc { display: flex; flex-direction: column; align-items: center; gap: 4px; user-select: none;
+         touch-action: none; cursor: ns-resize; }
+  .enc .dial { width: 100%; max-width: 52px; aspect-ratio: 1; border: 1px solid var(--mid); border-radius: 50%;
+               position: relative; }
+  .enc .dial::after { content: ""; position: absolute; left: 50%; top: 6%; width: 2px; height: 30%;
+                      background: var(--fg); transform-origin: 50% 147%; transform: translateX(-50%) rotate(var(--a, 0deg)); }
+  .enc span { font-size: 10px; color: var(--mid); }
+  .btns { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .btns button { padding: 6px 0; font-size: 11px; position: relative; }
+  .btns button.lit::before { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px;
+                             background: var(--fg); border-radius: 50%; }
+  #keys { position: relative; height: 92px; user-select: none; touch-action: none; }
+  #keys div { position: absolute; top: 0; border: 1px solid var(--box); }
+  #keys .w { height: 100%; background: #111; }
+  #keys .b { height: 58%; background: #000; border-color: var(--mid); z-index: 1; }
+  #keys .lit { background: var(--fg) !important; }
+  .row2 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--mid); }
+  .row2 input[type=range] { accent-color: #fff; }
+
+  /* the editor */
+  #tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; }
+  #tabs button { font-size: 12px; padding: 4px 8px; }
+  .prow { border: 1px solid var(--box); padding: 10px 12px; margin-bottom: 10px; }
+  .prow.focus { border-color: var(--mid); }
+  .prow h3 { margin: 0 0 8px; font-size: 12px; font-weight: normal; color: var(--mid); letter-spacing: .12em; cursor: pointer; }
+  .prms { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  @media (max-width: 560px) { .prms { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .prm label { display: block; font-size: 11px; color: var(--mid); }
+  .prm .val { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .prm input[type=range] { width: 100%; accent-color: #fff; }
+  .prm select { width: 100%; padding: 3px 4px; }
+  #seq { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; margin-top: 8px; }
+  #seq div { aspect-ratio: 1; border: 1px solid var(--box); font-size: 9px; display: flex; align-items: flex-end;
+             justify-content: center; cursor: pointer; user-select: none; color: var(--mid); }
+  #seq .note { background: var(--faint); color: var(--fg); }
+  #seq .acc { background: var(--fg); color: var(--bg); }
+  #seq .slide { box-shadow: inset 0 -3px 0 var(--mid); }
+  #seq .past { opacity: .3; }
+  .hint { color: var(--mid); font-size: 12px; }
+  footer { padding: 16px; color: var(--faint); font-size: 12px; }
+  footer a { color: var(--mid); }
+</style>
+</head>
+<body>
+<header>
+  <h1>PRYSM</h1><span style="color:var(--mid)">editor</span>
+  <span class="grow"></span>
+  <span id="status">FM-1: not connected</span>
+  <button id="connect">Connect FM-1</button>
+  <button id="save-file">Save patch</button>
+  <button id="load-file">Load patch</button>
+  <select id="send-slot" title="Store the sound in a slot of the FM-1">
+    <option value="">Store on FM-1…</option>
+    <option>1</option><option>2</option><option>3</option><option>4</option>
+    <option>5</option><option>6</option><option>7</option><option>8</option>
+  </select>
+  <input id="file" type="file" accept=".prysm" hidden>
+</header>
+<main>
+  <section id="fm1">
+    <div id="screen-wrap">
+      <canvas id="screen" width="240" height="240"></canvas>
+      <button id="start">Click to start the sound</button>
+    </div>
+    <div class="encs" id="encs"></div>
+    <div class="btns" id="btns"></div>
+    <div id="keys"></div>
+    <div class="row2">
+      <label>MASTER <input id="vol" type="range" min="0" max="100" value="70"></label>
+      <span class="hint">Keys: A W S E D F T G Y H U J K O L P (C4 up). Knobs: drag or scroll.</span>
+    </div>
+  </section>
+  <section>
+    <div id="tabs"></div>
+    <div id="page"></div>
+  </section>
+</main>
+<footer>
+  Prysm runs here for real: the FM-1's own firmware, compiled for your browser. Connected (Chrome or Edge, with
+  Prysm 0.8 or later), every change goes to your FM-1 too, and what you turn on the FM-1 shows up here.
+  <a href="../">Install Prysm</a> · <a href="../manual.html">Manual</a> ·
+  <a href="https://github.com/NicholasPratt/Prysm">Source</a> (GPL-3.0)
+</footer>
+<script src="prysm.js"></script>
+<script src="editor.js"></script>
+</body>
+</html>

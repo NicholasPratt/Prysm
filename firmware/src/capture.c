@@ -48,7 +48,7 @@ _Static_assert(4u + PATCH_SLOTS + (PATCH_SLOTS + 2u) * sizeof(patch_t) + 4u + si
                PG_N * 4u + 10u <= CAP_STATE_MAX, "the capture state fits its buffer");
 
 #ifndef DINGHY_HOST
-static void cap_send(uint8_t type, const uint8_t *d, uint32_t n, int timed)   /* d: 7-bit bytes */
+static int cap_send(uint8_t type, const uint8_t *d, uint32_t n, int timed)   /* d: 7-bit bytes; 0 = sent */
 {
     uint8_t m[8u + 132u];
     uint32_t k = 0, t = fm1_ms - cap_t0, i;
@@ -57,7 +57,7 @@ static void cap_send(uint8_t type, const uint8_t *d, uint32_t n, int timed)   /*
     for (i = 0; i < n && k < sizeof m - 1u; i++)
         m[k++] = d[i] & 127u;
     m[k++] = 0xF7;
-    (void)ota_wire_send(m, k);
+    return ota_wire_send(m, k);
 }
 
 static void cap_keys(uint32_t keys)
@@ -114,6 +114,52 @@ static void cap_stop(void)
 {
     if (cap_on) cap_send('X', 0, 0u, 1);
     cap_on = 0;
+}
+
+/* patches from the computer (tools/demo.py send), SysEx F0 7D 50 <type> ... F7 the other way:
+ *   'P' i <128 nibbles>         64 bytes of a patch_t (i: which 64), into a staging patch
+ *   'W' slot n1 n0 version      the staged patch (n bytes, format version) into the slot, saved
+ *   'L' slot                    the slot's sound becomes the current one, as the PATCH screen's LOAD (no asking)
+ * each is answered 'A' type i-or-slot rc (rc 0: done; 1: wrong size or format; 2: the save failed; 3: empty), so the
+ * computer sends the next only then (the platform holds one frame at a time: one sent meanwhile is dropped) */
+static patch_t cap_stage;
+static void ed_sysex(const uint8_t *p, uint32_t n);   /* (editor.c: the editor's messages) */
+
+static void cap_sysex(const uint8_t *p, uint32_t n)   /* p: the 7-bit bytes between F0 and F7 */
+{
+    uint8_t a[3] = {0, 0, 0};
+    uint32_t i, at;
+    if (n < 3u || p[1] != 0x50u)               /* (the shortest: the editor's hello, 7D 50 H) */
+        return;
+    a[0] = p[2];
+    a[1] = n > 3u ? p[3] : 0u;
+    if (p[2] == 'P' && n == 4u + 128u) {
+        for (i = 0, at = p[3] * 64u; i < 64u && at + i < sizeof cap_stage; i++)
+            ((uint8_t *)&cap_stage)[at + i] = (uint8_t)(p[4u + 2u * i] << 4 | (p[5u + 2u * i] & 15u));
+    } else if (p[2] == 'W' && n == 7u) {
+        if (p[3] >= PATCH_SLOTS || (p[4] << 7 | p[5]) != sizeof(patch_t) || p[6] != PATCH_VERSION)
+            a[2] = 1;
+        else if (patch_save(p[3], &cap_stage) != 0)
+            a[2] = 2;
+        else if ((int32_t)p[3] == cur_slot)
+            clean = cap_stage;                  /* (the slot's sound changed: the current one now differs, or not) */
+        dirty = D_ALL;
+    } else if (p[2] == 'L' && n == 4u) {
+        patch_t s;
+        if (p[3] >= PATCH_SLOTS || patch_get(p[3], &s) != 0)
+            a[2] = 3;
+        else {
+            edit = clean = s;
+            cur_slot = p[3];
+            slot_moved = 1;
+            engine_set(&edit);
+            dirty = D_ALL;
+        }
+    } else {
+        ed_sysex(p, n);
+        return;
+    }
+    cap_send('A', a, 3u, 0);
 }
 #else
 /* on a computer: the take's start state from the file PRYSM_STATE names (tools/capture.py render) */
