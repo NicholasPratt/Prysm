@@ -30,7 +30,7 @@ PG = {p: i for i, p in enumerate(PAGES)}
 ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"],
         "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
         "MENV2": ["ENV", "DEST"], "LFO": ["LFO", "DEST"],
-        "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "GLIDE"], "ARP": ["ARP", "TIME"], "SEQ": ["STEP", "PATTERN", "EDIT", "SONG", "ENTRY"],
+        "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "GLIDE"], "ARP": ["ARP", "TIME"], "SEQ": ["STEP", "CHORD", "PATTERN", "EDIT", "SONG", "ENTRY"],
         "CHO": ["CHORUS"], "DLY": ["DELAY", "D.MOD"], "REV": ["REVERB", "R.MOD"], "SETUP": ["MIDI"],
         "PATCH": ["SAVE", "LOAD", "INIT"], "SCOPE": []}
 BTN = {"FX": 2, "SELECT": 3, "ENV": 4, "LFO": 5, "EDIT": 6, "GLO": 7, "HOME": 8, "SAVE": 9, "ARP": 10, "SEQ": 11,

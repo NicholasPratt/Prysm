@@ -80,7 +80,9 @@ static struct {
 /* the store holds the bank and, after it, the sequencer's patterns and song (engine.c: seqs). Older stores: format 9's
  * bank and the patterns (SEQS_VERSION 1), or a bank alone (formats 1 .. 9: then the patterns start empty, and the
  * sound that comes back at power-on brings its pattern in as pattern 1: seqs_from_slot, ui.c) */
-#define SEQS_V1_SIZE 828u                       /* (seqs_t as SEQS_VERSION 1 had it) */
+#define SEQS_V1_SIZE 828u                       /* (seqs_t as SEQS_VERSION 1 had it: patterns of lane 0 alone) */
+#define SEQS_V1_PAT 196u                        /* (its pattern_t: len, pad, note, trig, slide) */
+_Static_assert(__builtin_offsetof(pattern_t, vel) == SEQS_V1_PAT, "a version 1 pattern is a prefix of pattern_t");
 #define BANK_SIZE(psize) (4u + PATCH_SLOTS + PATCH_SLOTS * (psize))
 #define STORE_NOW (sizeof bank + sizeof seqs)
 #define STORE_OLD (BANK_SIZE(PATCH_V9_SIZE) + SEQS_V1_SIZE)   /* the biggest older store */
@@ -112,11 +114,22 @@ static void seqs_from_old(const uint8_t *q)     /* (formats 7 .. 9: a sound's si
 
 static int seqs_from(const uint8_t *q, uint32_t version)   /* the patterns as the store had them; 0 = done */
 {
-    if (version != SEQS_VERSION)
+    uint32_t i, tail = SEQS_V1_SIZE - 4u - SEQ_PATS * SEQS_V1_PAT;   /* (version 1: after its patterns, the rest) */
+    if (version == SEQS_VERSION) {
+        memcpy(&seqs, q, sizeof seqs);
+        return 0;
+    }
+    if (version != 1u)
         return -1;
-    memcpy(&seqs, q, sizeof seqs);
+    memset(&seqs, 0, sizeof seqs);              /* version 1: lane 0 alone; the chords' lanes empty */
+    for (i = 0; i < SEQ_PATS; i++)
+        memcpy(&seqs.pat[i], q + 4u + i * SEQS_V1_PAT, SEQS_V1_PAT);
+    memcpy((uint8_t *)&seqs + __builtin_offsetof(seqs_t, div), q + 4u + SEQ_PATS * SEQS_V1_PAT, tail);
+    seqs.version = SEQS_VERSION;
     return 0;
 }
+_Static_assert(sizeof(seqs_t) - __builtin_offsetof(seqs_t, div) == SEQS_V1_SIZE - 4u - SEQ_PATS * SEQS_V1_PAT,
+               "after the patterns, seqs_t is as version 1 had it");
 
 /* the store as the bank of format version (patches psize bytes), then patterns of sversion (ssize bytes; 0: none) */
 static int store_try(uint32_t version, uint32_t psize, uint32_t sversion, uint32_t ssize)
@@ -159,6 +172,7 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     seqs_fresh = 0;
     old_size = 0;
     if (store_try(PATCH_VERSION, sizeof(patch_t), SEQS_VERSION, sizeof seqs) == 0 ||
+        store_try(PATCH_VERSION, sizeof(patch_t), 1u, SEQS_V1_SIZE) == 0 ||
         store_try(9u, PATCH_V9_SIZE, 1u, SEQS_V1_SIZE) == 0)   /* (kept in RAM; the next save writes them anew) */
         return;
     for (i = 0; i < sizeof OLD / sizeof OLD[0]; i++)

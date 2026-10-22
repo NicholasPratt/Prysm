@@ -35,6 +35,15 @@ static int same_old(const patch_t *a, const patch_t *c, uint32_t size)   /* the 
            !memcmp((const uint8_t *)a + PATCH_SEQ_AT, (const uint8_t *)c + PATCH_SEQ_AT, size - PATCH_V7_SIZE);
 }
 static uint8_t old_store[4096];
+static void seqs_as_v1(uint8_t *d)              /* seqs as SEQS_VERSION 1 had them: lane 0 alone */
+{
+    uint32_t i, one = 1;
+    memcpy(d, &one, 4);
+    for (i = 0; i < SEQ_PATS; i++)
+        memcpy(d + 4u + i * SEQS_V1_PAT, &seqs.pat[i], SEQS_V1_PAT);
+    memcpy(d + 4u + SEQ_PATS * SEQS_V1_PAT, (uint8_t *)&seqs + __builtin_offsetof(seqs_t, div),
+           sizeof seqs - __builtin_offsetof(seqs_t, div));
+}
 static void store_old(uint32_t version, uint32_t size, uint32_t slot, const patch_t *c, const uint8_t *seq)
 {                                               /* a bank of that format, with c in slot (and nothing after it) */
     memset(old_store, 0, sizeof old_store);
@@ -180,17 +189,21 @@ int main(void)
         c.osc[1].mode[0] = MODE_MIX; c.osc[1].ratio[1] = 3;   /* x2: +12 */
         c.osc[0].mode[1] = MODE_RING; c.osc[0].ratio[2] = 2;  /* x1.5: +7, +2 cents */
         seqs_init();
-        seqs.pat[3].len = 21; seqs.song_len = 3;
+        seqs.pat[3].len = 21; seqs.pat[3].note[5] = 62; seqs.pat[3].trig[5] = SEQ_ACCENT; seqs.song_len = 3;
+        seqs.song_rep[2] = 5; seqs.div = DIV_8T;
         memset(old_store, 0, sizeof old_store);
         old_store[0] = 9; old_store[4u + 1u] = 1;
         as_old(old_store + BANK_SIZE(0) + PATCH_V9_SIZE, &c, PATCH_V9_SIZE, seq);
-        memcpy(old_store + BANK_SIZE(PATCH_V9_SIZE), &seqs, SEQS_V1_SIZE);
+        seqs_as_v1(old_store + BANK_SIZE(PATCH_V9_SIZE));
         store_save(old_store, BANK_SIZE(PATCH_V9_SIZE) + SEQS_V1_SIZE);
         seqs_init();
         memset(&bank, 0, sizeof bank);
         patches_load();
-        CHECK(patch_get(1, &a) == 0 && !seqs_fresh && seqs.pat[3].len == 21 && seqs.song_len == 3,
-              "format 9 and the patterns: the sound and the patterns kept");
+        CHECK(patch_get(1, &a) == 0 && !seqs_fresh && seqs.pat[3].len == 21 && seqs.pat[3].note[5] == 62 &&
+              seqs.pat[3].trig[5] == SEQ_ACCENT && seqs.song_len == 3 && seqs.song_rep[2] == 5 && seqs.div == DIV_8T &&
+              seqs.version == SEQS_VERSION, "format 9 and the patterns (version 1): the sound and the patterns kept");
+        CHECK(seqs.pat[3].vel[5] == 0 && seqs.pat[3].xvel[5][2] == 0 && seqs.pat[3].xnote[63][0] == 0,
+              "version 1 patterns: the chords' lanes come in empty");
         CHECK(a.lfo2_dest == DEST_RES, "format 9: LFO 2 on RES stays on RES (%u)", (unsigned)a.lfo2_dest);
         CHECK(a.mpitch[1][0] == 36 && a.mfine[1][0] == 64 && a.mpitch[0][1] == 31 && a.mfine[0][1] == 66 &&
               a.mpitch[0][0] == 24, "MIX / RING: the ratio becomes the pitch (x2: +12, x1.5: +7 and 2 cents); FM: in tune");
@@ -201,6 +214,16 @@ int main(void)
             CHECK(patch_from(&got, f, sizeof f - 1u, 9) != 0 && patch_from(&got, f, sizeof f, 11) != 0,
                   "a file of the wrong size or a newer format: refused");
         }
+    }
+    {                                           /* the plugin's saved patterns, version 1 (prysm_seqs_load) */
+        uint8_t v1[SEQS_V1_SIZE];
+        seqs_init();
+        seqs.pat[1].note[9] = 70; seqs.pat[1].trig[9] = SEQ_NOTE; seqs.mode = 1;
+        seqs_as_v1(v1);
+        seqs_init();
+        CHECK(seqs_from(v1, 1) == 0 && seqs.pat[1].note[9] == 70 && seqs.pat[1].trig[9] == SEQ_NOTE && seqs.mode == 1,
+              "version 1 patterns convert (the plugin's state)");
+        CHECK(seqs_from(v1, 3) != 0, "a newer version: refused");
     }
     CHECK(sizeof bank + sizeof seqs <= STORE_MAX, "the bank and the patterns fit the store (%u of %u bytes)",
           (unsigned)(sizeof bank + sizeof seqs), (unsigned)STORE_MAX);

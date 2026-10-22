@@ -147,13 +147,20 @@ static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT", "
 
 /* the sequencer's patterns and song: not part of a sound (patches.c keeps them in the store beside the bank). Four
  * patterns of up to 64 steps (each its own length; one step length and gate for all), and a song: up to 16 entries,
- * each a pattern played 1 .. 16 times, round and round. patch_t's seq_* fields are format 9's single pattern: read
- * only to bring an older bank's pattern in as pattern 1. */
+ * each a pattern played 1 .. 16 times, round and round. A step is a chord of up to SEQ_LANES notes: lane 0 is the
+ * step's own (note, trig, slide: what the STEP row edits; ACCENT and SLIDE are the whole step's), lanes 1 .. 3 the
+ * chord's others, each a note and a velocity, or a tie. Each lane plays as a voice of its own: a lane's TIE carries
+ * that lane's note on. (Patterns of SEQS_VERSION 1 were lane 0 alone: patches.c converts them.) */
 #define SEQ_PATS 4u
 #define SONG_N 16u
+#define SEQ_LANES 4u
+#define SEQ_XTIE 0x80u                          /* xnote: the lane's note before goes on (no new attack) */
 typedef struct {
     uint8_t len, pad[3];                        /* 1 .. 64 steps */
-    uint8_t note[64], trig[64], slide[64];      /* as patch_t's seq_*; trig may be TIE */
+    uint8_t note[64], trig[64], slide[64];      /* lane 0; trig: SEQ_REST .. SEQ_TIE */
+    uint8_t vel[64];                            /* lane 0's velocity (recorded): 0 = its trig's (NOTE 100) */
+    uint8_t xnote[64][SEQ_LANES - 1u];          /* lanes 1 .. 3: a note (| SEQ_XTIE: a tie) */
+    uint8_t xvel[64][SEQ_LANES - 1u];           /* their velocity; 0 and no tie: nothing in the lane */
 } pattern_t;
 typedef struct {
     uint32_t version;
@@ -164,7 +171,7 @@ typedef struct {
     uint8_t song_len, pad2[3];                  /* 1 .. SONG_N entries */
     uint8_t song_pat[SONG_N], song_rep[SONG_N]; /* each entry: a pattern (0..3), played 1 .. 16 times */
 } seqs_t;
-#define SEQS_VERSION 1u
+#define SEQS_VERSION 2u
 static seqs_t seqs;
 
 static void seqs_init(void)                     /* four empty patterns (16 rests, C3 waiting), a song of P1 .. P4 */
@@ -747,15 +754,47 @@ static void arp_step(uint32_t bi, const uint8_t *nt, const uint8_t *vl, uint32_t
     arp.steps++;
 }
 
-/* ---- the sequencer (ISR, beside the arp, on its clock): a step at a time from seqs (a pattern, or the song); one
- * voice. A step with SLIDE, or one before a TIE, holds its note into the next */
+/* ---- the sequencer (ISR, beside the arp, on its clock): a step at a time from seqs (a pattern, or the song); a voice
+ * a lane. A step with SLIDE, or one before a lane's TIE, holds that lane's note into the next */
 typedef struct { uint8_t pat, pos, entry, rep; } seqpos_t;   /* a step: its pattern, its place, the song's entry, its round */
 static struct {
     seqpos_t at;                                /* the step to play next */
-    uint32_t was, phase_q8, odd, now, hold;     /* hold: the note goes on into the next step */
-    int32_t v, gate_left, count, wait;              /* count: ticks since START (the MIDI clock) */
+    uint32_t was, phase_q8, odd, now;
+    uint32_t hold[SEQ_LANES];                   /* the lane's note goes on into the next step */
+    int32_t v[SEQ_LANES];                       /* each lane's voice (-1: none) */
+    int32_t gate_left, count, wait;             /* count: ticks since START (the MIDI clock) */
     volatile uint32_t steps, playing, playing_pat, entry;   /* (the page follows: steps played, the step, its pattern, entry) */
-} seq = {{0, 0, 0, 0}, 0, 0, 0, 0, 0, -1, 0, -1, -1, 0, 0, 0, 0};
+    volatile seqpos_t now_at;                   /* the step playing (recording: where a key falls) */
+    volatile uint32_t step_at, step_len;        /* when it started (engine_frames), its length (frames Q8) */
+    volatile uint8_t rec_mute;                  /* lanes a key is recording into (the main loop's): they rest */
+} seq = {.v = {-1, -1, -1, -1}, .count = -1, .wait = -1};
+
+/* lane l of step k: SEQ_REST, SEQ_NOTE or SEQ_TIE (an accent: a NOTE at 127), its note and velocity */
+static uint32_t seq_lane(const pattern_t *p, uint32_t k, uint32_t l, uint32_t *note, uint32_t *vel)
+{
+    uint32_t t;
+    k %= 64u;
+    if (!l) {
+        t = p->trig[k] < SEQ_TRIGS ? p->trig[k] : SEQ_REST;
+        *note = p->note[k] & 127u;
+        *vel = t == SEQ_ACCENT ? 127u : p->vel[k] ? p->vel[k] & 127u : SEQ_VEL;
+        return t == SEQ_ACCENT ? SEQ_NOTE : t;
+    }
+    t = p->xnote[k][l - 1u];
+    *note = t & 127u;
+    *vel = p->xvel[k][l - 1u] & 127u;
+    return t & SEQ_XTIE ? SEQ_TIE : *vel ? SEQ_NOTE : SEQ_REST;
+}
+
+static void seq_off(uint32_t bi)                /* every lane's note ends (block bi) */
+{
+    uint32_t l;
+    for (l = 0; l < SEQ_LANES; l++) {
+        if (seq.v[l] >= 0) voice[seq.v[l]].ioff = (uint8_t)bi;
+        seq.v[l] = -1;
+        seq.hold[l] = 0;
+    }
+}
 
 static uint32_t seq_len_of(uint32_t i)          /* pattern i's length */
 {
@@ -789,48 +828,59 @@ static uint32_t seq_step_len(uint32_t odd)
 
 static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
 {
-    const pattern_t *p = &seqs.pat[seq.at.pat % SEQ_PATS];
-    uint32_t k = seq.at.pos % 64u, trig = p->trig[k] < SEQ_TRIGS ? p->trig[k] : SEQ_REST;
-    uint32_t note = p->note[k] & 127u, vel = trig == SEQ_ACCENT ? 127u : SEQ_VEL, tie_next;
+    const pattern_t *p = &seqs.pat[seq.at.pat % SEQ_PATS], *pn;
+    uint32_t k = seq.at.pos % 64u, kn, l, accent = p->trig[k] == SEQ_ACCENT;
     seq.playing = k;
     seq.playing_pat = seq.at.pat;
     seq.entry = seq.at.entry;
+    seq.now_at = seq.at;
+    seq.step_at = engine_frames + bi * BLK;
+    seq.step_len = len;
     seq.at = seq_adv(seq.at);
-    tie_next = seqs.pat[seq.at.pat % SEQ_PATS].trig[seq.at.pos % 64u] == SEQ_TIE;
-    if (trig == SEQ_TIE) {                      /* the note before goes on (none: a rest) */
-        if (seq.v < 0 || !voice[seq.v].gate) {
-            if (seq.v >= 0) voice[seq.v].ioff = (uint8_t)bi;
-            seq.v = -1;
-        }
-    } else if (seq.v >= 0 && seq.hold && trig != SEQ_REST && voice[seq.v].gate) {   /* the last one slides into it */
-        voice[seq.v].inote = (uint8_t)note;
-        voice[seq.v].ivel = (uint8_t)vel;
-        voice[seq.v].islide = (uint8_t)bi;
-        last_note = (int32_t)note;
-    } else {
-        if (seq.v >= 0) voice[seq.v].ioff = (uint8_t)bi;
-        seq.v = -1;
-        if (trig != SEQ_REST) {
-            uint32_t v = voice_pick(note);
+    pn = &seqs.pat[seq.at.pat % SEQ_PATS];
+    kn = seq.at.pos % 64u;
+    for (l = 0; l < SEQ_LANES; l++) {
+        uint32_t note, vel, nn, nv, st = seq_lane(p, k, l, &note, &vel), tie_next = seq_lane(pn, kn, l, &nn, &nv) == SEQ_TIE;
+        int32_t v = seq.v[l];
+        if (seq.rec_mute >> l & 1u)             /* (a key is recording into this lane: it plays itself) */
+            st = SEQ_REST, tie_next = 0;
+        if (accent && st == SEQ_NOTE)
+            vel = 127u;
+        if (st == SEQ_TIE) {                    /* the lane's note before goes on (none: a rest) */
+            if (v < 0 || !voice[v].gate) {
+                if (v >= 0) voice[v].ioff = (uint8_t)bi;
+                v = -1;
+            }
+        } else if (v >= 0 && seq.hold[l] && st != SEQ_REST && voice[v].gate) {   /* the last one slides into it */
             voice[v].inote = (uint8_t)note;
             voice[v].ivel = (uint8_t)vel;
-            voice[v].iglide = glide_from(note);
-            voice[v].itrig = (uint8_t)bi;
-            voice[v].age = ++ages;
-            seq.v = (int32_t)v;
+            voice[v].islide = (uint8_t)bi;
+            if (!l) last_note = (int32_t)note;
+        } else {
+            if (v >= 0) voice[v].ioff = (uint8_t)bi;
+            v = -1;
+            if (st != SEQ_REST) {
+                uint32_t w = voice_pick(note);
+                voice[w].inote = (uint8_t)note;
+                voice[w].ivel = (uint8_t)vel;
+                voice[w].iglide = l ? 0 : glide_from(note);   /* (a chord: its root glides, the rest land) */
+                voice[w].itrig = (uint8_t)bi;
+                voice[w].age = ++ages;
+                v = (int32_t)w;
+            }
         }
+        seq.hold[l] = v >= 0 && (tie_next || (st != SEQ_REST && p->slide[k]));
+        seq.v[l] = v;
     }
-    seq.hold = seq.v >= 0 && (tie_next || (trig != SEQ_REST && p->slide[k]));
     seq.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.seq_gate) >> 23);
     seq.steps++;
 }
 
 static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; due: a step's tick came (MIDI clock) */
 {
-    if (!eg.seq_play) {                         /* stopped: its note goes */
-        if (seq.v >= 0) { voice[seq.v].ioff = (uint8_t)bi; seq.v = -1; }
+    if (!eg.seq_play) {                         /* stopped: its notes go */
+        seq_off(bi);
         seq.was = 0;
-        seq.hold = 0;
         return;
     }
     if (!seq.was) {                             /* PLAY: from the first step (of the pattern, or of the song) */
@@ -843,9 +893,11 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
         seq.count = -1;
         seq.wait = -1;
     }
-    if (seq.v >= 0 && !seq.hold) {              /* the gate (a slide holds it into the next step) */
-        seq.gate_left -= (int32_t)BLK;
-        if (seq.gate_left <= 0) { voice[seq.v].ioff = (uint8_t)bi; seq.v = -1; }
+    seq.gate_left -= (int32_t)BLK;              /* the gate (a slide or a tie holds a lane into the next step) */
+    if (seq.gate_left <= 0) {
+        uint32_t l;
+        for (l = 0; l < SEQ_LANES; l++)
+            if (seq.v[l] >= 0 && !seq.hold[l]) { voice[seq.v[l]].ioff = (uint8_t)bi; seq.v[l] = -1; }
     }
     if (eg.arp_midi) {                          /* on the MIDI clock: the step's tick (an odd one swung later) */
         uint32_t slen = mc.period_q8 ? mc.period_q8 * (24u / (eg.seq_spb ? eg.seq_spb : 4u))
@@ -934,7 +986,7 @@ static void arp_run(uint32_t nb)
             } else if (st == 0xFCu) {           /* STOP: and its note */
                 mc.running = 0; mc.wait = -1; seq.wait = -1;
                 if (eg.arp_midi && arp.v >= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
-                if (eg.arp_midi && seq.v >= 0) { voice[seq.v].ioff = (uint8_t)bi; seq.v = -1; seq.hold = 0; }
+                if (eg.arp_midi) seq_off(bi);
             }
         }
         seq_block(bi, sdue);                    /* the sequencer, this block */
@@ -1642,6 +1694,28 @@ static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16
 }
 
 static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */
+static void engine_seq_mute(uint32_t lanes) { seq.rec_mute = (uint8_t)lanes; }   /* lanes that rest (recording) */
+
+/* the step a note played now falls on (recording): the one playing, or the next once past its middle; and its count
+ * (seq.steps: the one playing is steps - 1). 0: the sequencer is not playing */
+static int engine_seq_now(seqpos_t *at, uint32_t *ord)
+{
+    uint32_t n, len;
+    int32_t t;
+    seqpos_t cur, nx;
+    do {                                        /* (a copy no step was half-way through) */
+        n = seq.steps;
+        cur = seq.now_at;
+        nx = seq.at;
+        t = (int32_t)(engine_frames - seq.step_at);   /* (under 0: the step starts later in this render) */
+        len = seq.step_len;
+    } while (n != seq.steps);
+    if (!eg.seq_play || !seq.was || !n)
+        return 0;
+    if (t > 0 && ((uint64_t)t << 9) > len) { *at = nx; *ord = n; }   /* past half the step (len: frames Q8) */
+    else { *at = cur; *ord = n - 1u; }
+    return 1;
+}
 
 static void engine_sync(uint32_t midi)          /* the arp's clock: its own (0) or the MIDI clock (1) */
 {

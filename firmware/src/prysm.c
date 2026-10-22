@@ -255,11 +255,15 @@ static void app_main(void)
         for (k = 0; k < 27u; k++) {             /* (a key stops the note it started: the octave may change meanwhile) */
             if (down >> k & 1u) {
                 held[k] = (uint8_t)(base + k);
-                if (ui_seq_key(held[k])) engine_set(&edit);   /* (REC on the SEQ page: into the step, and heard) */
+                if (ui_seq_key(held[k], 127)) engine_set(&edit);   /* (REC: into the pattern, and heard) */
                 play(held[k], 127);
                 midi_send(0x90u | gset.midi_out, held[k], 100);
             }
-            if (up >> k & 1u) { stop(held[k]); midi_send(0x80u | gset.midi_out, held[k], 0); }
+            if (up >> k & 1u) {
+                ui_seq_key_up(held[k]);
+                stop(held[k]);
+                midi_send(0x80u | gset.midi_out, held[k], 0);
+            }
         }
 
         b = fm1_input_edges(&rel);              /* buttons pressed since the last call (bit = button id) */
@@ -287,10 +291,10 @@ static void app_main(void)
             if (st < 0xF0u && gset.midi_in && (st & 0x0Fu) != gset.midi_in - 1u)
                 continue;                       /* (another channel than the SETUP page's) */
             if ((st & 0xF0u) == 0x90u && d2) {
-                if (ui_seq_key(d1)) engine_set(&edit);
+                if (ui_seq_key(d1, d2)) engine_set(&edit);
                 play(d1, d2);
             }
-            else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) stop(d1);
+            else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) { ui_seq_key_up(d1); stop(d1); }
             else if ((st & 0xF0u) == 0xE0u) bend = d1 | (uint32_t)d2 << 7;   /* pitch bend */
         }
         engine_bend(bend, gset.bend);
@@ -308,7 +312,7 @@ static void app_main(void)
         fm1_led_key(BTN_OCT_UP, gset.oct > 0);
         fm1_led_key(BTN_PLAY, eg.seq_play);     /* the sequencer runs */
         fm1_led_key(BTN_ARP, eg.arp_on);        /* the arpeggiator is on */
-        fm1_led_key(BTN_REC, seq_rec);          /* step entry */
+        fm1_led_key(BTN_REC, seq_rec);          /* step entry, or recording */
 
         ui_draw();
         ed_poll();                              /* (an editor connected: what changed here) */

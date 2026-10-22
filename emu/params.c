@@ -61,17 +61,19 @@ static const char *prm_fmt(uint32_t i, uint32_t v)
     return prm_txt;
 }
 /* the patterns and song (engine.c: seqs_t), where each field is: "pat|pattern size|len|note|trig|slide|div|gate|cur|
- * mode|song_len|song_pat|song_rep|size|patterns|entries" (the pattern fields within a pattern) */
+ * mode|song_len|song_pat|song_rep|size|patterns|entries|vel|xnote|xvel|lanes" (the pattern fields within a pattern;
+ * xnote, xvel: SEQ_LANES - 1 a step) */
 static const char *prm_seq_layout(void)
 {
-    static const uint32_t L[16] = {
+    static const uint32_t L[20] = {
         __builtin_offsetof(seqs_t, pat), sizeof(pattern_t), __builtin_offsetof(pattern_t, len),
         __builtin_offsetof(pattern_t, note), __builtin_offsetof(pattern_t, trig), __builtin_offsetof(pattern_t, slide),
         __builtin_offsetof(seqs_t, div), __builtin_offsetof(seqs_t, gate), __builtin_offsetof(seqs_t, cur),
         __builtin_offsetof(seqs_t, mode), __builtin_offsetof(seqs_t, song_len), __builtin_offsetof(seqs_t, song_pat),
-        __builtin_offsetof(seqs_t, song_rep), sizeof(seqs_t), SEQ_PATS, SONG_N};
+        __builtin_offsetof(seqs_t, song_rep), sizeof(seqs_t), SEQ_PATS, SONG_N, __builtin_offsetof(pattern_t, vel),
+        __builtin_offsetof(pattern_t, xnote), __builtin_offsetof(pattern_t, xvel), SEQ_LANES};
     char *s = prm_txt;
     uint32_t i;
-    for (i = 0; i < 16u; i++) s = num(i ? put(s, "|") : s, L[i]);
+    for (i = 0; i < 20u; i++) s = num(i ? put(s, "|") : s, L[i]);
     return prm_txt;
 }

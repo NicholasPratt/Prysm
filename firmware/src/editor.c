@@ -59,12 +59,15 @@ static int ed_seq_set(uint32_t off, uint32_t v)
 {
     uint8_t *at = (uint8_t *)&seqs + off;
     uint32_t p0 = __builtin_offsetof(seqs_t, pat), pe = p0 + sizeof seqs.pat, lo = 0, hi = 0;
-    if (off >= p0 && off < pe) {                /* a pattern: its length, notes, triggers, slides */
+    if (off >= p0 && off < pe) {                /* a pattern: its length, notes, triggers, slides, the chords' lanes */
         uint32_t f = (off - p0) % sizeof(pattern_t);
         if (f == __builtin_offsetof(pattern_t, len)) lo = 1, hi = 64;
         else if (f >= __builtin_offsetof(pattern_t, note) && f < __builtin_offsetof(pattern_t, trig)) hi = 127;
         else if (f >= __builtin_offsetof(pattern_t, trig) && f < __builtin_offsetof(pattern_t, slide)) hi = SEQ_TRIGS - 1u;
-        else if (f >= __builtin_offsetof(pattern_t, slide)) hi = 1;
+        else if (f >= __builtin_offsetof(pattern_t, slide) && f < __builtin_offsetof(pattern_t, vel)) hi = 1;
+        else if (f >= __builtin_offsetof(pattern_t, vel) && f < __builtin_offsetof(pattern_t, xnote)) hi = 127;
+        else if (f >= __builtin_offsetof(pattern_t, xnote) && f < __builtin_offsetof(pattern_t, xvel)) hi = 255;   /* (| TIE) */
+        else if (f >= __builtin_offsetof(pattern_t, xvel) && f < sizeof(pattern_t)) hi = 127;
         else return 0;                          /* (padding) */
     } else if (off == __builtin_offsetof(seqs_t, div)) hi = DIV_N - 1u;
     else if (off == __builtin_offsetof(seqs_t, gate)) hi = 127;

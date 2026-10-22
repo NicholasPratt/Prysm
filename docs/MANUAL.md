@@ -91,7 +91,7 @@ cutoff).
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
 | **SEQ** | SEQ |
 | **PLAY** | the sequencer: run / stop (from any page; its LED shows it) |
-| **REC** | step entry on the SEQ page (its LED shows it) |
+| **REC** | step entry on the SEQ page; while the sequencer plays, real-time recording (its LED shows it) |
 | **FX** | CHORUS (press again: DELAY, then REVERB) |
 | **HOME** | the oscilloscope |
 | **SAVE** | the PATCH screen |
@@ -371,36 +371,51 @@ With every effect on, Prysm uses roughly twice the CPU: watch the header.
 
 ### SEQ
 
-A step sequencer, 303-style: notes, rests, **accents**, **slides** and **ties**, in **4 patterns** of up to 64 steps,
-and a **song** that plays the patterns in an order you choose, each so many times. It plays alongside the keys (and
+A polyphonic step sequencer, 303-style: notes and **chords** of up to four notes, rests, **accents**, **slides** and
+**ties**, in **4 patterns** of up to 64 steps, and a **song** that plays the patterns in an order you choose, each so
+many times. Enter steps one at a time, or **record in real time** as it plays. It plays alongside the keys (and
 the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock. The patterns and the song
 are not part of a sound: they stay when you load another, so you can try sounds on the same song.
 
 The picture is the pattern being edited: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white
 one an accent; a little bar joins a sliding step to the next; a tie is a bar carrying the note before it on; past the
-length, dots. The cursor is ringed (doubled while recording); a mark under a square shows the step playing. The
+length, dots. A chord's other notes are notches across the top of its square (a short notch: one of them tied on). The cursor is ringed (doubled while recording); a mark under a square shows the step playing. The
 header says which pattern you are editing (**SEQ P1** .. **P4**), or **SEQ SONG** in song mode. On the SONG and
 ENTRY rows the picture is the song instead: its entries, each a pattern and how many times it plays.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | STEP | the step (the cursor) | its note | its trigger: REST, NOTE, ACCENT, TIE | SLIDE ON / OFF |
+| CHORD | the step's 2nd note (-- none) | 3rd note | 4th note | its velocity: AUTO (100, an accent 127) or 1 .. 127 |
 | PATTERN | the pattern edited: P1 .. P4 | its length: 1 .. 64 | step: 1/4 .. 1/32 (all patterns) | gate (all patterns) |
 | EDIT | the row: 1 .. 4, or ALL | COPY | PASTE | CLEAR |
 | SONG | MODE: PATT or SONG | the song's length: 1 .. 16 entries | tempo (the arp's) | INIT |
 | ENTRY | the entry: 1 .. 16 | its pattern: P1 .. P4 | REPEAT: x1 .. x16 | |
 
-**Entering notes**: press **REC** (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or start at
-the first) and **play a key**: its note goes into the step (a rest or a tie becomes a note) and the cursor moves to the
-next, so you can type a line in. MIDI notes enter the same way. Press REC again to play the keys normally.
+**Entering notes** (stopped): press **REC** (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or
+start at the first) and **play a key**: its note goes into the step (a rest or a tie becomes a note), and when you let
+go the cursor moves to the next, so you can type a line in. **Hold keys together** for a chord: they all go into the
+step, and the cursor moves on once you let them all go. MIDI notes enter the same way. Press REC again to play the
+keys normally.
+
+**Recording in real time** (playing): press **PLAY**, then **REC**, and play. Each note lands on the nearest step
+(the one playing, or the next if you are past its middle), with its velocity (the FM-1's keys: full; a MIDI
+keyboard: as played), and a held note is tied over the steps you held it through. Recording **overdubs**: what is
+there stays, and each pass adds to it, up to four notes a step (playing a note that is already in the step records
+it again, at the new velocity). While you hold a key, the pattern's note in that place rests, so you hear yourself,
+not both. You can record from any page (turn the filter as you go); REC or PLAY ends it. To take something out, use
+the STEP and CHORD rows, or CLEAR a row.
 
 - **PLAY** starts from the first step (of the pattern, or of the song) and stops.
 - **ACCENT** plays the step at full velocity, the others a little softer: how much louder, brighter and more
   modulated an accent is comes from the AMP page's **VEL** row.
 - **SLIDE** holds the step's note into the next one and glides to its pitch in about 30 ms, **without a new attack**
-  (the 303 slide). A slide into a rest just ends.
+  (the 303 slide). A slide into a rest just ends. In a chord, each note slides to the next step's note in its place.
 - **TIE** carries the note before it on, at its pitch, without a new attack: a note followed by two ties is one note
-  three steps long (its gate ends in the last tie). A tie after a rest is a rest.
+  three steps long (its gate ends in the last tie). A tie after a rest is a rest. A chord's notes tie each on their
+  own: a recorded chord whose notes were let go one by one keeps them as you played them.
+- **Chords** play as up to four voices: the same four the keys use, so a four-note chord over a held chord steals
+  the oldest notes.
 - **Patterns**: PATT on the PATTERN row picks the one you edit; in PATT mode it is also the one playing. Changing it
   while the sequencer plays switches at the end of the current pattern, so it stays in time. Each pattern has its own
   length; the step and the gate are the same for all.

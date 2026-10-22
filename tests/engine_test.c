@@ -349,12 +349,12 @@ int main(void)
         static int16_t s[2u * 44100u * 3u];
         static const uint8_t PAT[8] = {48, 52, 55, 0, 60, 0, 55, 52};   /* C3 E3 G3 - C4 - G3 E3 (0: a rest) */
         uint32_t variant;
-        for (variant = 0; variant < 7u; variant++) {   /* plain, length 3, accents, slide, no slide, tie, song */
+        for (variant = 0; variant < 9u; variant++) {   /* plain, length 3, accents, slide, no slide, tie, song, chord, a lane's tie */
             patch_t q = solo();
             pattern_t *pt = &seqs.pat[0];
             uint32_t done = 0, total = 44100u * 3u / FRAMES * FRAMES, k;
-            static const char *const NAMES[7] = {"seq", "seq_len3", "seq_accent", "seq_slide", "seq_noslide", "seq_tie",
-                                                 "seq_song"};
+            static const char *const NAMES[9] = {"seq", "seq_len3", "seq_accent", "seq_slide", "seq_noslide", "seq_tie",
+                                                 "seq_song", "seq_chord", "seq_lane_tie"};
             memset(voice, 0, sizeof voice);
             engine_init();                      /* (the patterns: empty) */
             q.amp_r = 5; q.arp_bpm = 80; seqs.div = DIV_16; seqs.gate = 64; pt->len = 8;
@@ -381,6 +381,17 @@ int main(void)
                 seqs.pat[1].trig[0] = seqs.pat[1].trig[1] = SEQ_NOTE;
                 seqs.mode = 1; seqs.song_len = 2;
                 seqs.song_pat[0] = 0; seqs.song_rep[0] = 2; seqs.song_pat[1] = 1; seqs.song_rep[1] = 1;
+            }
+            if (variant == 7u) {                /* a chord: C4 E4 G4 on step 1 (the whole step), the rest rests */
+                pt->len = 4; pt->trig[0] = SEQ_NOTE; pt->note[0] = 60; seqs.gate = 127;
+                pt->trig[1] = pt->trig[2] = pt->trig[3] = SEQ_REST;
+                pt->xnote[0][0] = 64; pt->xvel[0][0] = 100; pt->xnote[0][1] = 67; pt->xvel[0][1] = 100;
+            }
+            if (variant == 8u) {                /* lane 1's G4 tied over three steps; lane 0's C4 a step, then rests */
+                pt->len = 4; pt->trig[0] = SEQ_NOTE; pt->note[0] = 60;
+                pt->trig[1] = pt->trig[2] = pt->trig[3] = SEQ_REST;
+                pt->xnote[0][0] = 67; pt->xvel[0][0] = 100;
+                pt->xnote[1][0] = pt->xnote[2][0] = 67 | SEQ_XTIE; pt->xvel[1][0] = pt->xvel[2][0] = 100;
             }
             engine_set(&q); engine_sync(0);
             last_note = -1;

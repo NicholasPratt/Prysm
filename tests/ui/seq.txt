@@ -1,4 +1,5 @@
-# the SEQ page: REC, enter C3 E3 G3 (keys), an accent, a slide, a length of 12; PLAY; then REC off
+# the SEQ page: REC, enter C4 E4 G4 (keys), then a chord (three keys held together); an accent, a slide; the
+# CHORD row; a length of 12; PLAY; then REC off
 100 btn 11
 200 shot
 300 btn 13
@@ -8,14 +9,24 @@
 550 keys 0
 600 keys 0x4000
 650 keys 0
+660 keys 0x80
+670 keys 0x880
+680 keys 0x4880
+690 keys 0
 700 shot
-800 enc 2 -3
+800 enc 2 -4
 820 enc 4 3
 900 enc 2 1
 920 enc 5 2
 1000 shot
-1100 enc 0 1
-1120 enc 2 -4
+1050 enc 2 2
+1060 enc 0 1
+1100 shot
+1110 enc 3 3
+1120 enc 5 40
+1150 shot
+1160 enc 0 1
+1170 enc 3 -4
 1200 btn 12
 1500 shot
 1600 btn 13

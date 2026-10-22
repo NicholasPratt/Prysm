@@ -65,9 +65,8 @@ uint32_t prysm_seqs_version(void) { return SEQS_VERSION; }
 int prysm_seq_set(uint32_t off, uint32_t v) { return ed_seq_set(off, v); }
 int prysm_seqs_load(const uint8_t *p, uint32_t n, uint32_t version)
 {
-    if (version != SEQS_VERSION || n != sizeof seqs)
-        return -1;
-    memcpy(&seqs, p, n);
+    if (n != (version == SEQS_VERSION ? sizeof seqs : version == 1u ? SEQS_V1_SIZE : 0u) || seqs_from(p, version) != 0)
+        return -1;                              /* (an older version: converted, as the FM-1 converts its store) */
     engine_set(&edit);
     return 0;
 }

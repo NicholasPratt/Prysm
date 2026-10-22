@@ -410,6 +410,16 @@ check("seq timing", len(d) >= 8 and np.all(np.abs((d / (STEP * FS)) - np.round(d
 xa = load("seq_accent")
 acc, nrm = rms(xa, 0.01, 0.05), rms(xa, STEP + 0.01, STEP + 0.05)
 check("seq accent", acc > 1.4 * nrm, f"an accent {acc / nrm:.2f} x a plain step's level (127 vs 100: x {127 / 100:.2f}^2 = {(127 / 100) ** 2:.2f})")
+f, s = spectrum(load("seq_chord"), 0.005, 0.12)      # (C4 E4 G4: 68 Hz and more apart, 9 Hz bins)
+lv = [level_db(f, s, NOTE[m], 6) for m in (60, 64, 67)]
+gap = max(level_db(f, s, hz, 6) for hz in (296, 361))   # between them: nothing
+check("seq chord", min(lv) > -6 and gap < min(lv) - 20 and rms(load("seq_chord"), STEP + 0.03, 4 * STEP) < 0.005,
+      f"step 1: C4 {lv[0]:.1f}, E4 {lv[1]:.1f}, G4 {lv[2]:.1f} dB (between: {gap:.1f}); then silent")
+lt = load("seq_lane_tie")
+f, s = spectrum(lt, 2 * STEP + 0.005, 2 * STEP + 0.055)   # (steady: its gate ends later in the step)
+g4, c4 = level_db(f, s, NOTE[67], 12), level_db(f, s, NOTE[60], 12)
+check("seq lane tie", g4 > -3 and c4 < g4 - 40 and rms(lt, 3 * STEP + 0.06, 4 * STEP) < 0.005,
+      f"step 3: G4 {g4:.1f} dB held, C4 {c4:.1f} dB gone; step 4 silent")
 sl, ns = load("seq_slide"), load("seq_noslide")
 gap_s = min(rms(sl, t, t + 0.005) for t in np.arange(0.06, 0.13, 0.005))
 gap_n = min(rms(ns, t, t + 0.005) for t in np.arange(0.06, 0.13, 0.005))

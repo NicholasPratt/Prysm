@@ -218,7 +218,7 @@ const seqSet = (off, v) => M._web_seq_set(off, v);
 function seqLayout() {
   const L = M.UTF8ToString(M._web_seq_layout()).split("|").map(Number);
   const k = ["pat", "patSize", "len", "note", "trig", "slide", "div", "gate", "cur", "mode", "songLen", "songPat", "songRep",
-             "size", "pats", "entries"];
+             "size", "pats", "entries", "vel", "xnote", "xvel", "lanes"];
   SQ = Object.fromEntries(k.map((n, i) => [n, L[i]]));
 }
 const patAt = (sq, p) => SQ.pat + (p % SQ.pats) * SQ.patSize;   // where pattern p starts
@@ -272,14 +272,19 @@ function seqUI() {
       row.append(cell);
     }
     const tools = el("span", { className: "rowtools" });
-    const rowBytes = (f) => { const sq = seqs(), a = patAt(sq, sq[SQ.cur]); return [0, 1, 2].map((k) => a + [SQ.note, SQ.trig, SQ.slide][k] + r * 16); };
+    const x = SQ.lanes - 1;                     // (the chords' lanes: x bytes a step)
+    const rowBytes = () => {                    // the row's bytes: [where, how many] of note, trig, slide, vel, the lanes
+      const a = patAt(seqs(), seqs()[SQ.cur]);
+      return [[a + SQ.note + r * 16, 16], [a + SQ.trig + r * 16, 16], [a + SQ.slide + r * 16, 16], [a + SQ.vel + r * 16, 16],
+              [a + SQ.xnote + r * 16 * x, 16 * x], [a + SQ.xvel + r * 16 * x, 16 * x]];
+    };
     const copy = el("button", { textContent: "COPY" }), paste = el("button", { textContent: "PASTE" }), clear = el("button", { textContent: "CLEAR" });
-    copy.onclick = () => { const sq = seqs(); seqClip = { rows: 1, b: rowBytes().map((o) => sq.slice(o, o + 16)) }; status(`Row ${r + 1} copied`); };
+    copy.onclick = () => { const sq = seqs(); seqClip = { rows: 1, b: rowBytes().map(([o, n]) => sq.slice(o, o + n)) }; status(`Row ${r + 1} copied`); };
     paste.onclick = () => {
       if (!seqClip || seqClip.rows !== 1) return status("Copy a row first");
-      rowBytes().forEach((o, k) => { for (let j = 0; j < 16; j++) seqSet(o + j, seqClip.b[k][j]); });
+      rowBytes().forEach(([o, n], k) => { for (let j = 0; j < n; j++) seqSet(o + j, seqClip.b[k][j]); });
     };
-    clear.onclick = () => { const [, t, sl] = rowBytes(); for (let j = 0; j < 16; j++) { seqSet(t + j, 0); seqSet(sl + j, 0); } };
+    clear.onclick = () => rowBytes().forEach(([o, n], k) => { if (k) for (let j = 0; j < n; j++) seqSet(o + j, 0); });   // (the notes stay, waiting)
     tools.append(copy, paste, clear);
     row.append(tools);
     grid.append(row);
@@ -330,7 +335,13 @@ function refreshSeq(sq) {                       // the SEQ tab from the patterns
     const t = sq[a + SQ.trig + i] & 3;
     c.className = "cell " + TRIG_CLASS[t] + (sq[a + SQ.slide + i] ? " slide" : "") + (i >= len ? " past" : "") +
                   (pl !== 0xFFFF && (pl >> 8) === cur && (pl & 255) === i ? " play" : "");
-    c.textContent = t === 1 || t === 2 ? noteName(sq[a + SQ.note + i]) : "";
+    const chord = [];                           // the chord's other notes (lanes 1 ..)
+    for (let l = 0; l < SQ.lanes - 1; l++) {
+      const n = sq[a + SQ.xnote + i * (SQ.lanes - 1) + l], v = sq[a + SQ.xvel + i * (SQ.lanes - 1) + l];
+      if (v && !(n & 128)) chord.push(noteName(n & 127));
+    }
+    c.textContent = (t === 1 || t === 2 ? noteName(sq[a + SQ.note + i]) : "") + (chord.length ? "+" + chord.length : "");
+    c.title = chord.length ? [t === 1 || t === 2 ? noteName(sq[a + SQ.note + i]) : "-", ...chord].join(" ") : "";
   });
   E.modeP.classList.toggle("on", !sq[SQ.mode]);
   E.modeS.classList.toggle("on", !!sq[SQ.mode]);
