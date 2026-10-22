@@ -28,7 +28,7 @@ $PY tools/fm1_install.py build/prysm.fwsc
 ```
 
 It asks before it writes, then the FM-1 restarts into the new firmware. To install a release instead, give its
-file: `$PY tools/fm1_install.py prysm-0.8.fwsc`. To see what the connected FM-1 is running:
+file: `$PY tools/fm1_install.py prysm-0.9.fwsc`. To see what the connected FM-1 is running:
 `$PY tools/fm1_install.py --info`.
 
 If the FM-1 does not start after an update, hold **OCT-** while switching it on to get the rescue updater, then
@@ -126,8 +126,8 @@ playing. Everything else is the same.
 | --- | --- |
 | `tools/setup_macos.sh` | once: sets the Mac up to build Prysm (colima and docker, the JieLi toolchain, the AC79 SDK, the Python venv) |
 | `./build.sh` | builds `build/prysm.fwsc` (identity FM-1_980). colima must be running: `colima start`. |
-| `./build.sh --release 0.8` | a release build, `build/prysm-0.8.fwsc` |
-| `$PY tools/make_site.py build/prysm-0.8.fwsc 0.8` | rebuilds `site/`: the web installer and the manual for GitHub Pages |
+| `./build.sh --release 0.9` | a release build, `build/prysm-0.9.fwsc` |
+| `$PY tools/make_site.py build/prysm-0.9.fwsc 0.9` | rebuilds `site/`: the web installer and the manual for GitHub Pages |
 
 ## The other tools
 

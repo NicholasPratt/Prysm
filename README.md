@@ -12,7 +12,7 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 - **See it**: [the demo video](https://www.youtube.com/watch?v=mpHz8HwsCX0) (2½ minutes: the screen and the sound)
 - **Install it**: [the web installer](https://nicholaspratt.github.io/Prysm/) (Chrome or Edge), or `tools/fm1_install.py` (below)
 - **Try it in a browser**: [the editor](https://nicholaspratt.github.io/Prysm/editor/): Prysm itself, running in the page, with every
-  parameter on screen; connected to an FM-1 (0.8 or later) the two stay in step
+  parameter on screen; connected to an FM-1 (0.9 or later) the two stay in step
 - **In your DAW**: [the CLAP plugin](plugin/README.md) (macOS, Windows, Linux): Prysm's engine as an instrument, every
   parameter automatable, the editor as its window, a connected FM-1 kept in step
 - **Use it**: [the manual](docs/MANUAL.md) ([as a page](https://nicholaspratt.github.io/Prysm/manual.html))
@@ -71,7 +71,7 @@ envelopes, the LFO, the effects chain.
 
 ```sh
 pip3 install mido python-rtmidi
-python3 tools/fm1_install.py prysm-0.8.fwsc       # asks before it writes; restarts into Prysm
+python3 tools/fm1_install.py prysm-0.9.fwsc       # asks before it writes; restarts into Prysm
 python3 tools/fm1_install.py --info               # what the connected FM-1 runs
 ```
 
@@ -81,7 +81,7 @@ or another one: the [FM-1 Firmware Hub](https://thefirmwarehub.com).
 ## Installing the CLAP plugin
 
 Prysm in your DAW, as an instrument ([what it does](plugin/README.md)). It needs a DAW that loads CLAP plugins (Reaper and
-Bitwig Studio among them). To keep an FM-1 in step with it, the FM-1 needs Prysm 0.8 or later.
+Bitwig Studio among them). To keep an FM-1 in step with it, the FM-1 needs Prysm 0.9 or later.
 
 1. Download the zip for your system from the [latest release](https://github.com/NicholasPratt/Prysm/releases/latest):
    `Prysm-clap-macos.zip`, `Prysm-clap-windows.zip` or `Prysm-clap-linux.zip`.
@@ -140,9 +140,9 @@ The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](S
 tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchain, the AC79 SDK, a Python venv
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
-./build.sh --release 0.8             # build/prysm-0.8.fwsc (identity FM-1_988, "0.8" on the splash)
-tools/make_site.py build/prysm-0.8.fwsc 0.8   # site/: the web installer and the manual (GitHub Pages)
-APP_VER=0.8 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
+./build.sh --release 0.9             # build/prysm-0.9.fwsc (identity FM-1_989, "0.9" on the splash)
+tools/make_site.py build/prysm-0.9.fwsc 0.9   # site/: the web installer and the manual (GitHub Pages)
+APP_VER=0.9 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
 ```
 
 ### Tests (on the computer, no FM-1 needed)

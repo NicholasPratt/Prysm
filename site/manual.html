@@ -14,10 +14,10 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.8</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.9</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
-LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
+LFO, two looping mod envelopes and stereo chorus, delay and reverb.</p>
 <ul>
 <li><a href="#installing">Installing</a></li>
 <li><a href="#playing">Playing</a></li>
@@ -37,7 +37,7 @@ LFO, a looping mod envelope and stereo chorus, delay and reverb.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.8.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.9.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -122,7 +122,7 @@ cutoff).</p>
 </tr>
 <tr>
 <td><strong>ENV</strong></td>
-<td>AMP (press again: FILTER)</td>
+<td>AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2)</td>
 </tr>
 <tr>
 <td><strong>SELECT</strong> (the button)</td>
@@ -150,7 +150,7 @@ cutoff).</p>
 </tr>
 <tr>
 <td><strong>REC</strong></td>
-<td>step entry on the SEQ page (its LED shows it)</td>
+<td>step entry on the SEQ page; while the sequencer plays, real-time recording (its LED shows it)</td>
 </tr>
 <tr>
 <td><strong>FX</strong></td>
@@ -166,6 +166,9 @@ cutoff).</p>
 </tr>
 </tbody>
 </table>
+<p>The header's battery shows <strong>0 to 3 bars</strong>; empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
+<strong>bolt</strong> (USB power) instead, as the FM-1 cannot tell its charge while it is charging. The splash shows it too, and the
+SETUP page in words, with the raw reading (ADC).</p>
 <p>The header's <strong>CPU</strong> bar is how much of the FM-1's time the sound takes (its peak over the last half second); it
 turns bright past 70 %. Keep it under that: near 100 % the sound starts to crackle.</p>
 <p>Values go from 0 to 127 unless the page says otherwise. Bipolar values (shown with a sign, like <code>+24</code>) are 0 in the
@@ -205,16 +208,16 @@ between them: an arrow gets thicker with more modulation, and the symbol on it i
 <tr>
 <td>RATIO</td>
 <td>carrier ratio</td>
-<td>mod 1 ratio</td>
-<td>mod 2 ratio</td>
+<td>mod 1 ratio (PIT1 in MIX / RING)</td>
+<td>mod 2 ratio (PIT2 in MIX / RING)</td>
 <td>fine tune</td>
 </tr>
 <tr>
 <td>MODE</td>
 <td>mod 1's mode</td>
 <td>mod 2's mode</td>
-<td></td>
-<td></td>
+<td>mod 1 fine (FINE1)</td>
+<td>mod 2 fine (FINE2)</td>
 </tr>
 <tr>
 <td>ENV</td>
@@ -277,12 +280,18 @@ oscillator by up to +-50 cents.</p>
 <li><strong>RING</strong>: multiplies; at full amount you hear the sum and difference of the two pitches, not the carrier itself.</li>
 <li><strong>MIX</strong>: adds the modulator's wave to the other one, a layer.</li>
 </ul>
+<p><strong>Pitch in MIX and RING.</strong> A modulator in MIX or RING is heard, not just felt, so a ratio is the wrong tool: its
+RATIO knob becomes <strong>PIT1</strong> (or <strong>PIT2</strong>), the modulator's pitch against the carrier, -24 .. +24 semitones. Switch
+back to FM and the ratio is there again, as you left it (each mode keeps its own setting). <strong>FINE1</strong> and <strong>FINE2</strong>
+(MODE row) detune each modulator by up to +-50 cents, in any mode: in MIX a chorused layer, in FM a slowly beating,
+inharmonic shimmer. The pitch is a modulation destination too (<strong>M1PITCH</strong>, <strong>M2PITCH</strong>, below).</p>
 <p><strong>Envelopes.</strong> Each modulator has its own attack and release (1 ms .. 10 s): the amount rises over the attack,
 holds while the key is down, and falls over the release. A slow mod 1 attack on FM makes a note that brightens as
 you hold it.</p>
 <p><strong>MIX row.</strong> The modulators' amounts (how much they change the next one) and the oscillator's own level.</p>
 <h3 id="filter">FILTER</h3>
-<p>A filter for each voice, with drive before it, a high-pass after it, and its own envelope. TYPE picks what it is: a
+<p>A filter for each voice, with drive before it, a high-pass after it, and its own envelope (on the <strong>F.ENV</strong> page:
+ENV, twice). TYPE picks what it is: a
 <strong>LP 12</strong> (2-pole, 12 dB / octave) or <strong>LP 24</strong> (4-pole, 24 dB / octave) low-pass, or a comb, <strong>COMB+</strong> or <strong>COMB-</strong>.
 The picture draws the filter's actual response (the low-pass's curve or the comb's peaks, and the high-pass) and the
 envelope's shape.</p>
@@ -305,13 +314,6 @@ envelope's shape.</p>
 <td>keytrack (0 .. 100 %)</td>
 </tr>
 <tr>
-<td>ENV</td>
-<td>attack</td>
-<td>decay</td>
-<td>sustain</td>
-<td>release</td>
-</tr>
-<tr>
 <td>TYPE</td>
 <td>LP 12, LP 24, COMB+, COMB-</td>
 <td>drive (0 = clean)</td>
@@ -330,6 +332,10 @@ envelope's shape.</p>
 <p>Cutoff and resonance glide as you turn them, so sweeps are smooth. <strong>Keytrack</strong> at 100 % moves the cutoff with the
 note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.</p>
 <p><strong>LP 24</strong> is steeper and darker than LP 12; its resonance is a little softer.</p>
+<p><strong>Self-oscillation</strong>: from RES <strong>122</strong> up, the low-pass sings on its own: a sine at the cutoff, held at a steady level
+from the lowest cutoffs to the highest, even with the oscillators' levels at 0. With KEY at 127 and CUT at 64 it plays
+in tune from the keys (C3 sings at C3's pitch); the amp envelope still shapes it. Turn RES back below 122 and it rings
+and dies away as before.</p>
 <p><strong>COMB+ / COMB-</strong> turn the filter into a comb, as on a Waldorf: a row of resonant peaks at a frequency and every
 multiple of it. The FILTER row then plays the comb: CUT sets the first peak (in 3/4-semitone steps: 64 is C4, 80 is
 C5), RES its feedback (from no effect to long ringing), ENV sweeps it with the envelope and KEY tracks the keyboard.
@@ -339,7 +345,7 @@ hollow and an octave down. On the <strong>COMB</strong> row, DAMP darkens the ri
 further and further apart while the first stays put: from an even comb to bells, bars and metal. The peaks get
 louder as RES rises (up to about +17 dB, rounded off rather than clipped), so the comb keeps its level even when they
 miss the harmonics. High feedback takes a moment to build up on low notes.</p>
-<p>The LFO and the mod envelope move the comb through <strong>CUTOFF</strong>, and its spread through <strong>SPREAD</strong>.</p>
+<p>The LFO and the mod envelopes move the comb through <strong>CUTOFF</strong>, and its spread through <strong>SPREAD</strong>.</p>
 <h3 id="amp">AMP</h3>
 <table>
 <thead>
@@ -373,8 +379,86 @@ miss the harmonics. High feedback takes a moment to build up on low notes.</p>
 are on / off), so they always play at full velocity and these settings do not change them. Each sensitivity says how
 much a softer note is quieter (by the square of its velocity, as it sounds natural), darker (up to 36 semitones of
 cutoff) or less modulated (less FM brightness: the classic expressive FM touch). At 0, velocity changes nothing.</p>
+<h3 id="fenv">F.ENV</h3>
+<p>The filter's envelope (ENV twice, or ENV from AMP). Its amount, how far it moves the cutoff, is the FILTER page's
+ENV knob; the picture shows it in its corner.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ENV</td>
+<td>attack</td>
+<td>decay</td>
+<td>sustain</td>
+<td>release</td>
+</tr>
+</tbody>
+</table>
+<h3 id="menv-1--menv-2">M.ENV 1 / M.ENV 2</h3>
+<p>Two mod envelopes, each an ADSR started by every note, with a destination and an amount of its own (ENV three and
+four times).</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ENV</td>
+<td>attack</td>
+<td>decay</td>
+<td>sustain</td>
+<td>release</td>
+</tr>
+<tr>
+<td>DEST</td>
+<td>LOOP ON / OFF</td>
+<td>destination</td>
+<td>amount (bipolar)</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>With <strong>LOOP ON</strong> an envelope runs attack -&gt; decay -&gt; attack -&gt; decay ... for as long as you hold the key, then
+releases: a sustain of 0 gives full up-and-down sweeps, a higher sustain a shallower cycle. Its destination can be
+any of the LFO's (below), plus two of its own:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LFORATE</td>
+<td>the LFO's rate, up to +-4 octaves: an envelope that speeds the LFO up and slows it down</td>
+</tr>
+<tr>
+<td>LFOAMT</td>
+<td>the LFO's depth, from nothing up to double</td>
+</tr>
+</tbody>
+</table>
+<p>The two can share a destination (they add up), or split the work: say M.ENV 1 sweeps the cutoff while M.ENV 2,
+short and looping, flicks mod 1's pitch. The picture shows two seconds of the envelope (the key held for 1.5 s, the
+dotted line where it is let go) with its destination's name, and with LFORATE or LFOAMT the LFO under it, moving as
+the envelope moves it.</p>
 <h3 id="lfo">LFO</h3>
-<p>One LFO per voice (or one shared, free-running) and a mod envelope that can loop. LFO 2 has a page of its own (below).</p>
+<p>One LFO per voice (or one shared, free-running). LFO 2 has a page of its own (below).</p>
 <table>
 <thead>
 <tr>
@@ -399,20 +483,6 @@ cutoff) or less modulated (less FM brightness: the classic expressive FM touch).
 <td>amount 1</td>
 <td>destination 2</td>
 <td>amount 2</td>
-</tr>
-<tr>
-<td>M.ENV</td>
-<td>mod envelope attack</td>
-<td>decay</td>
-<td>sustain</td>
-<td>release</td>
-</tr>
-<tr>
-<td>M.DST</td>
-<td>LOOP ON / OFF</td>
-<td>destination</td>
-<td>amount</td>
-<td></td>
 </tr>
 </tbody>
 </table>
@@ -471,31 +541,13 @@ cutoff) or less modulated (less FM brightness: the classic expressive FM touch).
 <td>SPREAD</td>
 <td>the comb's spread, up to the whole knob either way</td>
 </tr>
-</tbody>
-</table>
-<p><strong>The mod envelope</strong> (M.ENV, M.DST) is an ADSR started by each note. With <strong>LOOP ON</strong> it runs attack -&gt; decay -&gt;
-attack -&gt; decay ... for as long as you hold the key, then releases: a sustain of 0 gives full up-and-down sweeps, a
-higher sustain a shallower cycle. Its destination can be any of the LFO's, plus two of its own:</p>
-<table>
-<thead>
 <tr>
-<th></th>
-<th></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>LFORATE</td>
-<td>the LFO's rate, up to +-4 octaves: an envelope that speeds the LFO up and slows it down</td>
-</tr>
-<tr>
-<td>LFOAMT</td>
-<td>the LFO's depth, from nothing up to double</td>
+<td>M1PITCH, M2PITCH</td>
+<td>mod 1's / mod 2's pitch alone (both oscillators), up to +-12 semitones: in MIX a moving layer, in FM a sliding timbre</td>
 </tr>
 </tbody>
 </table>
-<p>On the M.ENV and M.DST rows the picture shows two seconds of the envelope (the key held for 1.5 s, the dotted line
-where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the envelope moves it.</p>
+<p>The mod envelopes have pages of their own: <strong>M.ENV 1 / M.ENV 2</strong> (above).</p>
 <h3 id="lfo-2">LFO 2</h3>
 <p>Press <strong>LFO</strong> again for LFO 2: one for all the voices, simpler than the LFO, but with many more destinations, and it
 can run in time with the tempo.</p>
@@ -738,12 +790,16 @@ and the page's own effect lit.</p>
 </ul>
 <p>With every effect on, Prysm uses roughly twice the CPU: watch the header.</p>
 <h3 id="seq">SEQ</h3>
-<p>A step sequencer of up to <strong>64 steps</strong>, one note each, 303-style: notes, rests, <strong>accents</strong> and <strong>slides</strong>. It plays
-alongside the keys (and the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock.
-Each patch has its own pattern.</p>
-<p>The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white one an
-accent; a little bar joins a sliding step to the next; past the length, dots. The cursor is ringed (white while
-recording); a mark under a square shows the step playing.</p>
+<p>A polyphonic step sequencer, 303-style: notes and <strong>chords</strong> of up to four notes, rests, <strong>accents</strong>, <strong>slides</strong> and
+<strong>ties</strong>, in <strong>4 patterns</strong> of up to 64 steps, and a <strong>song</strong> that plays the patterns in an order you choose, each so
+many times. Enter steps one at a time, or <strong>record in real time</strong> as it plays. It plays alongside the keys (and
+the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock. The patterns and the song
+are not part of a sound: they stay when you load another, so you can try sounds on the same song.</p>
+<p>The picture is the pattern being edited: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white
+one an accent; a little bar joins a sliding step to the next; a tie is a bar carrying the note before it on; past the
+length, dots. A chord's other notes are notches across the top of its square (a short notch: one of them tied on). The cursor is ringed (doubled while recording); a mark under a square shows the step playing. The
+header says which pattern you are editing (<strong>SEQ P1</strong> .. <strong>P4</strong>), or <strong>SEQ SONG</strong> in song mode. On the SONG and
+ENTRY rows the picture is the song instead: its entries, each a pattern and how many times it plays.</p>
 <table>
 <thead>
 <tr>
@@ -759,27 +815,97 @@ recording); a mark under a square shows the step playing.</p>
 <td>STEP</td>
 <td>the step (the cursor)</td>
 <td>its note</td>
-<td>its trigger: REST, NOTE, ACCENT</td>
+<td>its trigger: REST, NOTE, ACCENT, TIE</td>
 <td>SLIDE ON / OFF</td>
 </tr>
 <tr>
+<td>CHORD</td>
+<td>the step's 2nd note (-- none)</td>
+<td>3rd note</td>
+<td>4th note</td>
+<td>its velocity: AUTO (100, an accent 127) or 1 .. 127</td>
+</tr>
+<tr>
 <td>PATTERN</td>
-<td>length: 1 .. 64</td>
-<td>step: 1/4 .. 1/32</td>
-<td>gate</td>
+<td>the pattern edited: P1 .. P4</td>
+<td>its length: 1 .. 64</td>
+<td>step: 1/4 .. 1/32 (all patterns)</td>
+<td>gate (all patterns)</td>
+</tr>
+<tr>
+<td>EDIT</td>
+<td>the row: 1 .. 4, or ALL</td>
+<td>COPY</td>
+<td>PASTE</td>
+<td>CLEAR</td>
+</tr>
+<tr>
+<td>CLICK</td>
+<td>the metronome: OFF, ON, REC (only while recording)</td>
+<td>its level</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>SONG</td>
+<td>MODE: PATT or SONG</td>
+<td>the song's length: 1 .. 16 entries</td>
 <td>tempo (the arp's)</td>
+<td>INIT</td>
+</tr>
+<tr>
+<td>ENTRY</td>
+<td>the entry: 1 .. 16</td>
+<td>its pattern: P1 .. P4</td>
+<td>REPEAT: x1 .. x16</td>
+<td></td>
 </tr>
 </tbody>
 </table>
-<p><strong>Entering notes</strong>: press <strong>REC</strong> (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or start at
-the first) and <strong>play a key</strong>: its note goes into the step (a rest becomes a note) and the cursor moves to the next,
-so you can type a line in. MIDI notes enter the same way. Press REC again to play the keys normally.</p>
+<p><strong>Entering notes</strong> (stopped): press <strong>REC</strong> (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or
+start at the first) and <strong>play a key</strong>: its note goes into the step (a rest or a tie becomes a note), and when you let
+go the cursor moves to the next, so you can type a line in. <strong>Hold keys together</strong> for a chord: they all go into the
+step, and the cursor moves on once you let them all go. MIDI notes enter the same way. Press REC again to play the
+keys normally.</p>
+<p><strong>Recording in real time</strong> (playing): press <strong>PLAY</strong>, then <strong>REC</strong>, and play. Or press <strong>REC</strong> first, then <strong>PLAY</strong>:
+you get a <strong>count-in</strong>, a bar of ticks (whatever CLICK is set to), and recording starts on the downbeat; a note
+played just before it lands on step 1. (On the MIDI clock there is no count-in: the clock's START is the
+downbeat.) Each note lands on the nearest step
+(the one playing, or the next if you are past its middle), with its velocity (the FM-1's keys: full; a MIDI
+keyboard: as played), and a held note is tied over the steps you held it through. Recording <strong>overdubs</strong>: what is
+there stays, and each pass adds to it, up to four notes a step (playing a note that is already in the step records
+it again, at the new velocity). While you hold a key, the pattern's note in that place rests, so you hear yourself,
+not both. You can record from any page (turn the filter as you go); REC or PLAY ends it. To take something out, use
+the STEP and CHORD rows, or CLEAR a row.</p>
 <ul>
-<li><strong>PLAY</strong> starts the sequence from its first step, and stops it.</li>
+<li><strong>PLAY</strong> starts from the first step (of the pattern, or of the song) and stops.</li>
+<li><strong>The metronome</strong> (CLICK row) ticks every beat while the sequencer plays, higher on each bar's first beat (4/4,
+  counted from PLAY), whatever the step size. <strong>REC</strong> ticks only while you record. It is dry (no effects on it), goes
+  out over USB audio with the rest, and stays as you set it when you load another sound (it is a setting, as the
+  MIDI ones are).</li>
 <li><strong>ACCENT</strong> plays the step at full velocity, the others a little softer: how much louder, brighter and more
   modulated an accent is comes from the AMP page's <strong>VEL</strong> row.</li>
 <li><strong>SLIDE</strong> holds the step's note into the next one and glides to its pitch in about 30 ms, <strong>without a new attack</strong>
-  (the 303 slide). A slide into a rest just ends.</li>
+  (the 303 slide). A slide into a rest just ends. In a chord, each note slides to the next step's note in its place.</li>
+<li><strong>TIE</strong> carries the note before it on, at its pitch, without a new attack: a note followed by two ties is one note
+  three steps long (its gate ends in the last tie). A tie after a rest is a rest. A chord's notes tie each on their
+  own: a recorded chord whose notes were let go one by one keeps them as you played them.</li>
+<li><strong>Chords</strong> play as up to four voices: the same four the keys use, so a four-note chord over a held chord steals
+  the oldest notes.</li>
+<li><strong>Patterns</strong>: PATT on the PATTERN row picks the one you edit; in PATT mode it is also the one playing. Changing it
+  while the sequencer plays switches at the end of the current pattern, so it stays in time. Each pattern has its own
+  length; the step and the gate are the same for all.</li>
+<li><strong>Copy and paste</strong> (EDIT row): pick a row of 16 steps with KNOB1, turn <strong>COPY</strong>, pick another row (or another
+  pattern on the PATTERN row) and turn <strong>PASTE</strong>. With the row on <strong>ALL</strong>, COPY and PASTE take the whole pattern,
+  its length included; a single row pasted into ALL fills all four rows. <strong>CLEAR</strong> empties the row (with ALL, the
+  whole pattern: turn it again within 3 seconds to confirm).</li>
+<li><strong>The song</strong> (SONG and ENTRY rows): set MODE to SONG, its LENGTH to the number of entries, then for each entry its
+  pattern and how many times it plays. PLAY then plays the entries in turn and starts again after the last.</li>
+<li><strong>INIT</strong> (SONG row) starts over: all four patterns empty, the song P1, P2, P3, P4 once each, PATT mode. It asks
+  first: turn it again within 3 seconds.</li>
+<li><strong>Saving</strong>: the patterns and the song save themselves a few seconds after a change, once nothing is playing (the
+  flash write would cut a note short). They come back at power-on. From an older Prysm, the pattern of the sound
+  that comes back at power-on becomes pattern 1.</li>
 <li><strong>On the MIDI clock</strong> (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
   PLAY must be on.</li>
 </ul>
@@ -851,7 +977,9 @@ tabs SAVE, LOAD, INIT.</p>
 <li>When the FM-1 is switched on, the slot last saved or loaded comes back.</li>
 <li>Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.</li>
 <li>Patches are kept in two flash sectors written in turn: if the power goes during a save, only that save is lost.</li>
-<li>Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them).</li>
+<li>Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them). From
+  Prysm 0.8 and older: a modulator in MIX or RING gets the pitch of its ratio (x2: +12, x1.5: +7); ratios of 5 and
+  up are further than PIT goes, and come in at +24.</li>
 </ul>
 <hr />
 <h2 id="the-oscilloscope">The oscilloscope</h2>
@@ -894,7 +1022,7 @@ uses the internal tempo).</p>
 page: the screen, the knobs (drag or scroll), the buttons and the keys (or your computer's keys, A W S E D ... from C4),
 with the sound. Beside it, a tab for every page with every parameter, the sequencer's 64 steps as a grid, and patch
 files to save and load. The browser keeps its own 8 slots between visits.</p>
-<p><strong>With an FM-1</strong> (Prysm 0.8 or later): connect it by USB and press <strong>Connect FM-1</strong> (allow MIDI when the browser
+<p><strong>With an FM-1</strong> (Prysm 0.9 or later): connect it by USB and press <strong>Connect FM-1</strong> (allow MIDI when the browser
 asks). The editor takes the FM-1's current sound, and from then on the two stay in step: what you change in the editor
 the FM-1 plays (its knob's value shows in the corner, as if you had turned it), and what you turn on the FM-1 shows up
 in the editor. <strong>Store on FM-1</strong> saves the sound in one of its slots. Another MIDI keyboard connected to the computer

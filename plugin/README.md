@@ -2,7 +2,7 @@
 
 Prysm in your DAW: the FM-1 firmware's own engine makes the sound (the same code, so a project sounds as the FM-1 does),
 every knob of the sound is a DAW parameter you can automate, and its window is [the editor](https://nicholaspratt.github.io/Prysm/editor/),
-with Prysm's screen, knobs and keys. A connected FM-1 (Prysm 0.8 or later) is kept in step both ways: the project's sound
+with Prysm's screen, knobs and keys. A connected FM-1 (Prysm 0.9 or later) is kept in step both ways: the project's sound
 goes to it, and what you turn on the FM-1 is recorded as the plugin's parameters.
 
 | Parameter | Does |
