@@ -389,6 +389,7 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 | CHORD | the step's 2nd note (-- none) | 3rd note | 4th note | its velocity: AUTO (100, an accent 127) or 1 .. 127 |
 | PATTERN | the pattern edited: P1 .. P4 | its length: 1 .. 64 | step: 1/4 .. 1/32 (all patterns) | gate (all patterns) |
 | EDIT | the row: 1 .. 4, or ALL | COPY | PASTE | CLEAR |
+| CLICK | the metronome: OFF, ON, REC (only while recording) | its level | | |
 | SONG | MODE: PATT or SONG | the song's length: 1 .. 16 entries | tempo (the arp's) | INIT |
 | ENTRY | the entry: 1 .. 16 | its pattern: P1 .. P4 | REPEAT: x1 .. x16 | |
 
@@ -407,6 +408,10 @@ not both. You can record from any page (turn the filter as you go); REC or PLAY 
 the STEP and CHORD rows, or CLEAR a row.
 
 - **PLAY** starts from the first step (of the pattern, or of the song) and stops.
+- **The metronome** (CLICK row) ticks every beat while the sequencer plays, higher on each bar's first beat (4/4,
+  counted from PLAY), whatever the step size. **REC** ticks only while you record. It is dry (no effects on it), goes
+  out over USB audio with the rest, and stays as you set it when you load another sound (it is a setting, as the
+  MIDI ones are).
 - **ACCENT** plays the step at full velocity, the others a little softer: how much louder, brighter and more
   modulated an accent is comes from the AMP page's **VEL** row.
 - **SLIDE** holds the step's note into the next one and glides to its pitch in about 30 ms, **without a new attack**

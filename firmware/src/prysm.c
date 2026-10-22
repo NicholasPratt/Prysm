@@ -223,9 +223,12 @@ static void app_main(void)
     uint32_t prev = 0, k, t_change = 0, dirty = 0;
     uint8_t held[27] = {0};                     /* the note each key plays */
     uint32_t bend = 8192;                       /* the last MIDI pitch bend (the range may change under it) */
-    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; an older, shorter record (before BEND; the */
-        settings_load(&gset, GSET_V1_SIZE) != 0)    /* octave, the slot) */
+    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; an older, shorter record (before CLICK, before */
+        settings_load(&gset, GSET_V2_SIZE) != 0 &&  /* BEND; the octave, the slot) */
+        settings_load(&gset, GSET_V1_SIZE) != 0)
         settings_load(&gset, 2);
+    if (gset.click > 2u) gset.click = 0;
+    if (gset.click_lvl > 127u) gset.click_lvl = 80;
     if (gset.bend > 24u) gset.bend = 2;
     if (gset.oct < -2 || gset.oct > 2) gset.oct = 0;
     if (gset.midi_in > 16u) gset.midi_in = 0;
@@ -233,6 +236,7 @@ static void app_main(void)
     if (gset.clock > 1u) gset.clock = 0;
     engine_init();
     engine_sync(gset.clock);
+    engine_click(gset.click, gset.click_lvl, 0);
 #ifndef DINGHY_HOST
     midi_rt_hook = midi_rt;                     /* the MIDI clock, timed as it arrives */
 #endif

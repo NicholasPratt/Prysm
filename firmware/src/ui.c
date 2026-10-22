@@ -56,7 +56,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_SPAT, K_SDIV, K_SGATE, K_SROW, K_SCOPY, K_SPASTE, K_SCLEAR, K_SMODE, K_SONGLEN, K_SENTRY, K_SEPAT, K_SEREP,
        K_SINIT,
        K_MPIT, K_MFINE,
-       K_SCHORD, K_SVEL };   /* (K_SCHORD: off = the lane - 1) */   /* (the step kinds: the step under the cursor; K_MPIT, K_MFINE: off = the modulator, 0 / 1) */
+       K_SCHORD, K_SVEL,
+       K_CLICK, K_CLKLVL };   /* (the SEQ page's CLICK row: settings, gset) */   /* (K_SCHORD: off = the lane - 1) */   /* (the step kinds: the step under the cursor; K_MPIT, K_MFINE: off = the modulator, 0 / 1) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -69,9 +70,12 @@ typedef struct {
     uint8_t midi_out;                           /* 0 .. 15 = channel 1 .. 16 */
     uint8_t clock;                              /* the arp: 0 its own, 1 the MIDI clock */
     uint8_t bend;                               /* MIDI pitch bend's range: 0 .. 24 semitones */
+    uint8_t click;                              /* the metronome: 0 OFF, 1 ON, 2 REC (only while recording) */
+    uint8_t click_lvl;                          /* its level, 0 .. 127 */
 } gset_t;
 #define GSET_V1_SIZE 5u                         /* (before bend) */
-static gset_t gset = {0, -1, 0, 0, 0, 2};
+#define GSET_V2_SIZE 6u                         /* (before click) */
+static gset_t gset = {0, -1, 0, 0, 0, 2, 0, 80};
 static uint8_t gset_dirty;                      /* changed: the app saves it (when quiet) */
 #define G 3u                                    /* (page_t.osc: the page edits gset) */
 #define GO(f) ((uint16_t)__builtin_offsetof(gset_t, f))
@@ -148,6 +152,7 @@ static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cu
                  {"DIV", 0, DIV_N - 1u, K_SDIV}, {"GATE", 0, 127, K_SGATE}}, LIT_ENV},
     {"EDIT", {{"ROW", 0, 4, K_SROW}, {"COPY", 0, 1, K_SCOPY},   /* (ROW 5: ALL, the whole pattern) */
               {"PASTE", 0, 1, K_SPASTE}, {"CLEAR", 0, 1, K_SCLEAR}}, LIT_CURVE},
+    {"CLICK", {{"CLICK", 0, 2, K_CLICK}, {"LEVEL", 0, 127, K_CLKLVL}, NOPRM, NOPRM}, LIT_CURVE},
     {"SONG", {{"MODE", 0, 1, K_SMODE}, {"LENGTH", 0, SONG_N, K_SONGLEN},
               {"BPM", PO(arp_bpm), 200, K_BPM}, {"INIT", 0, 1, K_SINIT}}, LIT_ALL},
     {"ENTRY", {{"ENTRY", 0, SONG_N - 1u, K_SENTRY}, {"PATT", 0, SEQ_PATS - 1u, K_SEPAT},
@@ -221,7 +226,7 @@ static uint8_t clip_rows, clip_len;             /* the clipboard: 0 empty, 1 a r
 static uint8_t clip_note[64], clip_trig[64], clip_slide[64], clip_vel[64];
 static uint8_t clip_xnote[64][SEQ_LANES - 1u], clip_xvel[64][SEQ_LANES - 1u];
 static uint8_t chord_ui[SEQ_LANES - 1u];        /* the CHORD row's knobs: lane l's note + 1 (0: none), from the step */
-enum { SR_STEP, SR_CHORD, SR_PATTERN, SR_EDIT, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
+enum { SR_STEP, SR_CHORD, SR_PATTERN, SR_EDIT, SR_CLICK, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
 static uint32_t seq_arm, seq_arm_at;            /* a CLEAR ALL or INIT asked once: its kind, when (turn again to do it) */
 static pattern_t *seq_ed(void) { return &seqs.pat[seqs.cur % SEQ_PATS]; }   /* the pattern edited */
 static void rec_end(void);
@@ -264,6 +269,8 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_SEREP: return &seqs.song_rep[song_cursor % SONG_N];
     case K_SCOPY: case K_SPASTE: case K_SCLEAR: case K_SINIT: ui_none = 0; return &ui_none;
     case K_SVEL: return &seq_ed()->vel[seq_cursor % 64u];
+    case K_CLICK: return &gset.click;
+    case K_CLKLVL: return &gset.click_lvl;
     case K_SCHORD: {                            /* lane off + 1 of the step: its note + 1, or 0 (none, or a tie) */
         const pattern_t *pt = seq_ed();
         uint32_t l = p->off % (SEQ_LANES - 1u), x = pt->xnote[seq_cursor % 64u][l];
@@ -355,6 +362,8 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
         break;
     }
     case K_SVEL: if (*v) num(s, *v); else put(s, "AUTO"); break;   /* (AUTO: NOTE 100, ACCENT 127) */
+    case K_CLICK: put(s, *v == 1u ? "ON" : *v == 2u ? "REC" : "OFF"); break;
+    case K_CLKLVL: num(s, *v); break;
     case K_STRIG: put(s, SEQ_TRIG_NAME[*v < SEQ_TRIGS ? *v : 0u]); break;
     case K_SSLIDE: put(s, *v ? "ON" : "OFF"); break;
     case K_SLEN: case K_SONGLEN: num(s, *v); break;
@@ -1370,6 +1379,7 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_REC)) {            /* REC: step entry, or recording if it plays (and to the SEQ page) */
         rec_end();
         seq_rec = !seq_rec;
+        engine_click(gset.click, gset.click_lvl, seq_rec);
         if (page != PG_SEQ) ui_page(PG_SEQ);
         dirty |= D_ALL;
         return (int)changed;
@@ -1494,6 +1504,12 @@ static int ui_input(uint32_t buttons)
             seqs_dirty = 1;
             if (p->kind == K_SDIV || p->kind == K_SGATE) changed = 1;
             dirty |= D_HDR | D_GFX | D_ROWS;
+            continue;
+        }
+        if (p->kind == K_CLICK || p->kind == K_CLKLVL) {   /* the metronome: a setting (saved), to the engine */
+            gset_dirty = 1;
+            engine_click(gset.click, gset.click_lvl, seq_rec);
+            dirty |= D_GFX | D_ROWS;
             continue;
         }
         if (PAGES[page].osc == G) {             /* a setting, not the sound: saved; the clock to the engine */

@@ -349,12 +349,12 @@ int main(void)
         static int16_t s[2u * 44100u * 3u];
         static const uint8_t PAT[8] = {48, 52, 55, 0, 60, 0, 55, 52};   /* C3 E3 G3 - C4 - G3 E3 (0: a rest) */
         uint32_t variant;
-        for (variant = 0; variant < 9u; variant++) {   /* plain, length 3, accents, slide, no slide, tie, song, chord, a lane's tie */
+        for (variant = 0; variant < 10u; variant++) {   /* plain, length 3, accents, slide, no slide, tie, song, chord, a lane's tie */
             patch_t q = solo();
             pattern_t *pt = &seqs.pat[0];
             uint32_t done = 0, total = 44100u * 3u / FRAMES * FRAMES, k;
-            static const char *const NAMES[9] = {"seq", "seq_len3", "seq_accent", "seq_slide", "seq_noslide", "seq_tie",
-                                                 "seq_song", "seq_chord", "seq_lane_tie"};
+            static const char *const NAMES[10] = {"seq", "seq_len3", "seq_accent", "seq_slide", "seq_noslide", "seq_tie",
+                                                  "seq_song", "seq_chord", "seq_lane_tie", "seq_click"};
             memset(voice, 0, sizeof voice);
             engine_init();                      /* (the patterns: empty) */
             q.amp_r = 5; q.arp_bpm = 80; seqs.div = DIV_16; seqs.gate = 64; pt->len = 8;
@@ -393,6 +393,9 @@ int main(void)
                 pt->xnote[0][0] = 67; pt->xvel[0][0] = 100;
                 pt->xnote[1][0] = pt->xnote[2][0] = 67 | SEQ_XTIE; pt->xvel[1][0] = pt->xvel[2][0] = 100;
             }
+            if (variant == 9u)                  /* the metronome alone: every step a rest */
+                for (k = 0; k < 8u; k++) pt->trig[k] = SEQ_REST;
+            engine_click(variant == 9u, 127, 0);
             engine_set(&q); engine_sync(0);
             last_note = -1;
             engine_seq_play(1);

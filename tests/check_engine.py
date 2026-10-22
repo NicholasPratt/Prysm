@@ -420,6 +420,10 @@ f, s = spectrum(lt, 2 * STEP + 0.005, 2 * STEP + 0.055)   # (steady: its gate en
 g4, c4 = level_db(f, s, NOTE[67], 12), level_db(f, s, NOTE[60], 12)
 check("seq lane tie", g4 > -3 and c4 < g4 - 40 and rms(lt, 3 * STEP + 0.06, 4 * STEP) < 0.005,
       f"step 3: G4 {g4:.1f} dB held, C4 {c4:.1f} dB gone; step 4 silent")
+ck = load("seq_click")
+bar, beat = peak_hz(*spectrum(ck, 0.0, 0.03)), peak_hz(*spectrum(ck, 4 * STEP, 4 * STEP + 0.03))
+check("metronome", abs(bar - 2000) < 30 and abs(beat - 1000) < 30 and rms(ck, 2 * STEP, 3 * STEP) < 0.0005 and
+      rms(load("seq"), 0.2, 0.3) > 0, f"beat 1: {bar:.0f} Hz, beat 2: {beat:.0f} Hz, silent between")
 sl, ns = load("seq_slide"), load("seq_noslide")
 gap_s = min(rms(sl, t, t + 0.005) for t in np.arange(0.06, 0.13, 0.005))
 gap_n = min(rms(ns, t, t + 0.005) for t in np.arange(0.06, 0.13, 0.005))

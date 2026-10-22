@@ -767,6 +767,7 @@ static struct {
     volatile seqpos_t now_at;                   /* the step playing (recording: where a key falls) */
     volatile uint32_t step_at, step_len;        /* when it started (engine_frames), its length (frames Q8) */
     volatile uint8_t rec_mute;                  /* lanes a key is recording into (the main loop's): they rest */
+    uint32_t n;                                 /* steps since PLAY (the metronome's count) */
 } seq = {.v = {-1, -1, -1, -1}, .count = -1, .wait = -1};
 
 /* lane l of step k: SEQ_REST, SEQ_NOTE or SEQ_TIE (an accent: a NOTE at 127), its note and velocity */
@@ -784,6 +785,35 @@ static uint32_t seq_lane(const pattern_t *p, uint32_t k, uint32_t l, uint32_t *n
     *note = t & 127u;
     *vel = p->xvel[k][l - 1u] & 127u;
     return t & SEQ_XTIE ? SEQ_TIE : *vel ? SEQ_NOTE : SEQ_REST;
+}
+
+/* ---- the metronome: a tick each beat while the sequencer plays (CLICK ON, or REC: only while recording), a
+ * decaying sine, 1 kHz (the bar's first beat: 2 kHz), ~40 ms, added after the effects (dry) */
+static volatile struct { uint8_t mode, rec, lvl; } clk_set;   /* (the main loop's: engine_click) */
+static struct { int32_t at, left, amp; uint32_t ph, inc; } tick = {-1, 0, 0, 0, 0};
+static void click_start(uint32_t bi, uint32_t bar)   /* (the ISR) a tick from block bi of this render */
+{
+    if (!clk_set.mode || (clk_set.mode == 2u && !clk_set.rec) || !clk_set.lvl)
+        return;
+    tick.at = (int32_t)(bi * BLK);
+    tick.left = 1764;
+    tick.amp = (int32_t)clk_set.lvl * 180;      /* (127: ~0.7 of full scale) */
+    tick.ph = 0;
+    tick.inc = bar ? 194783632u : 97391816u;    /* 2 kHz, 1 kHz: f * 2^32 / 44100 */
+}
+static void click_render(int32_t *out, uint32_t n)
+{
+    uint32_t i = tick.at > 0 ? (uint32_t)tick.at : 0u;
+    if (tick.at < 0 && tick.left <= 0)
+        return;
+    tick.at = -1;
+    for (; i < n && tick.left > 0; i++, tick.left--) {
+        int32_t s = (lfo_wave(LFO_SINE, tick.ph, 0) * tick.amp) >> 15;
+        tick.ph += tick.inc;
+        tick.amp -= tick.amp >> 9;              /* (~12 ms to 1/e) */
+        out[2u * i] += s;
+        out[2u * i + 1u] += s;
+    }
 }
 
 static void seq_off(uint32_t bi)                /* every lane's note ends (block bi) */
@@ -874,6 +904,9 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
     }
     seq.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.seq_gate) >> 23);
     seq.steps++;
+    if (seq.n % (eg.seq_spb ? eg.seq_spb : 4u) == 0u)   /* a beat: the metronome (the bar's first, higher) */
+        click_start(bi, seq.n % (4u * (eg.seq_spb ? eg.seq_spb : 4u)) == 0u);
+    seq.n++;
 }
 
 static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; due: a step's tick came (MIDI clock) */
@@ -888,6 +921,7 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
         l2_restart = 1;                         /* (LFO 2 too) */
         seq.at.pos = seq.at.entry = seq.at.rep = 0;
         seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
+        seq.n = 0;
         seq.now = 1;
         seq.odd = 0;
         seq.count = -1;
@@ -1420,6 +1454,7 @@ static void engine_render(int32_t *out, uint32_t n)
         lfo_rate16 = newest < NV ? voice[newest].rate16 : 0;
     }
     fx_render(out, n, g2);                      /* the effects, over all the voices (LFO 2 on them) */
+    click_render(out, n);                       /* the metronome, dry */
     engine_frames += n;
 }
 
@@ -1694,6 +1729,12 @@ static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16
 }
 
 static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */
+static void engine_click(uint32_t mode, uint32_t lvl, uint32_t rec)   /* the metronome: OFF, ON, REC; its level; recording */
+{
+    clk_set.mode = (uint8_t)mode;
+    clk_set.lvl = (uint8_t)lvl;
+    clk_set.rec = (uint8_t)rec;
+}
 static void engine_seq_mute(uint32_t lanes) { seq.rec_mute = (uint8_t)lanes; }   /* lanes that rest (recording) */
 
 /* the step a note played now falls on (recording): the one playing, or the next once past its middle; and its count
