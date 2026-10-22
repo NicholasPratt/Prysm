@@ -227,6 +227,11 @@ int main(void)
             p.flt_type = q.flt_type = FLT_LP24; render("self_lp24", &p, C5, 1, 1400, 1500);
             p.flt_type = q.flt_type = FLT_LP12; p.res = q.res = 110;
             render("self_res110", &p, C5, 1, 1400, 1500);   /* below the top: it rings, and dies */
+            p.res = 127; p.lvl1 = p.lvl2 = 0;
+            render_p2 = 0;
+            render("self_silent", &p, C5, 1, 1400, 1500);   /* the oscillators at 0 from the start: it sings anyway */
+            p.cut = 47;                         /* (low: about the note's own pitch, slow to grow) */
+            render("self_silent_low", &p, C3, 1, 1400, 1500);
             render_p2 = 0;
         }
         p = saw_through(10, 127);               /* the worst: full resonance, drive, the envelope sweeping it */

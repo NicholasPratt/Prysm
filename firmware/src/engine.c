@@ -1313,6 +1313,9 @@ static void engine_render(int32_t *out, uint32_t n)
                 self = voice[v].f_ks < K_SELF;  /* (the top of RES: past SELF_LVL the damping rises; at k < 0 the */
                 if (!self)                      /*  filter grows into a sine and settles there, at any cutoff) */
                     voice[v].f_pk = 0;
+                else if (voice[v].f_ks < 0 && !comb && ic1 > -4 && ic1 < 4 && ic2 > -4 && ic2 < 4)
+                    ic1 = 2048;                 /* (nothing in it yet: a nudge, as an analog filter's noise; it grows */
+                                                /*  from there to its level, down to the lowest cutoffs) */
                 voice[v].hp_gs = hg = glide(voice[v].hp_gs, hp_g);
                 c = cut_at(voice[v].note, fe, voice[v].f_cs + (m.cut << 8), f_env);
                 if (comb) {                     /* the comb: the cutoff (keytracked, the envelope, the mods) -> a delay */
