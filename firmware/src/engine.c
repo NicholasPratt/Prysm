@@ -226,7 +226,7 @@ static volatile struct {
     int32_t f_cut;                              /* cutoff, quarter semitones (PR_FILT_G index) */
     int32_t f_env;                              /* envelope depth, quarter semitones at full envelope (+-) */
     int32_t f_key;                              /* keytrack, Q8 (256 = 100 %: a semitone per semitone) */
-    uint32_t f_k;                               /* damping, Q24 */
+    int32_t f_k;                                /* damping, Q24 (under 0: self-oscillation) */
     int32_t drive;                              /* gain Q12; 0 = no drive stage */
     int32_t hp_g;                               /* the high-pass's one-poles: g / (1 + g), Q15; 0 = off */
     uint8_t flt_type;                           /* FLT_LP12 .. FLT_COMBM */
@@ -295,6 +295,7 @@ static struct {
     int32_t ic1, ic2, ic3, ic4;                 /* the filter's integrator states (3, 4: LP 24's first stage) */
     int32_t f_cs;                               /* the cutoff knob, smoothed (quarter semitones, Q8) */
     int32_t f_ks;                               /* the damping, smoothed (Q24) */
+    int32_t f_pk;                               /* the band state's peak, falling (the top of RES: its level control) */
     int32_t fc[3], fc2[3];                      /* the coefficients the last block ended on (Q28; 2: LP 24's first) */
     int32_t hp1, hp2, hp_gs;                    /* the high-pass: its two one-poles' states; its coefficient, smoothed */
     int32_t cd_q8;                              /* the comb: its delay the last block ended on (frames Q8; 0: none) */
@@ -415,7 +416,10 @@ static inline int32_t saturate(int32_t x)
 /* ---- the filter for a voice, once per block: the cutoff (the smoothed knob, the envelope, keytrack; quarter
  * semitones, Q8) ... */
 #define CUT_MAX ((int32_t)(PR_FILT_N - 1u) << 8)
-#define K_BUTTER 23726566u                      /* sqrt 2, Q24: LP 24's first stage (no resonance of its own) */
+#define K_BUTTER 23726566                       /* sqrt 2, Q24: LP 24's first stage (no resonance of its own) */
+#define K_SELF 1677722                          /* 0.1, Q24: damping under this, the level is held (the render) */
+#define K_HELD 335544                           /* 0.02, Q24: the most it damps (above: RES's own) */
+#define SELF_LVL 10000                          /* the band state's level self-oscillation settles a little above */
 static int32_t cut_at(uint32_t note, int32_t env, int32_t cut_q8, int32_t f_env)
 {
     return cut_q8 + (int32_t)(((int64_t)f_env * env) >> 16) + ((((int32_t)note - 60) * eg.f_key) << 2);
@@ -424,15 +428,15 @@ static int32_t cut_at(uint32_t note, int32_t env, int32_t cut_q8, int32_t f_env)
 /* ... -> g, interpolated between the table's quarter semitones, then the zero-delay-feedback SVF's
  * a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2 (Q28); with f2, LP 24's first stage's too (k: K_BUTTER). The render
  * glides from one block's to the next's. */
-static void svf_coefs(uint32_t g, uint32_t k, int32_t *f)
+static void svf_coefs(uint32_t g, int32_t k, int32_t *f)
 {
-    uint32_t den = (uint32_t)(((1u << 24) + (((uint64_t)g * (g + k)) >> 24)) >> 8);   /* (1 + g (g + k)), Q16 */
+    uint32_t den = (uint32_t)(((1 << 24) + (((int64_t)g * ((int64_t)g + k)) >> 24)) >> 8);   /* (1 + g (g + k)), Q16 */
     f[0] = (int32_t)((0xFFFFFFFFu / den) << 12);                           /* Q16 -> Q28 */
     f[1] = (int32_t)(((int64_t)f[0] * g) >> 24);
     f[2] = (int32_t)(((int64_t)f[1] * g) >> 24);
 }
 
-static void filter_coefs(int32_t c, uint32_t k, int32_t *f, int32_t *f2)
+static void filter_coefs(int32_t c, int32_t k, int32_t *f, int32_t *f2)
 {
     uint32_t g, i, fr;
     if (c < 0) c = 0;
@@ -1163,17 +1167,17 @@ static void engine_render(int32_t *out, uint32_t n)
             {                                   /* drive, the filter, the high-pass, the amp: the voice into both channels */
                 int32_t fe = env_step(&voice[v].flt, gate, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
                 int32_t f[3], f2[3], a1, a2, a3, d1, d2, d3, b1 = 0, b2 = 0, b3 = 0, e1 = 0, e2 = 0, e3 = 0;
-                int32_t ic1 = voice[v].ic1, ic2 = voice[v].ic2, ic3 = voice[v].ic3, ic4 = voice[v].ic4;
+                int32_t ic1 = voice[v].ic1, ic2 = voice[v].ic2, ic3 = voice[v].ic3, ic4 = voice[v].ic4, pk;
                 int32_t drive = eg.drive, hg, hp1 = voice[v].hp1, hp2 = voice[v].hp2, c;
-                int32_t fk = (int32_t)eg.f_k, hp_g = eg.hp_g, c_fb = eg.comb_fb, c_in = eg.comb_in, c_dk = eg.comb_dk;
+                int32_t fk = eg.f_k, hp_g = eg.hp_g, c_fb = eg.comb_fb, c_in = eg.comb_in, c_dk = eg.comb_dk;
                 int32_t f_env = eg.f_env;
                 int32_t cfb = 0, cin = 0, cdk = 0, cd = 0, dd = 0, clp = voice[v].clp, ap_a = 0;
                 int32_t ax0 = 0, ax1 = 0, ax2 = 0, ax3 = 0, ay0 = 0, ay1 = 0, ay2 = 0, ay3 = 0;
-                uint32_t cw = voice[v].cw, type = eg.flt_type, comb = type >= FLT_COMBP, lp24 = type == FLT_LP24;
+                uint32_t cw = voice[v].cw, type = eg.flt_type, comb = type >= FLT_COMBP, lp24 = type == FLT_LP24, self;
                 int16_t *cb = comb_buf[v];
                 switch (eg.l2_dest) {           /* LFO 2 on the filter's knobs */
                 case DEST_RES:
-                    fk = (int32_t)PR_RES_K[knob_moved(eg.res, pz2)];
+                    fk = PR_RES_K[knob_moved(eg.res, pz2)];
                     if (comb) comb_of(knob_moved(eg.res, pz2), type, &c_fb, &c_in);
                     break;
                 case DEST_DRIVE: drive = drive_of(knob_moved(eg.drv, pz2)); break;
@@ -1184,6 +1188,9 @@ static void engine_render(int32_t *out, uint32_t n)
                 }
                 voice[v].f_cs = glide(voice[v].f_cs, eg.f_cut << 8);   /* knob moves glide, they do not step */
                 voice[v].f_ks = glide(voice[v].f_ks, fk);
+                self = voice[v].f_ks < K_SELF;  /* (the top of RES: past SELF_LVL the damping rises; at k < 0 the */
+                if (!self)                      /*  filter grows into a sine and settles there, at any cutoff) */
+                    voice[v].f_pk = 0;
                 voice[v].hp_gs = hg = glide(voice[v].hp_gs, hp_g);
                 c = cut_at(voice[v].note, fe, voice[v].f_cs + (m.cut << 8), f_env);
                 if (comb) {                     /* the comb: the cutoff (keytracked, the envelope, the mods) -> a delay */
@@ -1232,7 +1239,15 @@ static void engine_render(int32_t *out, uint32_t n)
                     a1 = a2 = a3 = d1 = d2 = d3 = 0;
                 } else {
                     voice[v].comb_live = 0;
-                    filter_coefs(c, (uint32_t)voice[v].f_ks, f, lp24 ? f2 : 0);
+                    {
+                        int32_t k = voice[v].f_ks, over = voice[v].f_pk - SELF_LVL;
+                        if (self && over > 0 && k < K_HELD) {   /* 0.1 more damping each SELF_LVL over (Q24), up */
+                            k += over > SELF_LVL ? 1677722 : over * 168;   /* to 0.02: it rings on, never dies */
+                            if (k > K_HELD) k = K_HELD;
+                        }
+                        voice[v].f_pk -= voice[v].f_pk >> 6;   /* (falls in ~23 ms) */
+                        filter_coefs(c, k, f, lp24 ? f2 : 0);
+                    }
                     if (voice[v].fc[0] < 0) {   /* (a voice from silence: no previous block to glide from) */
                         voice[v].fc[0] = f[0]; voice[v].fc[1] = f[1]; voice[v].fc[2] = f[2];
                         voice[v].fc2[0] = -1;
@@ -1255,6 +1270,7 @@ static void engine_render(int32_t *out, uint32_t n)
                     } else
                         voice[v].fc2[0] = -1;
                 }
+                pk = voice[v].f_pk;
                 if (ap_a) {
                     ax0 = voice[v].apx[0]; ax1 = voice[v].apx[1]; ax2 = voice[v].apx[2]; ax3 = voice[v].apx[3];
                     ay0 = voice[v].apy[0]; ay1 = voice[v].apy[1]; ay2 = voice[v].apy[2]; ay3 = voice[v].apy[3];
@@ -1293,6 +1309,10 @@ static void engine_render(int32_t *out, uint32_t n)
                         v2 = ic2 + (int32_t)(((int64_t)a2 * ic1 + (int64_t)a3 * v3) >> 28);
                         ic1 = 2 * v1 - ic1;
                         ic2 = 2 * v2 - ic2;
+                        if (self) {             /* the band state's peak, for the next block's damping */
+                            int32_t m = ic1 < 0 ? -ic1 : ic1;
+                            if (m > pk) pk = m;
+                        }
                         s = v2 > 32767 ? 32767 : v2 < -32767 ? -32767 : v2;   /* the low-pass */
                         a1 += d1; a2 += d2; a3 += d3;
                     }
@@ -1311,6 +1331,7 @@ static void engine_render(int32_t *out, uint32_t n)
                     out[2u * (b + i) + 1u] += s;
                 }
                 voice[v].ic1 = comb ? 0 : ic1;
+                voice[v].f_pk = pk;
                 voice[v].ic2 = comb ? 0 : ic2;
                 voice[v].ic3 = lp24 ? ic3 : 0;
                 voice[v].ic4 = lp24 ? ic4 : 0;

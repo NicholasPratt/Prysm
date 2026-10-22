@@ -200,6 +200,20 @@ int main(void)
         p.key = 0; p.cut = 70; render("comb_res127_off", &p, A2, 1, 900, 1000);   /* the peaks off the harmonics */
         p = saw_through(71, 0); p.flt_type = FLT_LP24; render("lp24_1k", &p, A2, 1, 900, 1000);
         p.res = 120; render("lp24_res", &p, A2, 1, 900, 1000);
+        {                                       /* the top of RES: the oscillators cut at 30 ms, the filter sings on */
+            static const uint8_t C3[] = {48}, C5[] = {72};
+            patch_t q;
+            p = saw_through(64, 127); p.key = 127; p.fenv = 64; p.amp_s = 127;
+            q = p; q.lvl1 = q.lvl2 = 0;
+            render_p2 = &q;
+            render_change_ms = 30;
+            render("self_c3", &p, C3, 1, 1400, 1500);
+            render("self_c5", &p, C5, 1, 1400, 1500);
+            p.flt_type = q.flt_type = FLT_LP24; render("self_lp24", &p, C5, 1, 1400, 1500);
+            p.flt_type = q.flt_type = FLT_LP12; p.res = q.res = 110;
+            render("self_res110", &p, C5, 1, 1400, 1500);   /* below the top: it rings, and dies */
+            render_p2 = 0;
+        }
         p = saw_through(10, 127);               /* the worst: full resonance, drive, the envelope sweeping it */
         p.drive = 127; p.fenv = 127; p.flt_d = 40; p.flt_s = 0; p.amp_r = 30;
         render("stable", &p, A5, 1, 700, 1500);

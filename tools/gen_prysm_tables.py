@@ -151,8 +151,9 @@ def filt_hz(q):
 
 
 FILT_G = [round(np.tan(np.pi * filt_hz(q) / FS) * (1 << 24)) for q in range(FILT_N)]   # g = tan(pi fc / fs), Q24
-# resonance 0..127 -> damping k = 2 (none) .. 0.04 (near self-oscillation), Q24; eased so the top is usable
-RES_K = [round(max(0.04, 2 * (1 - (p / 127) ** 0.7)) * (1 << 24)) for p in range(128)]
+# resonance 0..127 -> damping k = 2 (none) .. -0.06, Q24; eased so the top is usable. Past ~122 k is negative: the
+# filter self-oscillates (the render limits the band state, so it settles to a sine at the cutoff)
+RES_K = [round(max(-0.06, 2 * (1 - (p / 127) ** 0.7) - 0.2 * (p / 127) ** 30) * (1 << 24)) for p in range(128)]
 DRIVE = [round(8 ** (p / 127) * 4096) for p in range(128)]                       # drive gain 1 .. 8, Q12
 
 # ---- the LFO
@@ -210,7 +211,7 @@ def main():
     out.append(" * g = tan(pi fc / fs) Q24; resonance 0..127 -> damping k Q24; drive 0..127 -> gain 1..8 Q12 */")
     out.append(f"#define PR_FILT_N {FILT_N}u")
     out.append(c_array("PR_FILT_G", "uint32_t", FILT_G, 8))
-    out.append(c_array("PR_RES_K", "uint32_t", RES_K, 8))
+    out.append(c_array("PR_RES_K", "int32_t", RES_K, 8))
     out.append(c_array("PR_DRIVE_Q12", "uint16_t", DRIVE))
     out.append("/* the LFO: rate 0..127 = 0.05 .. 40 Hz (exponential): phase step per 16-frame block, and Hz x 100 (shown);")
     out.append(" * pitch modulation: +-12 semitones in 1/16 semitone steps, index 192 = in tune, Q16 */")

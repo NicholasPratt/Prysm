@@ -173,6 +173,11 @@ note, so every key keeps the same brightness. A negative envelope amount closes 
 
 **LP 24** is steeper and darker than LP 12; its resonance is a little softer.
 
+**Self-oscillation**: from RES **122** up, the low-pass sings on its own: a sine at the cutoff, held at a steady level
+from the lowest cutoffs to the highest, even with the oscillators' levels at 0. With KEY at 127 and CUT at 64 it plays
+in tune from the keys (C3 sings at C3's pitch); the amp envelope still shapes it. Turn RES back below 122 and it rings
+and dies away as before.
+
 **COMB+ / COMB-** turn the filter into a comb, as on a Waldorf: a row of resonant peaks at a frequency and every
 multiple of it. The FILTER row then plays the comb: CUT sets the first peak (in 3/4-semitone steps: 64 is C4, 80 is
 C5), RES its feedback (from no effect to long ringing), ENV sweeps it with the envelope and KEY tracks the keyboard.
