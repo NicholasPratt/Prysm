@@ -27,9 +27,13 @@ static void ed_set(uint32_t off, uint32_t v)    /* patch byte off = v, as its kn
     for (pg = 0; pg < PG_N && !p; pg++)        /* its knob: the parameter that edits this byte */
         for (r = 0; PAGES[pg].osc != G && r < PAGES[pg].n && !p; r++)
             for (i = 0; i < 4u; i++) {
-                const prm_t *q = &PAGES[pg].rows[r].p[i];
+                const prm_t *q = &PAGES[pg].rows[r].p[i], *a = prm_alt(pg, r, i);
                 if (q->kind != K_NONE && q->kind != K_CURSOR && pval(pg, q) == at) {
                     p = q;
+                    break;
+                }
+                if (a && pval(pg, a) == at) {   /* (a modulator's pitch: the RATIO knob's in MIX / RING) */
+                    p = a;
                     break;
                 }
             }

@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, LFO, LFO 2, MIX, ARP, SEQ, CHORUS, DELAY,
- * REVERB, SETUP.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, F.ENV, M.ENV 1, M.ENV 2, LFO, LFO 2, MIX, ARP,
+ * SEQ, CHORUS, DELAY, REVERB, SETUP.
  *
- *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / FILTER, LFO = LFO / LFO 2, GLO = MIX / SETUP, ARP = ARP
+ *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / F.ENV / M.ENV 1 / M.ENV 2, LFO = LFO / LFO 2,
+ *                    GLO = MIX / SETUP, ARP = ARP
  *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = CHORUS / DELAY / REVERB,
  *                    the SELECT button = FILTER)
  *   PLAY             the sequencer: run / stop (anywhere; its LED shows it)
@@ -52,7 +53,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC, K_BEND,
        /* the sequencer's own (engine.c: seqs, not the sound; and the SEQ page's EDIT and ENTRY rows) */
        K_SPAT, K_SDIV, K_SGATE, K_SROW, K_SCOPY, K_SPASTE, K_SCLEAR, K_SMODE, K_SONGLEN, K_SENTRY, K_SEPAT, K_SEREP,
-       K_SINIT };   /* (the step kinds: the step under the cursor) */
+       K_SINIT,
+       K_MPIT, K_MFINE };   /* (the step kinds: the step under the cursor; K_MPIT, K_MFINE: off = the modulator, 0 / 1) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -74,7 +76,6 @@ static uint8_t gset_dirty;                      /* changed: the app saves it (wh
 
 enum { LIT_C = 1, LIT_M1 = 2, LIT_M2 = 4, LIT_A1 = 8, LIT_A2 = 16, LIT_CURVE = 32, LIT_ENV = 64, LIT_ALL = 127,
        LIT_AR = 128,                            /* (OSC pages: the mods' AR shapes under their boxes, not the names) */
-       LIT_MENV = 256,                          /* (the LFO page: the mod envelope's picture, not the LFO's) */
        LIT_L2 = 512 };                          /* (the LFO page: LFO 2's picture) */
 #define OO(f) ((uint16_t)__builtin_offsetof(patch_t, osc[0].f))
 #define PO(f) ((uint16_t)__builtin_offsetof(patch_t, f))
@@ -88,8 +89,8 @@ static const row_t OSC_ROWS[] = {
     {"RATIO", {{"CAR", OO(ratio[0]), PR_RATIOS - 1u, K_RATIO}, {"MOD1", OO(ratio[1]), PR_RATIOS - 1u, K_RATIO},
                {"MOD2", OO(ratio[2]), PR_RATIOS - 1u, K_RATIO}, {"FINE", OO(fine), 127, K_CENT}},
      LIT_C | LIT_M1 | LIT_M2},
-    {"MODE", {{"MOD1", OO(mode[0]), MODE_N - 1u, K_MODE}, {"MOD2", OO(mode[1]), MODE_N - 1u, K_MODE}, NOPRM, NOPRM},
-     LIT_A1 | LIT_A2},
+    {"MODE", {{"MOD1", OO(mode[0]), MODE_N - 1u, K_MODE}, {"MOD2", OO(mode[1]), MODE_N - 1u, K_MODE},
+              {"FINE1", 0, 127, K_MFINE}, {"FINE2", 1, 127, K_MFINE}}, LIT_A1 | LIT_A2},
     {"ENV", {{"A1", OO(att[0]), 127, K_NUM}, {"R1", OO(rel[0]), 127, K_NUM},
              {"A2", OO(att[1]), 127, K_NUM}, {"R2", OO(rel[1]), 127, K_NUM}}, LIT_M1 | LIT_M2 | LIT_AR},
     {"MIX", {{"AMT1", OO(amt[0]), 127, K_NUM}, {"AMT2", OO(amt[1]), 127, K_NUM},
@@ -98,8 +99,6 @@ static const row_t OSC_ROWS[] = {
 static const row_t FILTER_ROWS[] = {
     {"FILTER", {{"CUT", PO(cut), 127, K_NUM}, {"RES", PO(res), 127, K_NUM},
                 {"ENV", PO(fenv), 127, K_BIP}, {"KEY", PO(key), 127, K_NUM}}, LIT_CURVE},
-    {"ENV", {{"A", PO(flt_a), 127, K_NUM}, {"D", PO(flt_d), 127, K_NUM},
-             {"S", PO(flt_s), 127, K_NUM}, {"R", PO(flt_r), 127, K_NUM}}, LIT_ENV},
     {"TYPE", {{"TYPE", PO(flt_type), FLT_N - 1u, K_FTYPE}, {"DRIVE", PO(drive), 127, K_NUM},
               {"HPF", PO(hp_cut), 127, K_HPF}, NOPRM}, LIT_CURVE},
     {"COMB", {{"DAMP", PO(comb_damp), 127, K_NUM}, {"SPREAD", PO(comb_spread), 127, K_NUM}, NOPRM, NOPRM}, LIT_CURVE},
@@ -110,15 +109,27 @@ static const row_t AMP_ROWS[] = {
     {"VEL", {{"AMP", PO(vel_amp), 127, K_NUM}, {"CUTOFF", PO(vel_cut), 127, K_NUM},     /* MIDI velocity */
              {"MOD", PO(vel_mod), 127, K_NUM}, NOPRM}, LIT_ENV},
 };
+static const row_t FENV_ROWS[] = {               /* (the filter's envelope; its amount: FILTER's ENV) */
+    {"ENV", {{"A", PO(flt_a), 127, K_NUM}, {"D", PO(flt_d), 127, K_NUM},
+             {"S", PO(flt_s), 127, K_NUM}, {"R", PO(flt_r), 127, K_NUM}}, LIT_ENV},
+};
+static const row_t MENV_ROWS[] = {
+    {"ENV", {{"A", PO(menv_a), 127, K_NUM}, {"D", PO(menv_d), 127, K_NUM},
+             {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_NUM}}, LIT_ENV},
+    {"DEST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
+              {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_CURVE},
+};
+static const row_t MENV2_ROWS[] = {
+    {"ENV", {{"A", PO(menv2_a), 127, K_NUM}, {"D", PO(menv2_d), 127, K_NUM},
+             {"S", PO(menv2_s), 127, K_NUM}, {"R", PO(menv2_r), 127, K_NUM}}, LIT_ENV},
+    {"DEST", {{"LOOP", PO(menv2_loop), 1, K_ONOFF}, {"DEST", PO(menv2_dest), DEST_N - 1u, K_DEST},
+              {"AMT", PO(menv2_amt), 127, K_BIP}, NOPRM}, LIT_CURVE},
+};
 static const row_t LFO_ROWS[] = {
     {"LFO", {{"WAVE", PO(lfo_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo_rate), 127, K_RATE},
              {"DELAY", PO(lfo_delay), 127, K_NUM}, {"RETRIG", PO(lfo_retrig), 1, K_ONOFF}}, LIT_CURVE},
     {"DEST", {{"DEST1", PO(lfo_dest[0]), DEST_N - 1u, K_LDEST}, {"AMT1", PO(lfo_amt[0]), 127, K_BIP},
               {"DEST2", PO(lfo_dest[1]), DEST_N - 1u, K_LDEST}, {"AMT2", PO(lfo_amt[1]), 127, K_BIP}}, LIT_ENV},
-    {"M.ENV", {{"A", PO(menv_a), 127, K_NUM}, {"D", PO(menv_d), 127, K_NUM},
-               {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_NUM}}, LIT_MENV | LIT_ENV},
-    {"M.DST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
-               {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_MENV | LIT_CURVE},
 };
 static const row_t LFO2_ROWS[] = {               /* (one for all the voices; SYNC: the arp's tempo) */
     {"LFO", {{"WAVE", PO(lfo2_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo2_rate), 127, K_RATE},
@@ -172,10 +183,13 @@ static const row_t ARP_ROWS[] = {
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_LFO, PG_LFO2, PG_MIX, PG_ARP, PG_SEQ, PG_CHO, PG_DLY, PG_REV, PG_SETUP, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_FENV, PG_MENV, PG_MENV2, PG_LFO, PG_LFO2, PG_MIX, PG_ARP, PG_SEQ, PG_CHO,
+       PG_DLY, PG_REV, PG_SETUP, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
+    {"F.ENV", FENV_ROWS, NROWS(FENV_ROWS), 0}, {"M.ENV 1", MENV_ROWS, NROWS(MENV_ROWS), 0},
+    {"M.ENV 2", MENV2_ROWS, NROWS(MENV2_ROWS), 0},
     {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"LFO 2", LFO2_ROWS, NROWS(LFO2_ROWS), 0},
     {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
     {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0}, 
@@ -209,6 +223,18 @@ static int seq_kind(uint32_t k)                 /* a parameter of the sequencer'
     return k == K_SNOTE || k == K_STRIG || k == K_SSLIDE || k == K_SLEN || (k >= K_SPAT && k <= K_SINIT);
 }
 
+/* the RATIO row's MOD1, MOD2 when that modulator is in MIX or RING: heard, so a pitch (semitones), not a ratio */
+static const prm_t PITCH_PRM[2] = {{"PIT1", 0, 48, K_MPIT}, {"PIT2", 1, 48, K_MPIT}};
+static const prm_t *prm_alt(uint32_t pg, uint32_t r, uint32_t i)   /* knob i's other parameter (0: none) */
+{
+    return PAGES[pg].osc && PAGES[pg].osc != G && i && PAGES[pg].rows[r].p[i].kind == K_RATIO ? &PITCH_PRM[i - 1u] : 0;
+}
+static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's parameter, as the sound is now */
+{
+    const prm_t *a = prm_alt(pg, r, i);
+    return a && edit.osc[PAGES[pg].osc - 1u].mode[i - 1u] != MODE_FM ? a : &PAGES[pg].rows[r].p[i];
+}
+
 static uint8_t *pval(uint32_t pg, const prm_t *p)
 {
     uint32_t base;
@@ -228,6 +254,8 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_SEPAT: return &seqs.song_pat[song_cursor % SONG_N];
     case K_SEREP: return &seqs.song_rep[song_cursor % SONG_N];
     case K_SCOPY: case K_SPASTE: case K_SCLEAR: case K_SINIT: ui_none = 0; return &ui_none;
+    case K_MPIT: return &edit.mpitch[PAGES[pg].osc == 2u][p->off & 1u];   /* (the OSC pages: their oscillator's) */
+    case K_MFINE: return &edit.mfine[PAGES[pg].osc == 2u][p->off & 1u];
     default: break;
     }
     if (PAGES[pg].osc == G)
@@ -270,12 +298,12 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
 {
     switch (p->kind) {
     case K_BIP: snum(s, (int32_t)*v - 64); break;
-    case K_CENT: put(snum(s, ((int32_t)*v - 64) * 50 / 63), "c"); break;
+    case K_CENT: case K_MFINE: put(snum(s, ((int32_t)*v - 64) * 50 / 63), "c"); break;
     case K_BANK: put(s, PW_BANK_NAME[*v < PW_BANKS ? *v : 0u]); break;
     case K_POS: put(s, PW_WAVE_NAME[v[-(int)NOP] < PW_BANKS ? v[-(int)NOP] : 0u][wave_index(*v)]); break;
     case K_RATIO: put(put(s, "x"), PR_RATIO_NAME[*v < PR_RATIOS ? *v : 1u]); break;
     case K_MODE: put(s, MODE_NAME[*v < MODE_N ? *v : 0u]); break;
-    case K_SEMI: put(snum(s, (int32_t)*v - 24), "st"); break;
+    case K_SEMI: case K_MPIT: put(snum(s, (int32_t)*v - 24), "st"); break;
     case K_LFOW: put(s, LFO_NAME[*v < LFO_N ? *v : 0u]); break;
     case K_DEST: case K_LDEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
     case K_L2DEST: put(s, DEST_NAME[*v < DEST2_N ? *v : 0u]); break;
@@ -501,7 +529,7 @@ static void gfx_filter(uint32_t lit)
     /* the response: |H|^2 = 1 / ((1 - x^2)^2 + k^2 x^2), x = f / fc (LP 24: and 1 / (1 + x^4); the comb: its peaks),
      * over MIDI 16 .. 135, +24 .. -36 dB; with the high-pass, each of its one-poles x^2 / (1 + x^2) */
     const int32_t W = 164, top = 4, h = G_H - 12;   /* 2 px a dB */
-    uint64_t k12 = eg.f_k >> 12;
+    uint64_t k12 = (uint64_t)(eg.f_k > 167772 ? eg.f_k : 167772) >> 12;   /* (self-oscillating: drawn at k 0.01) */
     int32_t px, py = 0, fq = eg.flt_type >= FLT_COMBP ? eg.comb_p16 >> 2 : eg.f_cut, cx = (fq - 64) * (W - 1) / 476, hq = edit.hp_cut ? hp_q(edit.hp_cut) : 0;
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
     cv_hdots(0, W, top + 48, 4);                /* 0 dB, dotted; the octaves; the cutoff */
@@ -542,27 +570,28 @@ static void gfx_filter(uint32_t lit)
     cv_adsr(176, 20, 60, G_H - 26, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, lit & LIT_ENV ? C_ACC : C_MID);
 }
 
-/* the mod envelope over 2 s (the key held 1.5 s), simulated block by block with the engine's own steps; with LFO
+/* mod envelope k over 2 s (the key held 1.5 s), simulated block by block with the engine's own steps; with LFO
  * RATE or LFO AMT, the LFO under it, as the envelope moves it */
-static void gfx_menv(uint32_t lit)
+static void gfx_menv(uint32_t lit, uint32_t k)
 {
     const int32_t x0 = 4, w = 232, top = 4, h = G_H - 10;
     const uint32_t blocks = 2000u * 44100u / 1000u / BLK, held = blocks * 3u / 4u;
-    uint32_t b, ph = 0, lfo = eg.me_dest == DEST_LFORATE || eg.me_dest == DEST_LFOAMT, rng = 12345u;
+    uint32_t b, ph = 0, lfo = eg.me_dest[k] == DEST_LFORATE || eg.me_dest[k] == DEST_LFOAMT, rng = 12345u;
     int32_t px = -1, pe = 0, pl = 0, sh = lfo_random(&rng);
     env_t e = {0, 1};
+    cv_text(x0 + 2, top, &FONT_S, DEST_NAME[eg.me_dest[k] < DEST2_N ? eg.me_dest[k] : 0u], C_FAINT);
     for (b = 0; b < blocks; b++) {
-        int32_t me = menv_step(&e, b < held) >> 9, x = (int32_t)(b * (uint32_t)w / blocks);
-        int32_t mx = (me * eg.me_amt) >> 15, l, ye, yl;
+        int32_t me = menv_step(&e, b < held, k) >> 9, x = (int32_t)(b * (uint32_t)w / blocks);
+        int32_t mx = (me * eg.me_amt[k]) >> 15, l, ye, yl;
         {
-            uint32_t nx = ph + rate_moved(eg.lfo_inc, eg.me_dest == DEST_LFORATE ? (mx * 768) >> 15 : 0);
+            uint32_t nx = ph + rate_moved(eg.lfo_inc, eg.me_dest[k] == DEST_LFORATE ? (mx * 768) >> 15 : 0);
             if (nx < ph) sh = lfo_random(&rng);  /* S&H: a new value each cycle */
             ph = nx;
         }
         if (x == px)
             continue;
         l = lfo_wave(eg.lfo_wave, ph, sh);
-        if (eg.me_dest == DEST_LFOAMT) {
+        if (eg.me_dest[k] == DEST_LFOAMT) {
             int32_t f = 32767 + mx;
             l = (l * (f < 0 ? 0 : f)) >> 15;
             l = l > 32767 ? 32767 : l < -32767 ? -32767 : l;
@@ -583,10 +612,6 @@ static void gfx_menv(uint32_t lit)
 
 static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at faster rates), the delay as a fade-in */
 {
-    if (lit & LIT_MENV) {
-        gfx_menv(lit);
-        return;
-    }
     const int32_t x0 = 4, w = 232, mid = G_H / 2, amp = G_H / 2 - 8;
     uint32_t l2 = lit & LIT_L2, wave = l2 ? edit.lfo2_wave : edit.lfo_wave;   /* (LFO 2: no delay, no retrig) */
     uint32_t rate = l2 ? (edit.lfo2_sync ? 16u + edit.lfo2_sync * 10u : edit.lfo2_rate) : edit.lfo_rate;   /* (faster divisions: more cycles) */
@@ -861,6 +886,16 @@ static void draw_gfx(void)
     case PG_OSC2: gfx_osc(1, lit); break;
     case PG_FILTER: gfx_filter(lit); break;
     case PG_AMP: cv_adsr(8, 6, 224, G_H - 14, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
+    case PG_FENV:                               /* the filter's envelope, and how far it moves the cutoff */
+        cv_adsr(8, 6, 224, G_H - 14, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, C_ACC);
+        {
+            char t[16];
+            put(snum(put(t, "AMT "), ((int32_t)edit.fenv - 64) * 60 / 63), "st");
+            cv_text(12, 6, &FONT_S, t, C_FAINT);
+        }
+        break;
+    case PG_MENV: gfx_menv(lit, 0); break;
+    case PG_MENV2: gfx_menv(lit, 1); break;
     case PG_LFO: gfx_lfo(lit); break;
     case PG_LFO2: gfx_lfo(lit | LIT_L2); break;
     case PG_CHO: case PG_DLY: case PG_REV: gfx_fx(lit); break;
@@ -926,11 +961,10 @@ static void draw_hdr(void)
 
 static void draw_focus(void)                    /* the selected row: four labels, values (large), bars */
 {
-    const row_t *r = &PAGES[page].rows[row[page]];
     uint32_t i;
     cv_begin(240, FOC_H, C_BLACK);
     for (i = 0; i < 4u; i++) {
-        const prm_t *p = &r->p[i];
+        const prm_t *p = prm_of(page, row[page], i);
         const uint8_t *v;
         char s[16];
         int32_t x = (int32_t)i * FOC_W, w;
@@ -1288,7 +1322,6 @@ static int ui_input(uint32_t buttons)
 {
     static uint32_t last_turn[4];
     static int32_t slow[4];
-    const row_t *r;
     int32_t d;
     uint32_t i, changed = 0;
     if (buttons & (1u << BTN_PLAY)) {           /* PLAY: the sequencer runs / stops, from anywhere */
@@ -1346,7 +1379,8 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_EDIT)) ui_page(page == PG_OSC1 ? PG_OSC2 : PG_OSC1);
     if (buttons & (1u << BTN_FX))               /* FX: CHORUS, DELAY, REVERB in turn */
         ui_page(page == PG_CHO ? PG_DLY : page == PG_DLY ? PG_REV : PG_CHO);
-    if (buttons & (1u << BTN_ENV)) ui_page(page == PG_AMP ? PG_FILTER : PG_AMP);
+    if (buttons & (1u << BTN_ENV))              /* ENV: AMP, F.ENV, M.ENV 1, M.ENV 2 in turn */
+        ui_page(page >= PG_AMP && page < PG_MENV2 ? page + 1u : PG_AMP);
     if (buttons & (1u << BTN_SEL)) ui_page(PG_FILTER);   /* SELECT (the button): straight to FILTER */
     if (buttons & (1u << BTN_LFO)) ui_page(page == PG_LFO ? PG_LFO2 : PG_LFO);
     if (buttons & (1u << BTN_ARP)) {            /* ARP: its page; on its page, the arp on / off */
@@ -1367,9 +1401,8 @@ static int ui_input(uint32_t buttons)
         pop_until = 0;
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
-    r = &PAGES[page].rows[row[page]];
     for (i = 0; i < 4u; i++) {
-        const prm_t *p = &r->p[i];
+        const prm_t *p = prm_of(page, row[page], i);
         uint8_t *v;
         int32_t x;
         if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE || (p->kind == K_BPM && gset.clock))
@@ -1452,7 +1485,7 @@ static void ui_init(int32_t slot)                /* the sound in that slot (the 
     if (slot >= 0 && slot < (int32_t)PATCH_SLOTS && patch_get((uint32_t)slot, &edit) == 0)
         cur_slot = slot;
     if (seqs_fresh && cur_slot >= 0) {          /* (a bank from before the patterns: its sound's pattern is pattern 1) */
-        seqs_from_patch(&edit);
+        seqs_from_slot((uint32_t)cur_slot);
         seqs_dirty = 1;
     }
     clean = edit;

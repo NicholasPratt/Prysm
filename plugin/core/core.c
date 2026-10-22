@@ -21,11 +21,10 @@ void prysm_set(uint32_t off, uint32_t v) { ed_set(off, v); }
 
 int prysm_load(const uint8_t *p, uint32_t n, uint32_t version)
 {
-    if (version > PATCH_VERSION || n > sizeof edit || (version == PATCH_VERSION && n != sizeof edit))
+    patch_t t;
+    if (patch_from(&t, p, n, version) != 0)     /* (an older format: converted, as the FM-1 converts its bank) */
         return -1;
-    edit = PATCH_INIT;                          /* (an older format is a prefix: the new parts as the default has them) */
-    memcpy(&edit, p, n);
-    clean = edit;
+    edit = clean = t;
     engine_set(&edit);
     return 0;
 }

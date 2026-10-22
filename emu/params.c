@@ -1,22 +1,24 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The sound's parameters, from the pages' own tables (ui.c): what an editor shows and sets, with the FM-1's names,
  * ranges and values (fmt). Included after prysm.c by the browser's FM-1 (emu/exports.c) and the plugin
- * (plugin/core/core.c). Every knob of the sound's pages: not SETUP's, the sequencer's steps or its cursor. */
+ * (plugin/core/core.c). Every knob of the sound's pages: not SETUP's, the sequencer's steps or its cursor; a knob
+ * with another parameter (RATIO's MOD1 / MOD2: PIT1 / PIT2 in MIX or RING) has both, the other just after it. */
 static const prm_t *prm_get(uint32_t i, uint32_t *pg_, uint32_t *row_, uint32_t *k_)
 {
-    uint32_t pg, r, k, n = 0;
+    uint32_t pg, r, k, a, n = 0;
     for (pg = 0; pg < PG_N; pg++)
         for (r = 0; PAGES[pg].osc != G && r < PAGES[pg].n; r++)
-            for (k = 0; k < 4u; k++) {
-                const prm_t *p = &PAGES[pg].rows[r].p[k];
-                const uint8_t *at = p->kind == K_NONE ? 0 : pval(pg, p);
-                if (!at || at < (const uint8_t *)&edit || at >= (const uint8_t *)&edit + sizeof edit)
-                    continue;                   /* (not a byte of the sound: a cursor, the patterns) */
-                if (n++ == i) {
-                    *pg_ = pg; *row_ = r; *k_ = k;
-                    return p;
+            for (k = 0; k < 4u; k++)
+                for (a = 0; a < 2u; a++) {
+                    const prm_t *p = a ? prm_alt(pg, r, k) : &PAGES[pg].rows[r].p[k];
+                    const uint8_t *at = !p || p->kind == K_NONE ? 0 : pval(pg, p);
+                    if (!at || at < (const uint8_t *)&edit || at >= (const uint8_t *)&edit + sizeof edit)
+                        continue;               /* (not a byte of the sound: a cursor, the patterns) */
+                    if (n++ == i) {
+                        *pg_ = pg; *row_ = r; *k_ = k;
+                        return p;
+                    }
                 }
-            }
     return 0;
 }
 

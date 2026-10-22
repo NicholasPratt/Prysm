@@ -39,6 +39,18 @@ WEB int web_load(const uint8_t *p, uint32_t n, int32_t slot)   /* a whole sound;
     dirty = D_ALL;
     return 0;
 }
+WEB uint8_t *web_scratch(void)                 /* room for a patch of an older format (a file), for web_load_from */
+{
+    static uint8_t b[PATCH_OLD_MAX];
+    return b;
+}
+WEB int web_load_from(const uint8_t *p, uint32_t n, uint32_t version)   /* a sound of any format (patch_from) */
+{
+    patch_t t;
+    if (patch_from(&t, p, n, version) != 0) return -1;
+    edit = t;
+    return web_load((const uint8_t *)&edit, sizeof edit, -1);
+}
 WEB int32_t web_slot(void) { return cur_slot; }
 WEB int web_modified(void) { return modified(); }
 

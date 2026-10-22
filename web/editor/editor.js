@@ -487,9 +487,11 @@ $("file").onchange = async () => {
   const b = new Uint8Array(await f.arrayBuffer());
   $("file").value = "";
   if (b.length < 7 || String.fromCharCode(...b.subarray(0, 4)) !== "PRYS") return alertLine("not a Prysm patch file");
-  if (b[4] !== version || (b[5] << 8 | b[6]) !== size || b.length !== 7 + size) return alertLine(`a patch of another format (v${b[4]}): this editor has v${version}`);
-  M.HEAPU8.set(b.subarray(7), M._web_patch());
-  M._web_load(M._web_patch(), size, -1);         // (the FM-1 follows: the differences go to it)
+  const n = b[5] << 8 | b[6];
+  if (b.length !== 7 + n || b[4] > version || n > 512) return alertLine(`a patch of another format (v${b[4]}): this editor has v${version}`);
+  M.HEAPU8.set(b.subarray(7), M._web_scratch());   // (an older format is converted, as the FM-1 converts its bank)
+  if (M._web_load_from(M._web_scratch(), n, b[4]) !== 0) return alertLine(`a patch of another format (v${b[4]}, ${n} B)`);
+  // (the FM-1 follows: the differences go to it)
 };
 $("send-slot").onchange = async () => {
   const s = +$("send-slot").value;

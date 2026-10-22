@@ -2,7 +2,7 @@
 
 Prysm is a 4-voice synthesizer firmware for the **M-VAVE FM-1**. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
-LFO, a looping mod envelope and stereo chorus, delay and reverb.
+LFO, two looping mod envelopes and stereo chorus, delay and reverb.
 
 - [Installing](#installing)
 - [Playing](#playing)
@@ -84,7 +84,7 @@ cutoff).
 | **SELECT** | the row (the tabs along the bottom) |
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
 | **EDIT** | OSC 1 (press again: OSC 2) |
-| **ENV** | AMP (press again: FILTER) |
+| **ENV** | AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2) |
 | **SELECT** (the button) | FILTER |
 | **LFO** | LFO (press again: LFO 2) |
 | **GLO** | MIX (press again: SETUP) |
@@ -121,8 +121,8 @@ between them: an arrow gets thicker with more modulation, and the symbol on it i
 | --- | --- | --- | --- | --- |
 | WAVE | carrier bank | carrier wave | mod 1 bank | mod 1 wave |
 | WAVE2 | mod 2 bank | mod 2 wave | | |
-| RATIO | carrier ratio | mod 1 ratio | mod 2 ratio | fine tune |
-| MODE | mod 1's mode | mod 2's mode | | |
+| RATIO | carrier ratio | mod 1 ratio (PIT1 in MIX / RING) | mod 2 ratio (PIT2 in MIX / RING) | fine tune |
+| MODE | mod 1's mode | mod 2's mode | mod 1 fine (FINE1) | mod 2 fine (FINE2) |
 | ENV | mod 1 attack | mod 1 release | mod 2 attack | mod 2 release |
 | MIX | mod 1 amount | mod 2 amount | the oscillator's level | |
 
@@ -148,6 +148,12 @@ oscillator by up to +-50 cents.
 - **RING**: multiplies; at full amount you hear the sum and difference of the two pitches, not the carrier itself.
 - **MIX**: adds the modulator's wave to the other one, a layer.
 
+**Pitch in MIX and RING.** A modulator in MIX or RING is heard, not just felt, so a ratio is the wrong tool: its
+RATIO knob becomes **PIT1** (or **PIT2**), the modulator's pitch against the carrier, -24 .. +24 semitones. Switch
+back to FM and the ratio is there again, as you left it (each mode keeps its own setting). **FINE1** and **FINE2**
+(MODE row) detune each modulator by up to +-50 cents, in any mode: in MIX a chorused layer, in FM a slowly beating,
+inharmonic shimmer. The pitch is a modulation destination too (**M1PITCH**, **M2PITCH**, below).
+
 **Envelopes.** Each modulator has its own attack and release (1 ms .. 10 s): the amount rises over the attack,
 holds while the key is down, and falls over the release. A slow mod 1 attack on FM makes a note that brightens as
 you hold it.
@@ -156,7 +162,8 @@ you hold it.
 
 ### FILTER
 
-A filter for each voice, with drive before it, a high-pass after it, and its own envelope. TYPE picks what it is: a
+A filter for each voice, with drive before it, a high-pass after it, and its own envelope (on the **F.ENV** page:
+ENV, twice). TYPE picks what it is: a
 **LP 12** (2-pole, 12 dB / octave) or **LP 24** (4-pole, 24 dB / octave) low-pass, or a comb, **COMB+** or **COMB-**.
 The picture draws the filter's actual response (the low-pass's curve or the comb's peaks, and the high-pass) and the
 envelope's shape.
@@ -164,7 +171,6 @@ envelope's shape.
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | FILTER | cutoff (16 Hz .. 20 kHz) | resonance | envelope amount (bipolar, +-60 semitones) | keytrack (0 .. 100 %) |
-| ENV | attack | decay | sustain | release |
 | TYPE | LP 12, LP 24, COMB+, COMB- | drive (0 = clean) | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | |
 | COMB | damping (0 bright .. 127 dark) | spread | | |
 
@@ -188,7 +194,7 @@ further and further apart while the first stays put: from an even comb to bells,
 louder as RES rises (up to about +17 dB, rounded off rather than clipped), so the comb keeps its level even when they
 miss the harmonics. High feedback takes a moment to build up on low notes.
 
-The LFO and the mod envelope move the comb through **CUTOFF**, and its spread through **SPREAD**.
+The LFO and the mod envelopes move the comb through **CUTOFF**, and its spread through **SPREAD**.
 
 ### AMP
 
@@ -204,16 +210,47 @@ are on / off), so they always play at full velocity and these settings do not ch
 much a softer note is quieter (by the square of its velocity, as it sounds natural), darker (up to 36 semitones of
 cutoff) or less modulated (less FM brightness: the classic expressive FM touch). At 0, velocity changes nothing.
 
+### F.ENV
+
+The filter's envelope (ENV twice, or ENV from AMP). Its amount, how far it moves the cutoff, is the FILTER page's
+ENV knob; the picture shows it in its corner.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| ENV | attack | decay | sustain | release |
+
+### M.ENV 1 / M.ENV 2
+
+Two mod envelopes, each an ADSR started by every note, with a destination and an amount of its own (ENV three and
+four times).
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| ENV | attack | decay | sustain | release |
+| DEST | LOOP ON / OFF | destination | amount (bipolar) | |
+
+With **LOOP ON** an envelope runs attack -> decay -> attack -> decay ... for as long as you hold the key, then
+releases: a sustain of 0 gives full up-and-down sweeps, a higher sustain a shallower cycle. Its destination can be
+any of the LFO's (below), plus two of its own:
+
+| | |
+| --- | --- |
+| LFORATE | the LFO's rate, up to +-4 octaves: an envelope that speeds the LFO up and slows it down |
+| LFOAMT | the LFO's depth, from nothing up to double |
+
+The two can share a destination (they add up), or split the work: say M.ENV 1 sweeps the cutoff while M.ENV 2,
+short and looping, flicks mod 1's pitch. The picture shows two seconds of the envelope (the key held for 1.5 s, the
+dotted line where it is let go) with its destination's name, and with LFORATE or LFOAMT the LFO under it, moving as
+the envelope moves it.
+
 ### LFO
 
-One LFO per voice (or one shared, free-running) and a mod envelope that can loop. LFO 2 has a page of its own (below).
+One LFO per voice (or one shared, free-running). LFO 2 has a page of its own (below).
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | LFO | wave: SINE, TRI, SAW UP, SAW DN, SQUARE, S&H | rate (0.05 .. 40 Hz) | delay | retrig ON / OFF |
 | DEST | destination 1 | amount 1 | destination 2 | amount 2 |
-| M.ENV | mod envelope attack | decay | sustain | release |
-| M.DST | LOOP ON / OFF | destination | amount | |
 
 - **S&H** (sample and hold) jumps to a new random value each cycle.
 - **Delay**: from each note, the LFO fades in over this time (0: at once).
@@ -233,18 +270,9 @@ One LFO per voice (or one shared, free-running) and a mod envelope that can loop
 | AMP | tremolo |
 | MIX | the balance between the two oscillators |
 | SPREAD | the comb's spread, up to the whole knob either way |
+| M1PITCH, M2PITCH | mod 1's / mod 2's pitch alone (both oscillators), up to +-12 semitones: in MIX a moving layer, in FM a sliding timbre |
 
-**The mod envelope** (M.ENV, M.DST) is an ADSR started by each note. With **LOOP ON** it runs attack -> decay ->
-attack -> decay ... for as long as you hold the key, then releases: a sustain of 0 gives full up-and-down sweeps, a
-higher sustain a shallower cycle. Its destination can be any of the LFO's, plus two of its own:
-
-| | |
-| --- | --- |
-| LFORATE | the LFO's rate, up to +-4 octaves: an envelope that speeds the LFO up and slows it down |
-| LFOAMT | the LFO's depth, from nothing up to double |
-
-On the M.ENV and M.DST rows the picture shows two seconds of the envelope (the key held for 1.5 s, the dotted line
-where it is let go), and with LFORATE or LFOAMT the LFO under it, moving as the envelope moves it.
+The mod envelopes have pages of their own: **M.ENV 1 / M.ENV 2** (above).
 
 ### LFO 2
 
@@ -426,7 +454,9 @@ tabs SAVE, LOAD, INIT.
 - When the FM-1 is switched on, the slot last saved or loaded comes back.
 - Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.
 - Patches are kept in two flash sectors written in turn: if the power goes during a save, only that save is lost.
-- Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them).
+- Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them). From
+  Prysm 0.8 and older: a modulator in MIX or RING gets the pitch of its ratio (x2: +12, x1.5: +7); ratios of 5 and
+  up are further than PIT goes, and come in at +24.
 
 ---
 

@@ -136,11 +136,26 @@ int main(void)
     p.osc[0].amt[0] = 127;
     render("ring", &p, A4, 1, 900, 1000);
 
-    p = solo();                                 /* MIX: carrier 440 + mod 1 x2 (880) added */
-    p.osc[0].ratio[1] = 3;                      /* x2 */
+    p = solo();                                 /* MIX: carrier 440 + mod 1 an octave up (880) added */
+    p.mpitch[0][0] = 36;                    /* +12 (MIX: its pitch, not its ratio) */
+    p.osc[0].ratio[1] = 0;                      /* (x0.5: not used in MIX) */
     p.osc[0].mode[0] = MODE_MIX;
     p.osc[0].amt[0] = 127;
     render("mix", &p, A4, 1, 900, 1000);
+    p.mpitch[0][0] = 31;                    /* +7: a fifth, 659 Hz */
+    render("mix_fifth", &p, A4, 1, 900, 1000);
+    p.mpitch[0][0] = 24; p.mfine[0][0] = 127;   /* in tune, +50 cents: 453 Hz */
+    render("mix_fine", &p, A4, 1, 900, 1000);
+    p.mfine[0][0] = 64;                         /* mod envelope 2 on M1PITCH, held full: mod 1 up (as PITCH, below) */
+    p.menv2_a = 0; p.menv2_s = 127; p.menv2_dest = DEST_M1PITCH; p.menv2_amt = 127;
+    render("menv2_m1pitch", &p, A4, 1, 900, 1000);
+
+    p = solo();                                 /* mod envelope 2 on PITCH, held full: the note up, as envelope 1 */
+    p.menv2_a = 0; p.menv2_s = 127; p.menv2_dest = DEST_PITCH; p.menv2_amt = 127;
+    render("menv2_pitch", &p, A4, 1, 900, 1000);
+    p = solo();
+    p.menv_a = 0; p.menv_s = 127; p.menv_dest = DEST_PITCH; p.menv_amt = 127;
+    render("menv1_pitch", &p, A4, 1, 900, 1000);
 
     p = solo();                                 /* the series chain: mod 2 (x1) FM into mod 1 (x1) FM into the carrier */
     p.osc[0].amt[0] = 80;

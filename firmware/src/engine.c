@@ -37,6 +37,7 @@ enum { DEST_OFF, DEST_PITCH, DEST_PITCH2, DEST_WAVE1, DEST_WAVE2, DEST_MWAVE1, D
        DEST_MPITCH, DEST_CUTOFF, DEST_AMP, DEST_MIX,
        DEST_LFORATE, DEST_LFOAMT,               /* (the mod envelope's only: the LFO itself) */
        DEST_SPREAD,                             /* (after: the saved numbers above stay) */
+       DEST_M1PITCH, DEST_M2PITCH,              /* (format 10: mod 1's / mod 2's pitch; LFO 2's own move up 2) */
        DEST_N,                                  /* (the LFO's and the mod envelope's end here; LFO 2's go on) */
        DEST_RES = DEST_N, DEST_DRIVE, DEST_HPF, DEST_DAMP, DEST_FENV, DEST_LVL1, DEST_LVL2, DEST_DETUNE, DEST_MENVAMT,
        DEST_CHORUS, DEST_DELAY, DEST_DLYTIME, DEST_DLYFB, DEST_REVERB, DEST_REVSIZE, DEST2_N };
@@ -56,10 +57,11 @@ enum { FLT_LP12, FLT_LP24, FLT_COMBP, FLT_COMBM, FLT_N };   /* the filter: COMB-
 static const char *const FLT_NAME[FLT_N] = {"LP 12", "LP 24", "COMB+", "COMB-"};
 static const char *const DEST_NAME[DEST2_N] = {"OFF", "PITCH", "PITCH2", "WAVE1", "WAVE2", "MWAVE1", "MWAVE2",
                                               "MOD1", "MOD2", "MPITCH", "CUTOFF", "AMP", "MIX", "LFORATE", "LFOAMT",
-                                              "SPREAD", "RES", "DRIVE", "HPF", "DAMP", "FENV", "LEVEL1", "LEVEL2",
+                                              "SPREAD", "M1PITCH", "M2PITCH", "RES", "DRIVE", "HPF", "DAMP", "FENV", "LEVEL1", "LEVEL2",
                                               "DETUNE", "MENVAMT", "CHORUS", "DELAY", "DLYTIME", "DLYFDBK", "REVERB",
                                               "REVSIZE"};
 #define DEST_LFO_OK(d) ((d) < DEST_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)   /* the LFO's own (not itself) */
+#define DEST_V9_N 16u                           /* (format 9's DEST_N: its LFO 2 destinations from here are 2 lower) */
 #define DEST_LFO2_OK(d) ((d) < DEST2_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)  /* LFO 2's: those, and more */
 
 /* ---- the patch: what the pages edit (all small integers, 0..127 unless said) */
@@ -119,14 +121,7 @@ typedef struct {
     uint8_t arp_gate;                           /* 0..127 = 5 .. 100 % of a step (127: tied) */
     uint8_t arp_latch;                          /* 1: the notes keep playing after the keys are let go */
     uint8_t arp_swing;                          /* 0..127 = none .. the even steps 3x the odd */
-    /* (added in patch format 7: the sequencer; its tempo, swing and clock are the arp's) */
-    uint8_t seq_len;                            /* 1..64 steps */
-    uint8_t seq_div;                            /* DIV_4 .. DIV_32 */
-    uint8_t seq_gate;                           /* 0..127 = 5 .. 100 % of a step */
-    uint8_t seq_pad;
-    uint8_t seq_note[64];                       /* the steps: a note, */
-    uint8_t seq_trig[64];                       /* SEQ_REST, SEQ_NOTE, SEQ_ACCENT, */
-    uint8_t seq_slide[64];                      /* 1: held into the next step, which it glides to (no new attack) */
+    /* (formats 7 .. 9 had a pattern here, seq_len .. seq_slide: patches.c, PATCH_SEQ_*; now seqs, below) */
     /* (added in patch format 8: the high-pass, the filter's type, the comb) */
     uint8_t hp_cut;                             /* the high-pass (12 dB/oct, no resonance): 0 = off; 16 Hz .. 4.2 kHz */
     uint8_t flt_type;                           /* FLT_LP12 .. FLT_COMBM; the comb: CUT its frequency, RES its feedback */
@@ -138,7 +133,15 @@ typedef struct {
     uint8_t lfo2_sync;                          /* L2SYNC_OFF, or a cycle in the arp / sequencer's tempo: 4/1 .. 1/32 */
     uint8_t lfo2_dest;                          /* DEST_OFF .. DEST2_N - 1 (not LFORATE, LFOAMT) */
     uint8_t lfo2_amt;                           /* 64 = none; bipolar */
+    /* (added in patch format 10: mod envelope 2; the modulators' pitch) */
+    uint8_t menv2_a, menv2_d, menv2_s, menv2_r; /* as the mod envelope's */
+    uint8_t menv2_loop, menv2_dest, menv2_amt;
+    uint8_t mpitch[NOSC][2];                    /* mod 1, mod 2 in MIX or RING (RATIO then): 0..48, 24 = the carrier's */
+    uint8_t mfine[NOSC][2];                     /* mod 1, mod 2 (any mode): 64 = in tune, +-50 cents */
 } patch_t;
+_Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
+               __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
+               "a mod envelope's a d s r loop dest amt are in a row (engine_set)");
 enum { SEQ_REST, SEQ_NOTE, SEQ_ACCENT, SEQ_TIE, SEQ_TRIGS };   /* (TIE: the note before goes on, no new attack) */
 static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT", "TIE"};
 
@@ -205,12 +208,11 @@ static const patch_t PATCH_INIT = {
     .glide = 0, .glide_mode = GLIDE_ALWAYS,
     .arp_on = 0, .arp_mode = ARP_UP, .arp_div = DIV_16, .arp_oct = 0, .arp_bpm = 80, .arp_gate = 64,
     .arp_latch = 0, .arp_swing = 0,
-    .seq_len = 16, .seq_div = DIV_16, .seq_gate = 64,   /* an empty pattern: 16 rests (C3 waiting in each) */
-    .seq_note = {48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-                 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48,
-                 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48},
     .hp_cut = 0, .flt_type = FLT_LP12, .comb_damp = 30, .comb_spread = 0,
     .lfo2_wave = LFO_TRI, .lfo2_rate = 60, .lfo2_sync = L2SYNC_OFF, .lfo2_dest = DEST_OFF, .lfo2_amt = 64,
+    .menv2_a = 0, .menv2_d = 60, .menv2_s = 0, .menv2_r = 50, .menv2_loop = 0,   /* no amount yet */
+    .menv2_dest = DEST_PITCH, .menv2_amt = 64,
+    .mpitch = {{24, 24}, {24, 24}}, .mfine = {{64, 64}, {64, 64}},
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -244,10 +246,10 @@ static volatile struct {
     uint32_t lfo_inc, lfo_fade;                 /* LFO phase step per block; its fade-in step (Q24; full: at once) */
     uint8_t lfo_wave, lfo_retrig, lfo_dest[2];
     int32_t lfo_amt[2];                         /* Q15, signed (squared: fine at small amounts) */
-    uint32_t me_att, me_dec, me_rel;            /* the mod envelope */
-    int32_t me_sus;
-    uint8_t me_loop, me_dest;
-    int32_t me_amt;                             /* Q15, signed */
+    uint32_t me_att[2], me_dec[2], me_rel[2];   /* the mod envelopes */
+    int32_t me_sus[2];
+    uint8_t me_loop[2], me_dest[2];
+    int32_t me_amt[2];                          /* Q15, signed */
     int32_t vel_amp, vel_mod;                   /* velocity sensitivities, Q15 */
     int32_t vel_cut;                            /* the cutoff at velocity 0, quarter semitones below (0 .. 144) */
     uint32_t glide_k;                           /* the slide's coefficient a block (Q16; 0: no glide) */
@@ -291,7 +293,7 @@ static struct {
     volatile uint8_t gate;                      /* the key is down (main loop) */
     volatile uint8_t trig;                      /* a new note: the ISR restarts the envelopes (main sets, ISR clears) */
     uint32_t ph[NOSC][NOP];
-    env_t amp, flt, mod[NOSC][2], menv;
+    env_t amp, flt, mod[NOSC][2], menv[2];
     int32_t ic1, ic2, ic3, ic4;                 /* the filter's integrator states (3, 4: LP 24's first stage) */
     int32_t f_cs;                               /* the cutoff knob, smoothed (quarter semitones, Q8) */
     int32_t f_ks;                               /* the damping, smoothed (Q24) */
@@ -534,6 +536,7 @@ static int32_t lfo_random(uint32_t *r)          /* S&H: the next value of a sequ
 /* what the LFO does to a voice for a block: offsets, gathered from the two destinations */
 typedef struct {
     int32_t pitch16[NOSC], mpitch16;            /* pitch: 1/16 semitones (carriers and mods / the mods only) */
+    int32_t mp16[2];                            /* mod 1's, mod 2's pitch (both oscillators'), 1/16 semitones */
     int32_t pos[NOSC][NOP];                     /* wave positions: + -127..127 */
     int32_t amt[NOSC];                          /* both mod amounts of an oscillator: Q15 */
     int32_t cut;                                /* cutoff: quarter semitones */
@@ -559,6 +562,8 @@ static void mod_add(lfo_mod_t *m, uint32_t dest, int32_t a, int32_t s, int uni)
     case DEST_MOD1: m->amt[0] += x; break;                               /* +- the whole amount */
     case DEST_MOD2: m->amt[1] += x; break;
     case DEST_MPITCH: m->mpitch16 += q; break;
+    case DEST_M1PITCH: m->mp16[0] += q; break;                           /* +-12 semitones */
+    case DEST_M2PITCH: m->mp16[1] += q; break;
     case DEST_CUTOFF: m->cut += q; break;                                /* +-48 semitones */
     case DEST_AMP: {                                                     /* tremolo: down to 1 - |a| */
         int32_t aa = a < 0 ? -a : a, b = uni ? 2 * s - 32767 : s;   /* (an envelope: 0..1 as -1..1) */
@@ -595,10 +600,10 @@ static uint32_t rate_moved(uint32_t inc, int32_t r16)   /* the LFO's phase step 
     return v > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)v;
 }
 
-static int32_t menv_step(env_t *e, uint32_t gate)   /* the mod envelope; LOOP: back to the attack after the decay */
+static int32_t menv_step(env_t *e, uint32_t gate, uint32_t k)   /* mod envelope k; LOOP: the attack again after the decay */
 {
-    int32_t l = env_step(e, gate, eg.me_att, eg.me_dec, eg.me_sus, eg.me_rel);
-    if (eg.me_loop && gate && e->st == 2u && l - eg.me_sus < ENV_FULL / 128)
+    int32_t l = env_step(e, gate, eg.me_att[k], eg.me_dec[k], eg.me_sus[k], eg.me_rel[k]);
+    if (eg.me_loop[k] && gate && e->st == 2u && l - eg.me_sus[k] < ENV_FULL / 128)
         e->st = 1;
     return l;
 }
@@ -636,7 +641,7 @@ static void voice_start(uint32_t v)
     voice[v].lfo_rng += 0x9E3779B9u + v;
     voice[v].lfo_sh = lfo_random(&voice[v].lfo_rng);
     voice[v].lfo_fade = 0;                      /* the delay: it fades in from the note */
-    voice[v].menv.st = 1;
+    voice[v].menv[0].st = voice[v].menv[1].st = 1;
 }
 
 /* ---- which voice a new note takes: the same note, else a silent voice, else the quietest release, else the oldest
@@ -1047,13 +1052,15 @@ static void engine_render(int32_t *out, uint32_t n)
             lfo_mod_t m;
             /* the mod envelope first (it may move the LFO's rate and depth) */
             /* LFO 2 this block: x2 its value times its amount (Q15), pz2 that over a knob's range */
-            int32_t x2 = (g2[bi] * eg.l2_amt) >> 15, pz2 = (x2 * 127) >> 15, me_amt = eg.me_amt;
+            int32_t x2 = (g2[bi] * eg.l2_amt) >> 15, pz2 = (x2 * 127) >> 15, me_amt = eg.me_amt[0];
             if (eg.l2_dest == DEST_MENVAMT) {   /* (the mod envelope's amount: +- the whole of it) */
                 me_amt += x2;
                 me_amt = me_amt > 32767 ? 32767 : me_amt < -32767 ? -32767 : me_amt;
             }
-            int32_t me = menv_step(&voice[v].menv, gate) >> 9, me_x = (me * me_amt) >> 15;
-            voice[v].rate16 = eg.me_dest == DEST_LFORATE ? (me_x * 768) >> 15 : 0;   /* +-4 octaves */
+            int32_t me = menv_step(&voice[v].menv[0], gate, 0) >> 9, me_x = (me * me_amt) >> 15;
+            int32_t me2 = menv_step(&voice[v].menv[1], gate, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
+            voice[v].rate16 = (((eg.me_dest[0] == DEST_LFORATE ? me_x : 0) +   /* +-4 octaves (each) */
+                                (eg.me_dest[1] == DEST_LFORATE ? me2_x : 0)) * 768) >> 15;
             /* the LFO: this voice's own, or the free-running one; faded in; -> what it does this block */
             if (eg.lfo_retrig) {
                 uint32_t nx = voice[v].lfo_ph + rate_moved(eg.lfo_inc, voice[v].rate16);
@@ -1068,14 +1075,21 @@ static void engine_render(int32_t *out, uint32_t n)
             voice[v].lfo_fade += (int32_t)eg.lfo_fade;
             if (voice[v].lfo_fade > ENV_FULL) voice[v].lfo_fade = ENV_FULL;
             l = (l * (voice[v].lfo_fade >> 9)) >> 15;
-            if (eg.me_dest == DEST_LFOAMT) {    /* the LFO's depth: x 0 .. 2 */
+            if (eg.me_dest[0] == DEST_LFOAMT) { /* the LFO's depth: x 0 .. 2 */
                 int32_t f = 32767 + me_x;
                 l = (l * (f < 0 ? 0 : f)) >> 15;
                 l = l > 32767 ? 32767 : l < -32767 ? -32767 : l;
             }
+            if (eg.me_dest[1] == DEST_LFOAMT) {
+                int32_t f = 32767 + me2_x;
+                l = (l * (f < 0 ? 0 : f)) >> 15;
+                l = l > 32767 ? 32767 : l < -32767 ? -32767 : l;
+            }
             lfo_mods(l, &m);
-            if (DEST_LFO_OK(eg.me_dest))        /* any of the LFO's destinations */
-                mod_add(&m, eg.me_dest, me_amt, me, 1);
+            if (DEST_LFO_OK(eg.me_dest[0]))     /* any of the LFO's destinations */
+                mod_add(&m, eg.me_dest[0], me_amt, me, 1);
+            if (DEST_LFO_OK(eg.me_dest[1]))
+                mod_add(&m, eg.me_dest[1], eg.me_amt[1], me2, 1);
             mod_add(&m, eg.l2_dest, eg.l2_amt, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
             m.pitch16[0] += bend16;             /* pitch bend: every note (and the comb's keytrack with it) */
             m.pitch16[1] += bend16;
@@ -1098,8 +1112,8 @@ static void engine_render(int32_t *out, uint32_t n)
                 uint32_t p0 = voice[v].ph[o][0], p1 = voice[v].ph[o][1], p2 = voice[v].ph[o][2];
                 int32_t g16 = voice[v].glide_q8 >> 8;   /* (+-48 semitones: the LFO, the envelope, glide) */
                 uint32_t i0 = rate_moved(voice[v].inc[o][0], m.pitch16[o] + g16);
-                uint32_t i1 = rate_moved(voice[v].inc[o][1], m.pitch16[o] + m.mpitch16 + g16);
-                uint32_t i2 = rate_moved(voice[v].inc[o][2], m.pitch16[o] + m.mpitch16 + g16);
+                uint32_t i1 = rate_moved(voice[v].inc[o][1], m.pitch16[o] + m.mpitch16 + m.mp16[0] + g16);
+                uint32_t i2 = rate_moved(voice[v].inc[o][2], m.pitch16[o] + m.mpitch16 + m.mp16[1] + g16);
                 uint32_t m1 = eg.mode[o][0], m2 = eg.mode[o][1];
                 int32_t lvl = eg.lvl[o], am1, am2;
                 if (eg.l2_dest == DEST_LVL1 + o)   /* LFO 2 on the MIX page's level */
@@ -1374,7 +1388,14 @@ static void voice_tune(uint32_t v)              /* the operators' phase steps fo
     for (o = 0; o < NOSC; o++) {
         uint64_t f = ((uint64_t)base * pitch_q16(o)) >> 16;
         for (k = 0; k < NOP; k++) {
-            uint64_t inc = (f * PR_RATIO_Q8[patch.osc[o].ratio[k] < PR_RATIOS ? patch.osc[o].ratio[k] : 1u]) >> 8;
+            uint64_t inc;
+            if (k && patch.osc[o].mode[k - 1u] != MODE_FM) {   /* a modulator heard (MIX, RING): its pitch */
+                uint32_t sm = patch.mpitch[o][k - 1u];
+                inc = (f * PR_SEMI_Q16[sm <= 48u ? sm : 24u]) >> 16;
+            } else
+                inc = (f * PR_RATIO_Q8[patch.osc[o].ratio[k] < PR_RATIOS ? patch.osc[o].ratio[k] : 1u]) >> 8;
+            if (k)
+                inc = (inc * PR_FINE_Q16[patch.mfine[o][k - 1u] & 127u]) >> 16;
             voice[v].inc[o][k] = inc > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)inc;   /* at most Nyquist */
         }
     }
@@ -1471,15 +1492,16 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.l2_dest = DEST_LFO2_OK(patch.lfo2_dest) ? patch.lfo2_dest : DEST_OFF;
         eg.l2_amt = eg.l2_dest == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
-    eg.me_att = PR_ENV_ATT[patch.menv_a & 127u];
-    eg.me_dec = PR_ENV_EXP[patch.menv_d & 127u];
-    eg.me_sus = (int32_t)((patch.menv_s & 127u) * (uint32_t)(ENV_FULL / 127));
-    eg.me_rel = PR_ENV_EXP[patch.menv_r & 127u];
-    eg.me_loop = patch.menv_loop ? 1u : 0u;
-    {
-        int32_t d = (int32_t)(patch.menv_amt & 127u) - 64, mag = d < 0 ? -d : d, q = PR_CURVE_Q15[mag * 127 / 64];
-        eg.me_dest = patch.menv_dest < DEST_N ? patch.menv_dest : DEST_OFF;
-        eg.me_amt = eg.me_dest == DEST_OFF ? 0 : d < 0 ? -q : q;
+    for (k = 0; k < 2u; k++) {                  /* the mod envelopes */
+        const uint8_t *e = k ? &patch.menv2_a : &patch.menv_a;   /* (a d s r loop dest amt, in a row in both) */
+        int32_t d = (int32_t)(e[6] & 127u) - 64, mag = d < 0 ? -d : d, q = PR_CURVE_Q15[mag * 127 / 64];
+        eg.me_att[k] = PR_ENV_ATT[e[0] & 127u];
+        eg.me_dec[k] = PR_ENV_EXP[e[1] & 127u];
+        eg.me_sus[k] = (int32_t)((e[2] & 127u) * (uint32_t)(ENV_FULL / 127));
+        eg.me_rel[k] = PR_ENV_EXP[e[3] & 127u];
+        eg.me_loop[k] = e[4] ? 1u : 0u;
+        eg.me_dest[k] = e[5] < DEST_N ? e[5] : DEST_OFF;
+        eg.me_amt[k] = eg.me_dest[k] == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
     eg.vel_amp = (int32_t)(patch.vel_amp & 127u) * 32767 / 127;
     eg.vel_mod = (int32_t)(patch.vel_mod & 127u) * 32767 / 127;
