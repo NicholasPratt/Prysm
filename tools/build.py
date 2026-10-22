@@ -48,6 +48,7 @@ SDK_SHA256 = {
 }
 
 PRODUCT = "FM-1_980"                # Prysm: 98N (OUR_LOADER in the installer wants FM-1_9NN; the hub lists 981 for Pocket GammaWave)
+PRODUCT_1 = "FM-1_989"              # from 1.0 on, every release: the identity names Prysm, the version string the release
 VERSION = None                      # APP_VER for release builds
 
 
@@ -270,7 +271,7 @@ def mmio_check():
 def main():
     global PRODUCT, VERSION
     ap = argparse.ArgumentParser()
-    ap.add_argument("--release", metavar="X.Y", help="release build: identity FM-1_98Y, version string X.Y")
+    ap.add_argument("--release", metavar="X.Y", help="release build: identity FM-1_98Y (0.Y; 1.0 on: FM-1_989), version string X.Y")
     ap.add_argument("--sdk", type=Path, help="JieLi AC79 SDK checkout (default: $AC79_SDK)")
     a = ap.parse_args()
     name = "prysm.fwsc"
@@ -278,7 +279,7 @@ def main():
         m = re.fullmatch(r"(\d)\.(\d)(\.\d)?(-[A-Za-z0-9]+)?", a.release)
         if not m:
             raise SystemExit(f"--release {a.release}: use X.Y, X.Y.Z or X.Y-suffix, one digit each")
-        PRODUCT = "FM-1_98" + m[2]
+        PRODUCT = "FM-1_98" + m[2] if m[1] == "0" else PRODUCT_1   # (98Y ran out at 0.9)
         VERSION = m[1] + "." + m[2] + (m[3] or "")
         name = f"prysm-{a.release}.fwsc"
     fm1pkg_make.SDK = a.sdk

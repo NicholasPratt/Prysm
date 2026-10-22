@@ -14,7 +14,7 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 0.9</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.0</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
 LFO, two looping mod envelopes and stereo chorus, delay and reverb.</p>
@@ -37,7 +37,7 @@ LFO, two looping mod envelopes and stereo chorus, delay and reverb.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-0.9.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.0.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -333,8 +333,9 @@ envelope's shape.</p>
 note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.</p>
 <p><strong>LP 24</strong> is steeper and darker than LP 12; its resonance is a little softer.</p>
 <p><strong>Self-oscillation</strong>: from RES <strong>122</strong> up, the low-pass sings on its own: a sine at the cutoff, held at a steady level
-from the lowest cutoffs to the highest, even with the oscillators' levels at 0. With KEY at 127 and CUT at 64 it plays
-in tune from the keys (C3 sings at C3's pitch); the amp envelope still shapes it. Turn RES back below 122 and it rings
+from the lowest cutoffs to the highest, even with the oscillators' levels at 0. With KEY at 127 it follows the keys
+in tune (an octave up the keyboard, an octave up in pitch); CUT sets where: at about <strong>47</strong> each key sings near its
+own note (a little sharp: tune by ear), each step of CUT about a semitone higher. The amp envelope still shapes it. Turn RES back below 122 and it rings
 and dies away as before.</p>
 <p><strong>COMB+ / COMB-</strong> turn the filter into a comb, as on a Waldorf: a row of resonant peaks at a frequency and every
 multiple of it. The FILTER row then plays the comb: CUT sets the first peak (in 3/4-semitone steps: 64 is C4, 80 is
@@ -372,9 +373,23 @@ miss the harmonics. High feedback takes a moment to build up on low notes.</p>
 <td>velocity to modulation</td>
 <td></td>
 </tr>
+<tr>
+<td>VCA</td>
+<td>OPEN: the amp held open this much (0 = closed)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <p>Times go from 1 ms to 10 s.</p>
+<p><strong>OPEN</strong> (VCA row) holds the amp open whatever the envelope does, as a VCA bias on an analog synth (the Neutron's,
+say): an instant <strong>drone</strong>. Turn it up and the notes you let go keep sounding at that level, each on its last note,
+so a chord let go becomes a drone chord; with nothing played since power-on, it drones C3. Keys still play over it
+with their envelope (from the drone's level up), and a new note takes a droning voice first. The picture draws the
+level as a line across the envelope. Turn OPEN back to 0 and the drone fades out. Filter and mod envelopes still run
+from each note, so a drone can open and close with the filter envelope's release, the LFOs or LFO 2 moving it.
+(A drone keeps up to four voices running: watch the CPU bar with every effect on.)</p>
 <p><strong>Velocity</strong> comes from MIDI: a keyboard or a DAW playing Prysm over USB. The FM-1's own keys have no velocity (they
 are on / off), so they always play at full velocity and these settings do not change them. Each sensitivity says how
 much a softer note is quieter (by the square of its velocity, as it sounds natural), darker (up to 36 semitones of
@@ -450,6 +465,10 @@ any of the LFO's (below), plus two of its own:</p>
 <tr>
 <td>LFOAMT</td>
 <td>the LFO's depth, from nothing up to double</td>
+</tr>
+<tr>
+<td>LFOSHAPE</td>
+<td>the LFO's wave, morphed: from the one you chose along SINE, TRI, SAW UP, SAW DN, SQUARE, S&amp;H (a full amount: the whole row), each fading into the next</td>
 </tr>
 </tbody>
 </table>
@@ -622,6 +641,10 @@ it is set, as far as the whole knob):</p>
 <tr>
 <td>MENVAMT</td>
 <td>the mod envelope's amount</td>
+</tr>
+<tr>
+<td>LFOSHAPE</td>
+<td>the LFO's wave, morphed along its shapes (as the mod envelopes' LFOSHAPE)</td>
 </tr>
 <tr>
 <td>CHORUS, DELAY, REVERB</td>
@@ -1022,7 +1045,7 @@ uses the internal tempo).</p>
 page: the screen, the knobs (drag or scroll), the buttons and the keys (or your computer's keys, A W S E D ... from C4),
 with the sound. Beside it, a tab for every page with every parameter, the sequencer's 64 steps as a grid, and patch
 files to save and load. The browser keeps its own 8 slots between visits.</p>
-<p><strong>With an FM-1</strong> (Prysm 0.9 or later): connect it by USB and press <strong>Connect FM-1</strong> (allow MIDI when the browser
+<p><strong>With an FM-1</strong> (Prysm 1.0 or later): connect it by USB and press <strong>Connect FM-1</strong> (allow MIDI when the browser
 asks). The editor takes the FM-1's current sound, and from then on the two stay in step: what you change in the editor
 the FM-1 plays (its knob's value shows in the corner, as if you had turned it), and what you turn on the FM-1 shows up
 in the editor. <strong>Store on FM-1</strong> saves the sound in one of its slots. Another MIDI keyboard connected to the computer
