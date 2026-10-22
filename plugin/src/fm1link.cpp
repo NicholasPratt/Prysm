@@ -30,13 +30,16 @@ std::string Fm1Link::status()
     return state;
 }
 
-void Fm1Link::sync(const uint8_t* patch, size_t n)
+void Fm1Link::sync(const uint8_t* patch, size_t n, const uint8_t* seqs, size_t sn)
 {
     std::lock_guard<std::mutex> g(lock);
     patchSize = n;
+    seqsSize = sn;
     if (!synced) return;
     for (auto& c : mirror.diff(patch, n)) pending.push_back(c);
-    if (!pending.empty()) wake.notify_all();
+    if (smirror.ready())
+        for (auto& c : smirror.diff(seqs, sn)) spending.push_back(c);
+    if (!pending.empty() || !spending.empty()) wake.notify_all();
 }
 
 void Fm1Link::note(uint8_t st, uint8_t d1, uint8_t d2)
@@ -94,6 +97,9 @@ void Fm1Link::close()
     std::lock_guard<std::mutex> g(lock);
     connected = synced = false;
     mirror.clear();
+    smirror.clear();
+    pending.clear();
+    spending.clear();
 }
 
 void Fm1Link::send(char type, const std::vector<uint8_t>& data)
@@ -104,7 +110,7 @@ void Fm1Link::send(char type, const std::vector<uint8_t>& data)
     out->sendMessage(&m);
 }
 
-bool Fm1Link::ask(char type, const std::vector<uint8_t>& data)
+int Fm1Link::ask(char type, const std::vector<uint8_t>& data)
 {
     for (int tries = 0; tries < 3; tries++) {
         std::unique_lock<std::mutex> g(lock);
@@ -115,12 +121,12 @@ bool Fm1Link::ask(char type, const std::vector<uint8_t>& data)
         g.lock();
         if (wake.wait_for(g, 400ms, [this] { return answered != -2 || quit; })) {
             awaiting = 0;
-            return answered == 0;
+            return quit ? -1 : answered;
         }
     }
     std::lock_guard<std::mutex> g(lock);
     awaiting = 0;
-    return false;
+    return -1;
 }
 
 void Fm1Link::midiIn(double, std::vector<unsigned char>* m, void* self)
@@ -141,6 +147,9 @@ void Fm1Link::receive(const std::vector<unsigned char>& m)
     } else if (t == 'E' && n >= 129) {           // the FM-1's sound, 64 bytes at b[0] * 64
         if (dump.size() < (b[0] + 1u) * 64) dump.resize((b[0] + 1u) * 64);
         for (int j = 0; j < 64; j++) dump[b[0] * 64 + j] = (uint8_t)(b[1 + 2 * j] << 4 | b[2 + 2 * j]);
+    } else if (t == 'Q' && n >= 129) {          // the FM-1's patterns, 64 bytes at b[0] * 64
+        if (sdump.size() < (b[0] + 1u) * 64) sdump.resize((b[0] + 1u) * 64);
+        for (int j = 0; j < 64; j++) sdump[b[0] * 64 + j] = (uint8_t)(b[1 + 2 * j] << 4 | b[2 + 2 * j]);
     } else if (t == 'F' && n >= 4) {
         const size_t size = (size_t)b[0] << 7 | b[1];
         if (size != patchSize || dump.size() < size) {
@@ -149,6 +158,9 @@ void Fm1Link::receive(const std::vector<unsigned char>& m)
         }
         mirror.reset(dump.data(), size);        // (the project's sound then goes to it: sync)
         dump.clear();
+        smirror.clear();                        // (and the project's patterns: an FM-1 that has them)
+        if (n >= 7 && ((size_t)b[4] << 7 | b[5]) == seqsSize && sdump.size() >= seqsSize) smirror.reset(sdump.data(), seqsSize);
+        sdump.clear();
         synced = true;
         state = "FM-1: connected";
         wake.notify_all();
@@ -157,6 +169,13 @@ void Fm1Link::receive(const std::vector<unsigned char>& m)
         const uint8_t v = (uint8_t)(b[2] << 7 | b[3]);
         mirror.mine(o, v);
         auto cb = onChange;
+        g.unlock();
+        if (cb) cb(o, v);
+    } else if (t == 'G' && n >= 4 && synced && smirror.ready()) {   // its patterns changed on the FM-1
+        const uint32_t o = (uint32_t)b[0] << 7 | b[1];
+        const uint8_t v = (uint8_t)(b[2] << 7 | b[3]);
+        smirror.mine(o, v);
+        auto cb = onSeqChange;
         g.unlock();
         if (cb) cb(o, v);
     }
@@ -212,19 +231,20 @@ void Fm1Link::run()
                     d.push_back(v >> 4);
                     d.push_back(v & 15);
                 }
-                ok = ask('P', d);
+                ok = ask('P', d) == 0;
             }
-            ok = ok && ask('W', {s[0], s[1], s[2], s[3]});
+            ok = ok && ask('W', {s[0], s[1], s[2], s[3]}) == 0;
             g.lock();
             state = ok ? "FM-1: stored in slot " + std::to_string(s[0] + 1) : "FM-1: storing failed";
             continue;
         }
-        if (synced && !pending.empty()) {       // one change at a time, each answered
-            auto c = pending.front();
-            pending.pop_front();
+        if (synced && (!pending.empty() || !spending.empty())) {   // one change at a time, each answered
+            const bool snd = !pending.empty();
+            auto c = snd ? pending.front() : spending.front();
+            (snd ? pending : spending).pop_front();
             g.unlock();
-            if (!ask('V', {(uint8_t)(c.first >> 7), (uint8_t)(c.first & 127), (uint8_t)(c.second >> 7),
-                           (uint8_t)(c.second & 127)})) {
+            if (ask(snd ? 'V' : 'U', {(uint8_t)(c.first >> 7), (uint8_t)(c.first & 127), (uint8_t)(c.second >> 7),
+                           (uint8_t)(c.second & 127)}) < 0) {
                 close();                         // (no answer: unplugged; look for it again)
                 std::lock_guard<std::mutex> g2(lock);
                 state = "FM-1: lost; looking for it";

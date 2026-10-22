@@ -28,7 +28,7 @@ PAGES = {"OSC1": "OSC 1", "OSC2": "OSC 2", "FILTER": "FILTER", "AMP": "AMP", "LF
 PG = {p: i for i, p in enumerate(PAGES)}
 ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"],
         "FILTER": ["FILTER", "ENV", "TYPE", "COMB"], "AMP": ["ENV", "VEL"], "LFO": ["LFO", "DEST", "M.ENV", "M.DST"],
-        "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "GLIDE"], "ARP": ["ARP", "TIME"], "SEQ": ["STEP", "PATTERN"],
+        "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "GLIDE"], "ARP": ["ARP", "TIME"], "SEQ": ["STEP", "PATTERN", "EDIT", "SONG", "ENTRY"],
         "CHO": ["CHORUS"], "DLY": ["DELAY", "D.MOD"], "REV": ["REVERB", "R.MOD"], "SETUP": ["MIDI"],
         "PATCH": ["SAVE", "LOAD", "INIT"], "SCOPE": []}
 BTN = {"FX": 2, "SELECT": 3, "ENV": 4, "LFO": 5, "EDIT": 6, "GLO": 7, "HOME": 8, "SAVE": 9, "ARP": 10, "SEQ": 11,
@@ -55,8 +55,7 @@ def info():
            'int main(void)\n{\n    uint32_t i;\n    edit = PATCH_INIT;\n'
            '    for (i = 0; i < sizeof edit; i++) printf("%u ", ((uint8_t *)&edit)[i]);\n    printf("\\n");\n'
            '    for (i = 0; i < prm_n(); i++) printf("%s\\n", prm_info(i));\n'
-           '    printf("seq %u %u %u %u %u\\n", prm_seq_off(0), prm_seq_off(1), prm_seq_off(2),\n'
-           '           (unsigned)__builtin_offsetof(patch_t, seq_len), (unsigned)__builtin_offsetof(patch_t, arp_on));\n'
+           '    printf("seq %u\\n", (unsigned)__builtin_offsetof(patch_t, arp_on));\n'
            '    return 0;\n}\n')
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
@@ -71,7 +70,7 @@ def info():
         page, row, label, knob, off, mx, mn, kind = line.split("|")
         knobs[(names[page], row, int(knob))] = (int(off), int(mx), int(mn), int(kind), label)
     s = [int(x) for x in out[-1].split()[1:]]
-    _info = {"init": init, "knobs": knobs, "seq_note": s[0], "seq_trig": s[1], "seq_len": s[3], "arp_on": s[4]}
+    _info = {"init": init, "knobs": knobs, "arp_on": s[0]}
     return _info
 
 
@@ -88,7 +87,7 @@ def gen_states(states):
         body.append(f"    n = cap_state(cap_buf, 0);\n    g = fopen(\"{path}\", \"wb\");\n"
                     f"    fwrite(cap_buf, 1, n, g);\n    fclose(g);")
     src = ('#define main prysm_host_main\n#include "prysm.c"\n#undef main\nint main(void)\n{\n    FILE *g;\n'
-           '    uint32_t n;\n    bank.version = PATCH_VERSION;\n' + "\n".join(body) + "\n    return 0;\n}\n")
+           '    uint32_t n;\n    bank.version = PATCH_VERSION;\n    seqs_init();\n' + "\n".join(body) + "\n    return 0;\n}\n")
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
         (t / "states.c").write_text(src)
@@ -233,13 +232,10 @@ class Scene:
 
     def on(self, *notes, vel=127):
         I = info()
-        for n in notes:
+        for n in notes:                         # (with REC, the firmware enters them in the pattern: not the sound)
             self.ev.append((self.t, f"midi 0x90 {n} {vel}"))
-            if self.rec and self.page == "SEQ":   # (step entry: the note into the step, the cursor on)
-                ln = self.patch[I["seq_len"]] or 16
-                self.patch[I["seq_note"] + self.cursor] = n
-                if self.patch[I["seq_trig"] + self.cursor] == 0: self.patch[I["seq_trig"] + self.cursor] = 1
-                self.cursor = (self.cursor + 1) % ln
+            if self.rec and self.page == "SEQ":
+                self.cursor = (self.cursor + 1) % 16
         self._how("play keys")
         return self
 

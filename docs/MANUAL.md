@@ -338,28 +338,50 @@ With every effect on, Prysm uses roughly twice the CPU: watch the header.
 
 ### SEQ
 
-A step sequencer of up to **64 steps**, one note each, 303-style: notes, rests, **accents** and **slides**. It plays
-alongside the keys (and the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock.
-Each patch has its own pattern.
+A step sequencer, 303-style: notes, rests, **accents**, **slides** and **ties**, in **4 patterns** of up to 64 steps,
+and a **song** that plays the patterns in an order you choose, each so many times. It plays alongside the keys (and
+the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock. The patterns and the song
+are not part of a sound: they stay when you load another, so you can try sounds on the same song.
 
-The picture is the pattern: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white one an
-accent; a little bar joins a sliding step to the next; past the length, dots. The cursor is ringed (white while
-recording); a mark under a square shows the step playing.
+The picture is the pattern being edited: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white
+one an accent; a little bar joins a sliding step to the next; a tie is a bar carrying the note before it on; past the
+length, dots. The cursor is ringed (doubled while recording); a mark under a square shows the step playing. The
+header says which pattern you are editing (**SEQ P1** .. **P4**), or **SEQ SONG** in song mode. On the SONG and
+ENTRY rows the picture is the song instead: its entries, each a pattern and how many times it plays.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| STEP | the step (the cursor) | its note | its trigger: REST, NOTE, ACCENT | SLIDE ON / OFF |
-| PATTERN | length: 1 .. 64 | step: 1/4 .. 1/32 | gate | tempo (the arp's) |
+| STEP | the step (the cursor) | its note | its trigger: REST, NOTE, ACCENT, TIE | SLIDE ON / OFF |
+| PATTERN | the pattern edited: P1 .. P4 | its length: 1 .. 64 | step: 1/4 .. 1/32 (all patterns) | gate (all patterns) |
+| EDIT | the row: 1 .. 4, or ALL | COPY | PASTE | CLEAR |
+| SONG | MODE: PATT or SONG | the song's length: 1 .. 16 entries | tempo (the arp's) | INIT |
+| ENTRY | the entry: 1 .. 16 | its pattern: P1 .. P4 | REPEAT: x1 .. x16 | |
 
 **Entering notes**: press **REC** (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or start at
-the first) and **play a key**: its note goes into the step (a rest becomes a note) and the cursor moves to the next,
-so you can type a line in. MIDI notes enter the same way. Press REC again to play the keys normally.
+the first) and **play a key**: its note goes into the step (a rest or a tie becomes a note) and the cursor moves to the
+next, so you can type a line in. MIDI notes enter the same way. Press REC again to play the keys normally.
 
-- **PLAY** starts the sequence from its first step, and stops it.
+- **PLAY** starts from the first step (of the pattern, or of the song) and stops.
 - **ACCENT** plays the step at full velocity, the others a little softer: how much louder, brighter and more
   modulated an accent is comes from the AMP page's **VEL** row.
 - **SLIDE** holds the step's note into the next one and glides to its pitch in about 30 ms, **without a new attack**
   (the 303 slide). A slide into a rest just ends.
+- **TIE** carries the note before it on, at its pitch, without a new attack: a note followed by two ties is one note
+  three steps long (its gate ends in the last tie). A tie after a rest is a rest.
+- **Patterns**: PATT on the PATTERN row picks the one you edit; in PATT mode it is also the one playing. Changing it
+  while the sequencer plays switches at the end of the current pattern, so it stays in time. Each pattern has its own
+  length; the step and the gate are the same for all.
+- **Copy and paste** (EDIT row): pick a row of 16 steps with KNOB1, turn **COPY**, pick another row (or another
+  pattern on the PATTERN row) and turn **PASTE**. With the row on **ALL**, COPY and PASTE take the whole pattern,
+  its length included; a single row pasted into ALL fills all four rows. **CLEAR** empties the row (with ALL, the
+  whole pattern: turn it again within 3 seconds to confirm).
+- **The song** (SONG and ENTRY rows): set MODE to SONG, its LENGTH to the number of entries, then for each entry its
+  pattern and how many times it plays. PLAY then plays the entries in turn and starts again after the last.
+- **INIT** (SONG row) starts over: all four patterns empty, the song P1, P2, P3, P4 once each, PATT mode. It asks
+  first: turn it again within 3 seconds.
+- **Saving**: the patterns and the song save themselves a few seconds after a change, once nothing is playing (the
+  flash write would cut a note short). They come back at power-on. From an older Prysm, the pattern of the sound
+  that comes back at power-on becomes pattern 1.
 - **On the MIDI clock** (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
   PLAY must be on.
 

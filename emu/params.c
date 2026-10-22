@@ -9,9 +9,9 @@ static const prm_t *prm_get(uint32_t i, uint32_t *pg_, uint32_t *row_, uint32_t 
         for (r = 0; PAGES[pg].osc != G && r < PAGES[pg].n; r++)
             for (k = 0; k < 4u; k++) {
                 const prm_t *p = &PAGES[pg].rows[r].p[k];
-                if (p->kind == K_NONE || p->kind == K_CURSOR || p->kind == K_SNOTE || p->kind == K_STRIG ||
-                    p->kind == K_SSLIDE)
-                    continue;
+                const uint8_t *at = p->kind == K_NONE ? 0 : pval(pg, p);
+                if (!at || at < (const uint8_t *)&edit || at >= (const uint8_t *)&edit + sizeof edit)
+                    continue;                   /* (not a byte of the sound: a cursor, the patterns) */
                 if (n++ == i) {
                     *pg_ = pg; *row_ = r; *k_ = k;
                     return p;
@@ -58,9 +58,18 @@ static const char *prm_fmt(uint32_t i, uint32_t v)
     fmt(prm_txt, p, at);
     return prm_txt;
 }
-/* the sequencer's steps: where their notes (0), triggers (1) and slides (2) are in patch_t */
-static uint32_t prm_seq_off(uint32_t which)
+/* the patterns and song (engine.c: seqs_t), where each field is: "pat|pattern size|len|note|trig|slide|div|gate|cur|
+ * mode|song_len|song_pat|song_rep|size|patterns|entries" (the pattern fields within a pattern) */
+static const char *prm_seq_layout(void)
 {
-    return which == 0 ? __builtin_offsetof(patch_t, seq_note) : which == 1 ? __builtin_offsetof(patch_t, seq_trig)
-                                                                           : __builtin_offsetof(patch_t, seq_slide);
+    static const uint32_t L[16] = {
+        __builtin_offsetof(seqs_t, pat), sizeof(pattern_t), __builtin_offsetof(pattern_t, len),
+        __builtin_offsetof(pattern_t, note), __builtin_offsetof(pattern_t, trig), __builtin_offsetof(pattern_t, slide),
+        __builtin_offsetof(seqs_t, div), __builtin_offsetof(seqs_t, gate), __builtin_offsetof(seqs_t, cur),
+        __builtin_offsetof(seqs_t, mode), __builtin_offsetof(seqs_t, song_len), __builtin_offsetof(seqs_t, song_pat),
+        __builtin_offsetof(seqs_t, song_rep), sizeof(seqs_t), SEQ_PATS, SONG_N};
+    char *s = prm_txt;
+    uint32_t i;
+    for (i = 0; i < 16u; i++) s = num(i ? put(s, "|") : s, L[i]);
+    return prm_txt;
 }

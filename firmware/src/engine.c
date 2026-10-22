@@ -139,8 +139,45 @@ typedef struct {
     uint8_t lfo2_dest;                          /* DEST_OFF .. DEST2_N - 1 (not LFORATE, LFOAMT) */
     uint8_t lfo2_amt;                           /* 64 = none; bipolar */
 } patch_t;
-enum { SEQ_REST, SEQ_NOTE, SEQ_ACCENT, SEQ_TRIGS };
-static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT"};
+enum { SEQ_REST, SEQ_NOTE, SEQ_ACCENT, SEQ_TIE, SEQ_TRIGS };   /* (TIE: the note before goes on, no new attack) */
+static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT", "TIE"};
+
+/* the sequencer's patterns and song: not part of a sound (patches.c keeps them in the store beside the bank). Four
+ * patterns of up to 64 steps (each its own length; one step length and gate for all), and a song: up to 16 entries,
+ * each a pattern played 1 .. 16 times, round and round. patch_t's seq_* fields are format 9's single pattern: read
+ * only to bring an older bank's pattern in as pattern 1. */
+#define SEQ_PATS 4u
+#define SONG_N 16u
+typedef struct {
+    uint8_t len, pad[3];                        /* 1 .. 64 steps */
+    uint8_t note[64], trig[64], slide[64];      /* as patch_t's seq_*; trig may be TIE */
+} pattern_t;
+typedef struct {
+    uint32_t version;
+    pattern_t pat[SEQ_PATS];
+    uint8_t div, gate;                          /* the step (DIV_4 .. DIV_32) and its gate (0..127 = 5 .. 100 %) */
+    uint8_t cur;                                /* the pattern edited, and played in PATTERN mode */
+    uint8_t mode;                               /* 0: PATTERN (the pattern edited, over and over); 1: SONG */
+    uint8_t song_len, pad2[3];                  /* 1 .. SONG_N entries */
+    uint8_t song_pat[SONG_N], song_rep[SONG_N]; /* each entry: a pattern (0..3), played 1 .. 16 times */
+} seqs_t;
+#define SEQS_VERSION 1u
+static seqs_t seqs;
+
+static void seqs_init(void)                     /* four empty patterns (16 rests, C3 waiting), a song of P1 .. P4 */
+{
+    uint32_t i, k;
+    memset(&seqs, 0, sizeof seqs);
+    seqs.version = SEQS_VERSION;
+    for (i = 0; i < SEQ_PATS; i++) {
+        seqs.pat[i].len = 16;
+        for (k = 0; k < 64u; k++) seqs.pat[i].note[k] = 48;
+    }
+    seqs.div = DIV_16;
+    seqs.gate = 64;
+    seqs.song_len = SEQ_PATS;
+    for (i = 0; i < SONG_N; i++) { seqs.song_pat[i] = (uint8_t)(i % SEQ_PATS); seqs.song_rep[i] = 1; }
+}
 #define SEQ_VEL 100u                            /* a step's velocity (an accent: 127): AMP's VEL row makes the accent */
 #define SEQ_SLIDE_K 58u                         /* a slide's speed (PR_ENV_EXP: there in ~30 ms, as a 303) */
 
@@ -701,12 +738,40 @@ static void arp_step(uint32_t bi, const uint8_t *nt, const uint8_t *vl, uint32_t
     arp.steps++;
 }
 
-/* ---- the sequencer (ISR, beside the arp, on its clock): a step at a time from patch.seq_*; one voice */
+/* ---- the sequencer (ISR, beside the arp, on its clock): a step at a time from seqs (a pattern, or the song); one
+ * voice. A step with SLIDE, or one before a TIE, holds its note into the next */
+typedef struct { uint8_t pat, pos, entry, rep; } seqpos_t;   /* a step: its pattern, its place, the song's entry, its round */
 static struct {
-    uint32_t pos, was, phase_q8, odd, now, hold;    /* hold: the note slides into the next step */
+    seqpos_t at;                                /* the step to play next */
+    uint32_t was, phase_q8, odd, now, hold;     /* hold: the note goes on into the next step */
     int32_t v, gate_left, count, wait;              /* count: ticks since START (the MIDI clock) */
-    volatile uint32_t steps, playing;           /* (the page follows: steps played, the step playing) */
-} seq = {0, 0, 0, 0, 0, 0, -1, 0, -1, -1, 0, 0};
+    volatile uint32_t steps, playing, playing_pat, entry;   /* (the page follows: steps played, the step, its pattern, entry) */
+} seq = {{0, 0, 0, 0}, 0, 0, 0, 0, 0, -1, 0, -1, -1, 0, 0, 0, 0};
+
+static uint32_t seq_len_of(uint32_t i)          /* pattern i's length */
+{
+    uint32_t n = seqs.pat[i < SEQ_PATS ? i : 0u].len;
+    return n >= 1u && n <= 64u ? n : 16u;
+}
+
+static seqpos_t seq_adv(seqpos_t s)             /* the step after s: on in the pattern, then the song's next round */
+{
+    uint32_t n, r;
+    if (++s.pos < seq_len_of(s.pat))
+        return s;
+    s.pos = 0;
+    if (seqs.mode) {
+        n = seqs.song_len >= 1u && seqs.song_len <= SONG_N ? seqs.song_len : 1u;
+        r = seqs.song_rep[s.entry % SONG_N];
+        if (++s.rep >= (r >= 1u && r <= 16u ? r : 1u)) {
+            s.rep = 0;
+            s.entry = (uint8_t)((s.entry + 1u) % n);
+        }
+        s.pat = (uint8_t)(seqs.song_pat[s.entry % SONG_N] % SEQ_PATS);
+    } else
+        s.pat = (uint8_t)(seqs.cur % SEQ_PATS);   /* (another pattern chosen: from its first step, in time) */
+    return s;
+}
 
 static uint32_t seq_step_len(uint32_t odd)
 {
@@ -715,11 +780,20 @@ static uint32_t seq_step_len(uint32_t odd)
 
 static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
 {
-    uint32_t k = seq.pos, trig = patch.seq_trig[k] < SEQ_TRIGS ? patch.seq_trig[k] : SEQ_REST;
-    uint32_t note = patch.seq_note[k] & 127u, vel = trig == SEQ_ACCENT ? 127u : SEQ_VEL;
+    const pattern_t *p = &seqs.pat[seq.at.pat % SEQ_PATS];
+    uint32_t k = seq.at.pos % 64u, trig = p->trig[k] < SEQ_TRIGS ? p->trig[k] : SEQ_REST;
+    uint32_t note = p->note[k] & 127u, vel = trig == SEQ_ACCENT ? 127u : SEQ_VEL, tie_next;
     seq.playing = k;
-    seq.pos = k + 1u >= eg.seq_steps ? 0u : k + 1u;
-    if (seq.v >= 0 && seq.hold && trig != SEQ_REST && voice[seq.v].gate) {   /* the last one slides into it */
+    seq.playing_pat = seq.at.pat;
+    seq.entry = seq.at.entry;
+    seq.at = seq_adv(seq.at);
+    tie_next = seqs.pat[seq.at.pat % SEQ_PATS].trig[seq.at.pos % 64u] == SEQ_TIE;
+    if (trig == SEQ_TIE) {                      /* the note before goes on (none: a rest) */
+        if (seq.v < 0 || !voice[seq.v].gate) {
+            if (seq.v >= 0) voice[seq.v].ioff = (uint8_t)bi;
+            seq.v = -1;
+        }
+    } else if (seq.v >= 0 && seq.hold && trig != SEQ_REST && voice[seq.v].gate) {   /* the last one slides into it */
         voice[seq.v].inote = (uint8_t)note;
         voice[seq.v].ivel = (uint8_t)vel;
         voice[seq.v].islide = (uint8_t)bi;
@@ -737,7 +811,7 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
             seq.v = (int32_t)v;
         }
     }
-    seq.hold = trig != SEQ_REST && patch.seq_slide[k];
+    seq.hold = seq.v >= 0 && (tie_next || (trig != SEQ_REST && p->slide[k]));
     seq.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.seq_gate) >> 23);
     seq.steps++;
 }
@@ -750,10 +824,11 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
         seq.hold = 0;
         return;
     }
-    if (!seq.was) {                             /* PLAY: from the first step */
+    if (!seq.was) {                             /* PLAY: from the first step (of the pattern, or of the song) */
         seq.was = 1;
         l2_restart = 1;                         /* (LFO 2 too) */
-        seq.pos = 0;
+        seq.at.pos = seq.at.entry = seq.at.rep = 0;
+        seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
         seq.now = 1;
         seq.odd = 0;
         seq.count = -1;
@@ -841,7 +916,9 @@ static void arp_run(uint32_t nb)
                 mc.running = 1; mc.count = -1; mc.wait = -1;
                 mc.last_at = 0;                 /* (no tempo across the pause) */
                 arp.idx = 0;
-                seq.pos = 0; seq.count = -1; seq.wait = -1;   /* (the sequencer: from its first step) */
+                seq.at.pos = seq.at.entry = seq.at.rep = 0;   /* (the sequencer: from its first step) */
+                seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
+                seq.count = -1; seq.wait = -1;
                 l2_restart = 1;
             } else if (st == 0xFBu) {           /* CONTINUE */
                 mc.running = 1;
@@ -1406,11 +1483,10 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.arp_gate = 1638 + (int32_t)(patch.arp_gate & 127u) * (32768 - 1638) / 127;   /* 5 .. 100 % */
         eg.arp_swing = (int32_t)(patch.arp_swing & 127u) * 16384 / 127;
         eg.arp_on = patch.arp_on ? 1u : 0u;
-        spb = DIV_SPB[patch.seq_div < DIV_N ? patch.seq_div : DIV_16];   /* the sequencer: the arp's tempo, its step */
+        spb = DIV_SPB[seqs.div < DIV_N ? seqs.div : DIV_16];   /* the sequencer: the arp's tempo, its step */
         eg.seq_len_q8 = 44100u * 60u * 256u / (bpm * spb);
         eg.seq_spb = spb;
-        eg.seq_steps = patch.seq_len >= 1u && patch.seq_len <= 64u ? patch.seq_len : 16u;
-        eg.seq_gate = 1638 + (int32_t)(patch.seq_gate & 127u) * (32768 - 1638) / 127;
+        eg.seq_gate = 1638 + (int32_t)(seqs.gate & 127u) * (32768 - 1638) / 127;
     }
     fx_set(&patch);
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
@@ -1426,6 +1502,7 @@ static void engine_init(void)
 {
     uint32_t o, k, v;
     fx_init();
+    seqs_init();                                /* (patches.c then brings the saved ones) */
     l2_ph = 0;                                  /* (LFO 2 from the top: the same every time) */
     for (v = 0; v < NV; v++)
         voice[v].itrig = voice[v].ioff = voice[v].islide = 0xFF;

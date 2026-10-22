@@ -14,7 +14,7 @@
  *     'M' st>>7 st&7F d1 d2     a MIDI message received
  *     'X'                       the take ends
  * Not captured: the MASTER knob, the MIDI clock (a take on CLOCK = MIDI plays on the internal tempo). */
-#define CAP_STATE_MAX 3400u
+#define CAP_STATE_MAX 4400u
 static uint8_t cap_buf[CAP_STATE_MAX];
 static uint32_t cap_t0;
 
@@ -39,13 +39,16 @@ static uint32_t cap_state(uint8_t *b, int load)
     CAP_F(&pa_row, 4u);
     CAP_F(&seq_cursor, 1u);
     CAP_F(&seq_on, 1u);
+    CAP_F(&seqs, sizeof seqs);                  /* the patterns and the song */
+    CAP_F(&seq_row, 1u);
+    CAP_F(&song_cursor, 1u);
 #undef CAP_F
     if (load)
         engine_seq_play(seq_on);
     return n;
 }
 _Static_assert(4u + PATCH_SLOTS + (PATCH_SLOTS + 2u) * sizeof(patch_t) + 4u + sizeof(gset_t) + 4u +
-               PG_N * 4u + 10u <= CAP_STATE_MAX, "the capture state fits its buffer");
+               PG_N * 4u + 12u + sizeof(seqs_t) <= CAP_STATE_MAX, "the capture state fits its buffer");
 
 #ifndef DINGHY_HOST
 static int cap_send(uint8_t type, const uint8_t *d, uint32_t n, int timed)   /* d: 7-bit bytes; 0 = sent */

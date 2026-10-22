@@ -63,6 +63,26 @@
   .prm .val { font-size: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .prm input[type=range] { width: 100%; accent-color: #fff; }
   .prm select { width: 100%; padding: 3px 4px; }
+  .seqbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 0 0 10px; color: var(--mid); font-size: 12px; }
+  .seqbar input[type=range] { accent-color: #fff; width: 110px; vertical-align: middle; }
+  .seqrow { display: grid; grid-template-columns: 16px repeat(16, minmax(0, 1fr)) auto; gap: 3px; align-items: center; margin-bottom: 4px; }
+  .seqrow .rowno { color: var(--mid); font-size: 11px; }
+  .cell { aspect-ratio: 1; border: 1px solid var(--box); font-size: 9px; display: flex; align-items: flex-end;
+          justify-content: center; cursor: pointer; user-select: none; color: var(--mid); }
+  .cell.note { background: var(--faint); color: var(--fg); }
+  .cell.acc { background: var(--fg); color: var(--bg); }
+  .cell.tie { border-color: transparent; background: linear-gradient(transparent 35%, var(--faint) 35%, var(--faint) 65%, transparent 65%); }
+  .cell.slide { box-shadow: inset 0 -3px 0 var(--mid); }
+  .cell.past { opacity: .3; }
+  .cell.play { outline: 2px solid var(--fg); }
+  .rowtools { display: flex; gap: 3px; margin-left: 6px; }
+  .rowtools button { font-size: 10px; padding: 2px 5px; }
+  .song { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+  @media (max-width: 560px) { .song { grid-template-columns: repeat(4, minmax(0, 1fr)); } .rowtools { display: none; } }
+  .entry { border: 1px solid var(--box); padding: 4px; font-size: 11px; color: var(--mid); display: flex; flex-direction: column; gap: 3px; }
+  .entry select { width: 100%; font-size: 11px; padding: 1px 2px; }
+  .entry.past { opacity: .3; }
+  .entry.play { border-color: var(--fg); }
   #seq { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; margin-top: 8px; }
   #seq div { aspect-ratio: 1; border: 1px solid var(--box); font-size: 9px; display: flex; align-items: flex-end;
              justify-content: center; cursor: pointer; user-select: none; color: var(--mid); }

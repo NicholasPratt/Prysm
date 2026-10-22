@@ -39,6 +39,32 @@ static struct {
     patch_t p[PATCH_SLOTS];
 } bank;
 
+/* the store holds the bank and, after it, the sequencer's patterns and song (engine.c: seqs); a store from before
+ * them holds the bank alone: then the patterns start empty, and the current sound's pattern becomes pattern 1
+ * (seqs_from_patch, ui.c) */
+static uint8_t store_buf[sizeof bank + sizeof seqs];
+static uint8_t seqs_fresh;                      /* the patterns did not come from the store */
+
+static int store_write(void)                    /* the bank and the patterns, together; 0 = saved */
+{
+    memcpy(store_buf, &bank, sizeof bank);
+    memcpy(store_buf + sizeof bank, &seqs, sizeof seqs);
+    return store_save(store_buf, sizeof store_buf);
+}
+
+static void seqs_from_patch(const patch_t *p)   /* (format 9 and older: a sound's single pattern) -> pattern 1 */
+{
+    uint32_t n = p->seq_len >= 1u && p->seq_len <= 64u ? p->seq_len : 16u, k;
+    seqs.pat[0].len = (uint8_t)n;
+    for (k = 0; k < 64u; k++) {
+        seqs.pat[0].note[k] = p->seq_note[k] & 127u;
+        seqs.pat[0].trig[k] = p->seq_trig[k] < SEQ_TIE ? p->seq_trig[k] : SEQ_REST;
+        seqs.pat[0].slide[k] = p->seq_slide[k] ? 1u : 0u;
+    }
+    seqs.div = p->seq_div < DIV_N ? p->seq_div : DIV_16;
+    seqs.gate = p->seq_gate & 127u;
+}
+
 static int patches_from_old(uint32_t version, uint32_t size)   /* an older bank -> bank; 0 = there was one */
 {
     static uint8_t old[4u + PATCH_SLOTS + PATCH_SLOTS * PATCH_OLD_MAX];   /* version, used[], the patches */
@@ -58,6 +84,15 @@ static int patches_from_old(uint32_t version, uint32_t size)   /* an older bank 
 
 static void patches_load(void)                  /* at boot: the saved bank (converted if older), or an empty one */
 {
+    seqs_fresh = 0;
+    if (store_load(store_buf, sizeof store_buf) == 0) {
+        memcpy(&bank, store_buf, sizeof bank);
+        memcpy(&seqs, store_buf + sizeof bank, sizeof seqs);
+        if (bank.version == PATCH_VERSION && seqs.version == SEQS_VERSION)
+            return;
+    }
+    seqs_init();
+    seqs_fresh = 1;
     if (store_load(&bank, sizeof bank) == 0 && bank.version == PATCH_VERSION)
         return;
     memset(&bank, 0, sizeof bank);
@@ -79,7 +114,7 @@ static int patch_save(uint32_t slot, const patch_t *p)   /* 0 = saved (the old b
     int rc;
     bank.p[slot] = *p;
     bank.used[slot] = 1;
-    if ((rc = store_save(&bank, sizeof bank)) != 0) {
+    if ((rc = store_write()) != 0) {
         bank.p[slot] = old;
         bank.used[slot] = was;
     }

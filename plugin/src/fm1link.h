@@ -25,8 +25,9 @@ public:
     ~Fm1Link();
     // a change made on the FM-1 (called on the link's own thread)
     std::function<void(uint32_t off, uint8_t v)> onChange;
+    std::function<void(uint32_t off, uint8_t v)> onSeqChange;   // (the patterns: a change made on the FM-1)
 
-    void sync(const uint8_t* patch, size_t n); // (main thread) what the FM-1 does not have yet goes to it
+    void sync(const uint8_t* patch, size_t n, const uint8_t* seqs, size_t sn);   // (main thread) what the FM-1 lacks goes to it
     void note(uint8_t st, uint8_t d1, uint8_t d2);   // (audio thread) a note, to be played by the FM-1 itself
     void store(int slot, const uint8_t* patch, size_t n, uint32_t version);   // (main thread) into a slot (0 .. 7)
     std::string status();
@@ -35,7 +36,7 @@ private:
     void run();
     bool open();
     void close();
-    bool ask(char type, const std::vector<uint8_t>& data);   // a message the FM-1 answers; true: answered rc 0
+    int ask(char type, const std::vector<uint8_t>& data);    // a message the FM-1 answers: its rc, -1 none
     void send(char type, const std::vector<uint8_t>& data);
     void receive(const std::vector<unsigned char>& m);
     static void midiIn(double, std::vector<unsigned char>* m, void* self);
@@ -46,10 +47,10 @@ private:
     std::atomic<bool> quit{false};
     std::mutex lock;                             // everything below
     std::condition_variable wake;
-    Mirror mirror;
-    std::vector<uint8_t> dump;
-    size_t patchSize = 0;
-    std::deque<std::pair<uint32_t, uint8_t>> pending;
+    Mirror mirror, smirror;                      // the sound, the patterns (smirror: none from an FM-1 before them)
+    std::vector<uint8_t> dump, sdump;
+    size_t patchSize = 0, seqsSize = 0;
+    std::deque<std::pair<uint32_t, uint8_t>> pending, spending;
     std::deque<std::vector<uint8_t>> stores;    // (slot, size, version, patch ...)
     int answered = -2;                           // the last 'A' rc (-2: none yet)
     char awaiting = 0;

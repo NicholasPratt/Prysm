@@ -59,5 +59,14 @@ WEB const char *web_fmt(uint32_t i, uint32_t v) { return prm_fmt(i, v); }
 WEB uint32_t web_page(void) { return page; }
 WEB uint32_t web_row(void) { return page < PG_N ? row[page] : 0u; }
 WEB uint32_t web_npages(void) { return PG_N; }
-WEB uint32_t web_seq_off(uint32_t which) { return prm_seq_off(which); }
+/* the patterns and song (not part of the sound): their bytes, set one at a time (checked), their layout */
+WEB uint8_t *web_seqs(void) { return (uint8_t *)&seqs; }
+WEB uint32_t web_seqs_size(void) { return sizeof seqs; }
+WEB uint32_t web_seqs_version(void) { return SEQS_VERSION; }
+WEB int web_seq_set(uint32_t off, uint32_t v) { return ed_seq_set(off, v); }
+WEB const char *web_seq_layout(void) { return prm_seq_layout(); }
+WEB void web_seqs_loaded(void) { seqs_dirty = 1; engine_set(&edit); dirty = D_ALL; }   /* (written in place, whole) */
+WEB uint32_t web_seq_entry(void) { return eg.seq_play && seqs.mode ? seq.entry : 0xFFu; }
+WEB void web_seqs_init(void) { seqs_init(); seqs_dirty = 1; engine_set(&edit); dirty = D_ALL; }
+WEB uint32_t web_seq_playing(void) { return eg.seq_play ? seq.playing_pat << 8 | seq.playing : 0xFFFFu; }
 WEB int32_t web_oct(void) { return gset.oct; }

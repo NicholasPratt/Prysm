@@ -41,10 +41,25 @@ int main(void)
     CHECK(got.lfo_amt[0] == 64 && got.lfo_amt[1] == 64 && got.lfo_rate == PATCH_INIT.lfo_rate,
           "the LFO: no amount, the default rate");
     got.lfo_amt[0] = 100; got.lfo_dest[0] = DEST_CUTOFF;
-    CHECK(patch_save(4, &got) == 0 && store_n == sizeof bank, "a save writes format %u (%u bytes)", (unsigned)PATCH_VERSION, (unsigned)store_n);
+    CHECK(seqs_fresh, "a bank from before the patterns: the patterns start empty (to take the sound's pattern)");
+    CHECK(patch_save(4, &got) == 0 && store_n == sizeof bank + sizeof seqs, "a save writes format %u and the patterns (%u bytes)",
+          (unsigned)PATCH_VERSION, (unsigned)store_n);
+    seqs.pat[2].len = 33; seqs.pat[2].trig[5] = SEQ_TIE; seqs.song_len = 7; seqs.mode = 1;
+    CHECK(store_write() == 0, "the patterns saved");
     memset(&bank, 0, sizeof bank);
+    seqs_init();
     patches_load();
     CHECK(patch_get(4, &a) == 0 && !memcmp(&a, &got, sizeof a), "the new format loads back as it was saved");
+    CHECK(!seqs_fresh && seqs.pat[2].len == 33 && seqs.pat[2].trig[5] == SEQ_TIE && seqs.song_len == 7 && seqs.mode == 1,
+          "the patterns and the song load back as they were saved");
+    {                                           /* a sound's own pattern (format 9 and older) -> pattern 1 */
+        patch_t c = PATCH_INIT;
+        c.seq_len = 12; c.seq_note[3] = 60; c.seq_trig[3] = SEQ_ACCENT; c.seq_slide[3] = 1; c.seq_div = DIV_8;
+        seqs_init();
+        seqs_from_patch(&c);
+        CHECK(seqs.pat[0].len == 12 && seqs.pat[0].note[3] == 60 && seqs.pat[0].trig[3] == SEQ_ACCENT &&
+              seqs.pat[0].slide[3] == 1 && seqs.div == DIV_8 && seqs.pat[1].len == 16, "a sound's pattern becomes pattern 1");
+    }
     CHECK(patch_get(2, &a) == 0 && patch_get(7, &a) == 0, "the converted slots stay");
     {                                           /* format 2 (with the LFO, before the effects) -> format 3 */
         struct { uint32_t version; uint8_t used[PATCH_SLOTS]; uint8_t p[PATCH_SLOTS][PATCH_V2_SIZE]; } v2;
@@ -144,7 +159,8 @@ int main(void)
         CHECK(patch_get(6, &a) == 0 && !memcmp(&a, &c, PATCH_V8_SIZE) && bank.version == PATCH_VERSION,
               "format 8: slot 7's sound and comb kept");
         CHECK(a.lfo2_dest == DEST_OFF && a.lfo2_amt == 64, "format 8: LFO 2 comes in with nowhere to go");
-        CHECK(sizeof bank <= STORE_MAX, "the bank fits the store (%u of %u bytes)", (unsigned)sizeof bank, (unsigned)STORE_MAX);
+        CHECK(sizeof bank + sizeof seqs <= STORE_MAX, "the bank and the patterns fit the store (%u of %u bytes)",
+              (unsigned)(sizeof bank + sizeof seqs), (unsigned)STORE_MAX);
     }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;

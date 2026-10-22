@@ -49,7 +49,10 @@
 /* ---- the parameters */
 enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_LFOW, K_RATE, K_ONOFF, K_DEST,
        K_DMS, K_PMS, K_SHIFT, K_ARPM, K_DIV, K_OCT, K_BPM, K_GATE, K_SWING, K_GLIDEM, K_MCHI, K_MCHO, K_CLK,
-       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC, K_BEND };   /* (the step kinds: the step under the cursor) */
+       K_CURSOR, K_SNOTE, K_STRIG, K_SSLIDE, K_SLEN, K_HPF, K_FTYPE, K_LDEST, K_L2DEST, K_L2SYNC, K_BEND,
+       /* the sequencer's own (engine.c: seqs, not the sound; and the SEQ page's EDIT and ENTRY rows) */
+       K_SPAT, K_SDIV, K_SGATE, K_SROW, K_SCOPY, K_SPASTE, K_SCLEAR, K_SMODE, K_SONGLEN, K_SENTRY, K_SEPAT, K_SEREP,
+       K_SINIT };   /* (the step kinds: the step under the cursor) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -123,11 +126,17 @@ static const row_t LFO2_ROWS[] = {               /* (one for all the voices; SYN
     {"DEST", {{"DEST", PO(lfo2_dest), DEST2_N - 1u, K_L2DEST}, {"AMT", PO(lfo2_amt), 127, K_BIP}, NOPRM, NOPRM},
      LIT_L2 | LIT_ENV},
 };
-static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cursor) */
-    {"STEP", {{"STEP", 0, 63, K_CURSOR}, {"NOTE", PO(seq_note), 127, K_SNOTE},
-              {"TRIG", PO(seq_trig), SEQ_TRIGS - 1u, K_STRIG}, {"SLIDE", PO(seq_slide), 1, K_SSLIDE}}, LIT_CURVE},
-    {"PATTERN", {{"LENGTH", PO(seq_len), 64, K_SLEN}, {"DIV", PO(seq_div), DIV_N - 1u, K_DIV},
-                 {"GATE", PO(seq_gate), 127, K_GATE}, {"BPM", PO(arp_bpm), 200, K_BPM}}, LIT_ENV},
+static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cursor, in the pattern edited) */
+    {"STEP", {{"STEP", 0, 63, K_CURSOR}, {"NOTE", 0, 127, K_SNOTE},
+              {"TRIG", 0, SEQ_TRIGS - 1u, K_STRIG}, {"SLIDE", 0, 1, K_SSLIDE}}, LIT_CURVE},
+    {"PATTERN", {{"PATT", 0, SEQ_PATS - 1u, K_SPAT}, {"LENGTH", 0, 64, K_SLEN},
+                 {"DIV", 0, DIV_N - 1u, K_SDIV}, {"GATE", 0, 127, K_SGATE}}, LIT_ENV},
+    {"EDIT", {{"ROW", 0, 4, K_SROW}, {"COPY", 0, 1, K_SCOPY},   /* (ROW 5: ALL, the whole pattern) */
+              {"PASTE", 0, 1, K_SPASTE}, {"CLEAR", 0, 1, K_SCLEAR}}, LIT_CURVE},
+    {"SONG", {{"MODE", 0, 1, K_SMODE}, {"LENGTH", 0, SONG_N, K_SONGLEN},
+              {"BPM", PO(arp_bpm), 200, K_BPM}, {"INIT", 0, 1, K_SINIT}}, LIT_ALL},
+    {"ENTRY", {{"ENTRY", 0, SONG_N - 1u, K_SENTRY}, {"PATT", 0, SEQ_PATS - 1u, K_SEPAT},
+               {"REPEAT", 0, 16, K_SEREP}, NOPRM}, LIT_ALL},
 };
 static const row_t SETUP_ROWS[] = {
     {"MIDI", {{"IN", GO(midi_in), 16, K_MCHI}, {"OUT", GO(midi_out), 15, K_MCHO},
@@ -186,14 +195,41 @@ enum { D_HDR = 1, D_GFX = 2, D_LEG = 4, D_ROWS = 8, D_ALL = 15 };
 
 static uint8_t seq_cursor;                      /* the SEQ page's step (0..63) */
 static uint8_t seq_rec;                         /* REC: keys write notes at the cursor */
+static uint8_t seq_row;                         /* the EDIT row's row: 0..3, 4 = ALL (the whole pattern) */
+static uint8_t song_cursor;                     /* the ENTRY row's entry (0..15) */
+static uint8_t seqs_dirty;                      /* the patterns changed: the app saves them (when quiet) */
+static uint8_t ui_none;                         /* (an action's knob: no value of its own) */
+static uint8_t clip_rows, clip_len;             /* the clipboard: 0 empty, 1 a row of 16, 4 a whole pattern (its length) */
+static uint8_t clip_note[64], clip_trig[64], clip_slide[64];
+static uint32_t seq_arm, seq_arm_at;            /* a CLEAR ALL or INIT asked once: its kind, when (turn again to do it) */
+static pattern_t *seq_ed(void) { return &seqs.pat[seqs.cur % SEQ_PATS]; }   /* the pattern edited */
+
+static int seq_kind(uint32_t k)                 /* a parameter of the sequencer's own (seqs), not of the sound */
+{
+    return k == K_SNOTE || k == K_STRIG || k == K_SSLIDE || k == K_SLEN || (k >= K_SPAT && k <= K_SINIT);
+}
 
 static uint8_t *pval(uint32_t pg, const prm_t *p)
 {
     uint32_t base;
-    if (p->kind == K_CURSOR)
-        return &seq_cursor;
-    if (p->kind == K_SNOTE || p->kind == K_STRIG || p->kind == K_SSLIDE)   /* the step under the cursor */
-        return (uint8_t *)&edit + p->off + seq_cursor;
+    switch (p->kind) {
+    case K_CURSOR: return &seq_cursor;
+    case K_SNOTE: return &seq_ed()->note[seq_cursor % 64u];   /* the step under the cursor */
+    case K_STRIG: return &seq_ed()->trig[seq_cursor % 64u];
+    case K_SSLIDE: return &seq_ed()->slide[seq_cursor % 64u];
+    case K_SLEN: return &seq_ed()->len;
+    case K_SPAT: return &seqs.cur;
+    case K_SDIV: return &seqs.div;
+    case K_SGATE: return &seqs.gate;
+    case K_SROW: return &seq_row;
+    case K_SMODE: return &seqs.mode;
+    case K_SONGLEN: return &seqs.song_len;
+    case K_SENTRY: return &song_cursor;
+    case K_SEPAT: return &seqs.song_pat[song_cursor % SONG_N];
+    case K_SEREP: return &seqs.song_rep[song_cursor % SONG_N];
+    case K_SCOPY: case K_SPASTE: case K_SCLEAR: case K_SINIT: ui_none = 0; return &ui_none;
+    default: break;
+    }
     if (PAGES[pg].osc == G)
         return (uint8_t *)&gset + p->off;
     base = PAGES[pg].osc ? (PAGES[pg].osc - 1u) * (uint32_t)sizeof edit.osc[0] : 0u;
@@ -274,7 +310,16 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     }
     case K_STRIG: put(s, SEQ_TRIG_NAME[*v < SEQ_TRIGS ? *v : 0u]); break;
     case K_SSLIDE: put(s, *v ? "ON" : "OFF"); break;
-    case K_SLEN: num(s, *v); break;
+    case K_SLEN: case K_SONGLEN: num(s, *v); break;
+    case K_SPAT: case K_SEPAT: num(put(s, "P"), *v % SEQ_PATS + 1u); break;
+    case K_SDIV: put(s, DIV_NAME[*v < DIV_N ? *v : DIV_16]); break;
+    case K_SGATE: put(num(s, 5u + *v * 95u / 127u), "%"); break;
+    case K_SROW: if (*v >= 4u) put(s, "ALL"); else num(s, *v + 1u); break;
+    case K_SCOPY: if (clip_rows) put(s, clip_rows == 4u ? "PATT" : "ROW"); else put(s, "-"); break;
+    case K_SPASTE: case K_SCLEAR: case K_SINIT: put(s, "TURN"); break;
+    case K_SMODE: put(s, *v ? "SONG" : "PATT"); break;
+    case K_SENTRY: num(s, *v + 1u); break;
+    case K_SEREP: num(put(s, "x"), *v ? *v : 1u); break;
     case K_HPF: if (*v) hz(s, hp_q(*v)); else put(s, "OFF"); break;
     case K_FTYPE: put(s, FLT_NAME[*v < FLT_N ? *v : 0u]); break;
     case K_RATE: {                              /* Hz: 0.05 .. 40 */
@@ -709,14 +754,44 @@ static void gfx_setup(void)                     /* the MIDI setup, in words */
 /* the sequencer: 64 squares, 16 a row: a rest empty, a note grey, an accent white, a slide joined to the next;
  * past the length a dot; the cursor ringed (doubled while REC), the step playing marked under */
 static uint32_t seq_drawn = 0xFFFFFFFFu;
+/* the song (the SONG and ENTRY rows): 16 entries, 8 a row, each its pattern and repeats; past the length dots; the
+ * entry under the cursor ringed, the one playing marked under */
+static void gfx_song(uint32_t lit)
+{
+    uint32_t i, n = seqs.song_len >= 1u && seqs.song_len <= SONG_N ? seqs.song_len : 1u;
+    char t[8];
+    for (i = 0; i < SONG_N; i++) {
+        int32_t x = 4 + (int32_t)(i % 8u) * 29, y = 6 + (int32_t)(i / 8u) * 60;
+        uint32_t r = seqs.song_rep[i] >= 1u && seqs.song_rep[i] <= 16u ? seqs.song_rep[i] : 1u;
+        if (i >= n) {
+            cv_rect(x + 11, y + 22, 3, 3, C_BOX);
+            continue;
+        }
+        cv_frame(x, y, 25, 46, seqs.mode ? C_MID : C_BOX);
+        num(put(t, "P"), seqs.song_pat[i] % SEQ_PATS + 1u);
+        cv_text(x + (25 - text_w(&FONT_S, t)) / 2, y + 5, &FONT_S, t, C_BRIGHT);
+        num(put(t, "x"), r);
+        cv_text(x + (25 - text_w(&FONT_S, t)) / 2, y + 25, &FONT_S, t, C_MID);
+        if (i == song_cursor && (lit & LIT_ENV)) cv_frame(x - 2, y - 2, 29, 50, C_BRIGHT);
+        if (eg.seq_play && seqs.mode && i == seq.entry) cv_rect(x, y + 49, 25, 3, C_BRIGHT);
+    }
+}
+
+/* the pattern edited: 64 squares, 16 a row: a rest empty, a note grey, an accent white, a slide joined to the next, a
+ * tie a bar on from the step before; past the length a dot; the cursor ringed (doubled while REC), the step playing
+ * marked under; on the EDIT row, the row it works on framed */
 static void gfx_seq(uint32_t lit)
 {
-    uint32_t k, len = edit.seq_len >= 1u && edit.seq_len <= 64u ? edit.seq_len : 16u;
-    (void)lit;
+    const pattern_t *pt = seq_ed();
+    uint32_t k, len = pt->len >= 1u && pt->len <= 64u ? pt->len : 16u;
     seq_drawn = seq.steps;
+    if (row[PG_SEQ] >= 3u) {
+        gfx_song(row[PG_SEQ] == 4u ? LIT_ENV : 0u);
+        return;
+    }
     for (k = 0; k < 64u; k++) {
         int32_t x = 2 + (int32_t)(k % 16u) * 15, y = 3 + (int32_t)(k / 16u) * 30, gx = (int32_t)(k % 16u);
-        uint32_t tr = edit.seq_trig[k];
+        uint32_t tr = pt->trig[k];
         if (gx == 4 || gx == 8 || gx == 12)     /* the beats */
             cv_vdots(x - 2, y, y + 22, 2);
         if (k >= len) {
@@ -725,19 +800,26 @@ static void gfx_seq(uint32_t lit)
         }
         if (tr == SEQ_REST)
             cv_frame(x, y, 12, 22, C_BOX);
+        else if (tr == SEQ_TIE)                 /* the note before, on */
+            cv_rect(gx ? x - 3 : x, y + 7, gx ? 15 : 12, 8, C_MID);
         else {
             cv_rect(x, y, 12, 22, tr == SEQ_ACCENT ? C_BRIGHT : C_MID);
-            if (edit.seq_slide[k] && k + 1u < len && (k % 16u) != 15u)
+            if (pt->slide[k] && k + 1u < len && (k % 16u) != 15u)
                 cv_rect(x + 12, y + 10, 3, 3, tr == SEQ_ACCENT ? C_BRIGHT : C_MID);   /* the slide: on to the next */
         }
-        if (k == seq_cursor) {                  /* the cursor */
+        if (k == seq_cursor && row[PG_SEQ] == 0u) {   /* the cursor */
             uint16_t c = C_BRIGHT;
             cv_frame(x - 2, y - 2, 16, 26, c);
             if (seq_rec) cv_frame(x - 1, y - 1, 14, 24, c);
         }
-        if (eg.seq_play && k == seq.playing)    /* the step playing */
+        if (eg.seq_play && k == seq.playing && seq.playing_pat == seqs.cur % SEQ_PATS)   /* the step playing */
             cv_rect(x, y + 24, 12, 2, C_BRIGHT);
     }
+    if (row[PG_SEQ] == 2u) {                    /* EDIT: its row (or all of them) */
+        int32_t y0 = seq_row < 4u ? (int32_t)seq_row * 30 : 0, h = seq_row < 4u ? 30 : 120;
+        cv_frame(0, y0, 240, h, C_BRIGHT);
+    }
+    (void)lit;
 }
 
 static void gfx_mix(void)
@@ -815,6 +897,10 @@ static void draw_hdr(void)
     uint32_t cpu = 0;
     cv_begin(240, 20, C_BLACK);
     x = cv_text(4, 1, &FONT_S, page < PG_N ? PAGES[page].name : "PATCH", C_BRIGHT);
+    if (page == PG_SEQ) {                       /* the pattern edited, or the song */
+        if (seqs.mode) x = cv_text(x + 6, 1, &FONT_S, "SONG", C_BRIGHT);
+        else { char t[4]; num(put(t, "P"), seqs.cur % SEQ_PATS + 1u); x = cv_text(x + 6, 1, &FONT_S, t, C_BRIGHT); }
+    }
     if (page == PG_SEQ && seq_rec) {            /* REC: inverted */
         cv_rect(x + 6, 1, 36, 16, C_BRIGHT);
         x = cv_text(x + 10, 1, &FONT_S, "REC", C_BLACK) + 4;
@@ -972,6 +1058,50 @@ static void pa_say(const char *a, uint32_t slot)   /* the message line: a, then 
     char *e = put(pa_msgbuf, a);
     if (slot) num(e, slot);
     pa_msg = pa_msgbuf;
+}
+
+/* the EDIT row's COPY, PASTE, CLEAR and the SONG row's INIT (a knob turned either way); CLEAR ALL and INIT ask first:
+ * the same turn again within 3 s does it. 1: the timing may have changed (the engine's to know) */
+static int seq_action(uint32_t kind)
+{
+    pattern_t *pt = seq_ed();
+    uint32_t a = seq_row < 4u ? seq_row * 16u : 0u, n = seq_row < 4u ? 16u : 64u, k;
+    char msg[16], *e;
+    if ((kind == K_SINIT || (kind == K_SCLEAR && seq_row >= 4u)) &&
+        (seq_arm != kind || fm1_ms - seq_arm_at > 3000u)) {
+        seq_arm = kind;
+        seq_arm_at = fm1_ms;
+        pop(kind == K_SINIT ? "INIT ALL?" : "CLEAR ALL?", "AGAIN");
+        return 0;
+    }
+    seq_arm = 0;
+    e = seq_row < 4u ? num(put(msg, "ROW "), seq_row + 1u) : num(put(msg, "P"), seqs.cur % SEQ_PATS + 1u);
+    if (kind == K_SCOPY) {
+        for (k = 0; k < n; k++) { clip_note[k] = pt->note[a + k]; clip_trig[k] = pt->trig[a + k]; clip_slide[k] = pt->slide[a + k]; }
+        clip_rows = seq_row < 4u ? 1u : 4u;
+        clip_len = pt->len;
+        pop("COPIED", msg);
+    } else if (kind == K_SPASTE) {
+        if (!clip_rows) { pop("PASTE", "EMPTY"); return 0; }
+        if (clip_rows == 4u && seq_row < 4u) { pop("PASTE", "ROW=ALL"); return 0; }   /* (a pattern: into a pattern) */
+        for (k = 0; k < n; k++) {               /* (a row into ALL: into every row) */
+            uint32_t c = clip_rows == 1u ? k % 16u : k;
+            pt->note[a + k] = clip_note[c]; pt->trig[a + k] = clip_trig[c]; pt->slide[a + k] = clip_slide[c];
+        }
+        if (clip_rows == 4u) pt->len = clip_len;
+        pop("PASTED", msg);
+    } else if (kind == K_SCLEAR) {
+        for (k = 0; k < n; k++) { pt->trig[a + k] = SEQ_REST; pt->slide[a + k] = 0; }
+        pop("CLEARED", msg);
+    } else {                                    /* INIT: every pattern empty, the song P1 .. P4, PATTERN mode */
+        seqs_init();
+        seq_cursor = song_cursor = 0;
+        pop("INIT", "DONE");
+    }
+    (void)e;
+    seqs_dirty = 1;
+    dirty |= D_HDR | D_GFX | D_ROWS;
+    return kind == K_SINIT;
 }
 
 static int pa_do(void)                          /* the SAVE button on the PATCH screen; 1 = the sound changed */
@@ -1245,7 +1375,8 @@ static int ui_input(uint32_t buttons)
         if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE || (p->kind == K_BPM && gset.clock))
             continue;                           /* (on the MIDI clock the tempo is the clock's) */
         if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM ||
-            p->kind == K_CLK || p->kind == K_STRIG || p->kind == K_SSLIDE) {
+            p->kind == K_CLK || p->kind == K_STRIG || p->kind == K_SSLIDE || p->kind == K_SMODE ||
+            p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT) {
             /* one step per two detents: no flicker */
             slow[i] += d;
             if (slow[i] > -2 && slow[i] < 2) continue;
@@ -1255,9 +1386,16 @@ static int ui_input(uint32_t buttons)
             d *= 3;                             /* a fast turn covers the range quickly */
         }
         last_turn[i] = fm1_ms;
+        if (p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT) {
+            if (seq_action(p->kind)) changed = 1;   /* (a turn either way does it) */
+            continue;
+        }
         v = pval(page, p);
         x = (int32_t)*v + d;
-        x = x < (p->kind == K_SLEN ? 1 : 0) ? (p->kind == K_SLEN ? 1 : 0) : x > p->max ? p->max : x;
+        {
+            int32_t mn = p->kind == K_SLEN || p->kind == K_SONGLEN || p->kind == K_SEREP ? 1 : 0;
+            x = x < mn ? mn : x > p->max ? p->max : x;
+        }
         if ((p->kind == K_LDEST || p->kind == K_L2DEST) && (x == DEST_LFORATE || x == DEST_LFOAMT))
             /* the LFOs: past the mod envelope's own (LFORATE, LFOAMT) */
             x = d > 0 ? DEST_SPREAD : DEST_MIX;
@@ -1269,8 +1407,14 @@ static int ui_input(uint32_t buttons)
             fmt(val, p, v);
             pop(p->label, val);
         }
-        if (p->kind == K_CURSOR) {              /* the cursor: not the sound */
+        if (p->kind == K_CURSOR || p->kind == K_SROW || p->kind == K_SENTRY) {   /* a cursor: not the sound */
             dirty |= D_GFX | D_ROWS;
+            continue;
+        }
+        if (seq_kind(p->kind)) {                /* the patterns: saved by the app (when quiet); timing to the engine */
+            seqs_dirty = 1;
+            if (p->kind == K_SDIV || p->kind == K_SGATE) changed = 1;
+            dirty |= D_HDR | D_GFX | D_ROWS;
             continue;
         }
         if (PAGES[page].osc == G) {             /* a setting, not the sound: saved; the clock to the engine */
@@ -1285,15 +1429,17 @@ static int ui_input(uint32_t buttons)
     return (int)changed;
 }
 
-/* step entry: on the SEQ page with REC on, a key (or MIDI note) writes its note at the cursor (a rest becomes a note;
- * an accent stays one), and the cursor moves on (round within the length). 1: the sound changed */
+/* step entry: on the SEQ page with REC on, a key (or MIDI note) writes its note at the cursor (a rest or a tie becomes
+ * a note; an accent stays one), and the cursor moves on (round within the length). 1: the sound changed */
 static int ui_seq_key(uint32_t note)
 {
-    uint32_t len = edit.seq_len >= 1u && edit.seq_len <= 64u ? edit.seq_len : 16u;
+    pattern_t *pt = seq_ed();
+    uint32_t len = pt->len >= 1u && pt->len <= 64u ? pt->len : 16u;
     if (page != PG_SEQ || !seq_rec || note > 127u)
         return 0;
-    edit.seq_note[seq_cursor] = (uint8_t)note;
-    if (edit.seq_trig[seq_cursor] == SEQ_REST) edit.seq_trig[seq_cursor] = SEQ_NOTE;
+    pt->note[seq_cursor % 64u] = (uint8_t)note;
+    if (pt->trig[seq_cursor % 64u] == SEQ_REST || pt->trig[seq_cursor % 64u] == SEQ_TIE) pt->trig[seq_cursor % 64u] = SEQ_NOTE;
+    seqs_dirty = 1;
     seq_cursor = (uint8_t)(seq_cursor + 1u >= len ? 0u : seq_cursor + 1u);
     dirty |= D_HDR | D_GFX | D_ROWS;
     return 1;
@@ -1305,6 +1451,10 @@ static void ui_init(int32_t slot)                /* the sound in that slot (the 
     edit = PATCH_INIT;
     if (slot >= 0 && slot < (int32_t)PATCH_SLOTS && patch_get((uint32_t)slot, &edit) == 0)
         cur_slot = slot;
+    if (seqs_fresh && cur_slot >= 0) {          /* (a bank from before the patterns: its sound's pattern is pattern 1) */
+        seqs_from_patch(&edit);
+        seqs_dirty = 1;
+    }
     clean = edit;
     engine_set(&edit);
     lcd_fill(0, 0, 240, 240, C_BLACK);

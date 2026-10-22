@@ -29,6 +29,13 @@ void prysm_clock(uint32_t st, uint32_t frame_ahead);   /* 0xF8 tick, 0xFA start,
 void prysm_seq_play(int on);
 void prysm_render(float *l, float *r, uint32_t n);
 
+const uint8_t *prysm_seqs(void);               /* the sequencer's patterns and song (not part of the sound) */
+uint32_t prysm_seqs_size(void);
+uint32_t prysm_seqs_version(void);
+int prysm_seq_set(uint32_t off, uint32_t v);    /* a byte of them, checked; 1: set */
+int prysm_seqs_load(const uint8_t *p, uint32_t n, uint32_t version);
+const char *prysm_seq_layout(void);             /* where each field is (emu/params.c) */
+
 uint32_t prysm_nparams(void);
 const char *prysm_param(uint32_t i);            /* "page|row|label|knob|offset|max|min|kind" */
 const char *prysm_fmt(uint32_t i, uint32_t v);  /* as the FM-1 shows it */

@@ -322,5 +322,13 @@ static void app_main(void)
             settings_save(&gset, sizeof gset);
             dirty = 0;
         }
+        {                                       /* the patterns and the song: 3 s after the last change, when silent */
+            static uint32_t seqs_at;            /* (the flash write would cut a note for ~50 ms) */
+            if (seqs_dirty == 1u) { seqs_dirty = 2; seqs_at = fm1_ms; }
+            if (seqs_dirty == 2u && engine_quiet() && fm1_ms - seqs_at > 3000u) {
+                seqs_dirty = 0;
+                store_write();
+            }
+        }
     }
 }

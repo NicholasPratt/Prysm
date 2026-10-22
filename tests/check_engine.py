@@ -408,6 +408,14 @@ check("seq slide glides", abs(before[-1] - 130.8) < 3 and all(140 < f < 194 for 
       and abs(cn[1] - 196) < 4,
       f"C3 {before[-1]:.0f} Hz, then {', '.join(f'{f:.0f}' for f in during)} sliding, G3 {np.median(after):.0f} Hz;"
       f" without the slide {cn[1]:.0f} Hz at once")
+xt = load("seq_tie")
+held = min(rms(xt, a, a + 0.005) for a in np.arange(0.02, 2.4 * STEP, 0.005))   # (the last tied step: its own 50 % gate)
+gone = rms(xt, 3 * STEP + 0.03, 4 * STEP - 0.005)
+again = len(starts(xt, int(0.01 * FS), int(2.4 * STEP * FS)))
+check("seq tie", held > 0.02 and gone < 0.005 and again == 0,
+      f"C3 held through steps 1-3 (lowest {held:.3f}, no new attack: {again}), the rest after silent ({gone:.4f})")
+got = seq_notes("seq_song", 12)
+check("seq song", got == ([48] * 4 + [55] * 2) * 2, f"{got} (P1 twice, P2 once, round)")
 xs = load("seq_clock")
 quiet = rms(xs, 0.1, 0.45)
 first = seq_notes("seq_clock", 4, t0=0.5 + (100 + 248) / FS)

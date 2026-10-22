@@ -45,8 +45,8 @@ std::atomic<void*> g_owner{nullptr};            // the core is one per process: 
 
 struct Param { clap_id id; uint32_t index, off, max, min, kind; std::string name, module; double def; };
 
-struct Op { uint8_t type, v; uint16_t off; };   // to the audio thread: 0 set off = v, 1 note on (off, v), 2 note off
-enum { OP_SET, OP_ON, OP_OFF };
+struct Op { uint8_t type, v; uint16_t off; };   // to the audio thread: set off = v, note on (off, v), note off, a pattern byte
+enum { OP_SET, OP_ON, OP_OFF, OP_SEQ };
 
 struct Prysm {
     clap_plugin_t plugin{};
@@ -63,6 +63,7 @@ struct Prysm {
     Op ops[NOPS];
     std::atomic<unsigned> opsW{0}, opsR{0};
     std::vector<uint8_t> loadPending;           // a whole sound from the project (main -> audio, under loadLock)
+    std::vector<uint8_t> seqsPending;           // and its patterns (empty: none came)
     std::mutex loadLock;
     std::atomic<bool> loadReady{false};
 
@@ -76,8 +77,8 @@ struct Prysm {
     // the watchers
     std::unique_ptr<Fm1Link> link;
     std::mutex inboxLock;
-    std::vector<std::pair<uint32_t, uint8_t>> inbox;   // changes made on the FM-1 (from its thread)
-    Mirror guiMirror;
+    std::vector<std::pair<uint32_t, uint8_t>> inbox, sinbox;   // changes made on the FM-1 (from its thread)
+    Mirror guiMirror, guiSMirror;
     std::unique_ptr<choc::ui::WebView> web;
     bool guiReady = false;
     std::string guiStatus;
@@ -113,6 +114,7 @@ struct Prysm {
         if (loadReady.exchange(false)) {
             std::lock_guard<std::mutex> g(loadLock);
             prysm_load(loadPending.data() + 4, (uint32_t)loadPending.size() - 4, loadPending[0]);
+            if (seqsPending.size() > 1) prysm_seqs_load(seqsPending.data() + 1, (uint32_t)seqsPending.size() - 1, seqsPending[0]);
         }
         for (unsigned r; (r = opsR.load(std::memory_order_relaxed)) != opsW.load(std::memory_order_acquire);) {
             const Op o = ops[r % NOPS];
@@ -120,7 +122,8 @@ struct Prysm {
             if (o.type == OP_SET) {
                 prysm_set(o.off, o.v);
                 tellHost(out, o.off, prysm_patch()[o.off]);
-            } else note(o.off, o.type == OP_ON ? (o.v ? o.v : 1) : 0);
+            } else if (o.type == OP_SEQ) prysm_seq_set(o.off, o.v);
+            else note(o.off, o.type == OP_ON ? (o.v ? o.v : 1) : 0);
         }
     }
 
@@ -244,11 +247,10 @@ struct Prysm {
     }
 
     // ---- the window: the editor page, served from the plugin itself
-    std::string patchJson()
+    static std::string bytesJson(const uint8_t* pt, uint32_t n)
     {
         std::string s = "[";
-        const uint8_t* pt = prysm_patch();
-        for (uint32_t i = 0; i < prysm_patch_size(); i++) s += (i ? "," : "") + std::to_string(pt[i]);
+        for (uint32_t i = 0; i < n; i++) s += (i ? "," : "") + std::to_string(pt[i]);
         return s + "]";
     }
 
@@ -276,9 +278,12 @@ struct Prysm {
         }
         web->bind("prysm_hello", [this](const choc::value::ValueView&) -> choc::value::Value {
             guiMirror.reset(prysm_patch(), prysm_patch_size());
+            guiSMirror.reset(prysm_seqs(), prysm_seqs_size());
             guiReady = true;
             guiStatus.clear();
-            return choc::value::createString("{\"patch\":" + patchJson() + ",\"status\":\"" + (link ? link->status() : "") + "\"}");
+            return choc::value::createString("{\"patch\":" + bytesJson(prysm_patch(), prysm_patch_size()) + ",\"seqs\":" +
+                                             bytesJson(prysm_seqs(), prysm_seqs_size()) + ",\"status\":\"" +
+                                             (link ? link->status() : "") + "\"}");
         });
         web->bind("prysm_set", [this](const choc::value::ValueView& a) -> choc::value::Value {
             for (uint32_t i = 0; i + 1 < a.size(); i += 2) {
@@ -286,6 +291,15 @@ struct Prysm {
                 if (o >= prysm_patch_size()) continue;
                 guiMirror.mine(o, (uint8_t)v);
                 push({OP_SET, (uint8_t)v, (uint16_t)o});
+            }
+            return {};
+        });
+        web->bind("prysm_seqset", [this](const choc::value::ValueView& a) -> choc::value::Value {
+            for (uint32_t i = 0; i + 1 < a.size(); i += 2) {
+                const uint32_t o = (uint32_t)a[i].getWithDefault<int64_t>(0), v = (uint32_t)a[i + 1].getWithDefault<int64_t>(0);
+                if (o >= prysm_seqs_size()) continue;
+                guiSMirror.mine(o, (uint8_t)v);
+                push({OP_SEQ, (uint8_t)v, (uint16_t)o});
             }
             return {};
         });
@@ -362,14 +376,24 @@ struct Prysm {
             std::vector<std::pair<uint32_t, uint8_t>> in;
             { std::lock_guard<std::mutex> g(inboxLock); in.swap(inbox); }
             for (auto& c : in) push({OP_SET, c.second, (uint16_t)c.first});
+            std::vector<std::pair<uint32_t, uint8_t>> sin;
+            { std::lock_guard<std::mutex> g(inboxLock); sin.swap(sinbox); }
+            for (auto& c : sin) push({OP_SEQ, c.second, (uint16_t)c.first});
         }
         std::vector<uint8_t> pt(prysm_patch(), prysm_patch() + prysm_patch_size());
-        if (link) link->sync(pt.data(), pt.size());
+        std::vector<uint8_t> sq(prysm_seqs(), prysm_seqs() + prysm_seqs_size());
+        if (link) link->sync(pt.data(), pt.size(), sq.data(), sq.size());
         if (web && guiReady) {
             auto ch = guiMirror.diff(pt.data(), pt.size());
             if (!ch.empty()) {
                 std::string s = "prysmNative.changes([";
                 for (size_t i = 0; i < ch.size(); i++) s += (i ? "," : "") + std::to_string(ch[i].first) + "," + std::to_string(ch[i].second);
+                js(s + "])");
+            }
+            auto sc = guiSMirror.diff(sq.data(), sq.size());
+            if (!sc.empty()) {
+                std::string s = "prysmNative.seqChanges([";
+                for (size_t i = 0; i < sc.size(); i++) s += (i ? "," : "") + std::to_string(sc[i].first) + "," + std::to_string(sc[i].second);
                 js(s + "])");
             }
             const std::string st = link ? link->status() : "";
@@ -469,15 +493,21 @@ const clap_plugin_params_t PARAMS = {
         s->drain(out);
     }};
 
-// the project's copy: "PRYS", 1, the patch format, its size (2 bytes), the patch, the plugin's 4 switches
+// the project's copy: "PRYS", 2, the patch format, its size (2 bytes), the patch, the plugin's 4 switches, then the
+// patterns' format, their size (2 bytes), the patterns and song (version 1: without them)
 const clap_plugin_state_t STATE = {
     [](const clap_plugin_t* p, const clap_ostream_t* st) -> bool {
         auto s = P(p);
         if (!s->owner) return false;
         const uint32_t n = prysm_patch_size();
-        std::vector<uint8_t> b{'P', 'R', 'Y', 'S', 1, (uint8_t)prysm_patch_version(), (uint8_t)(n >> 8), (uint8_t)n};
+        const uint32_t sn = prysm_seqs_size();
+        std::vector<uint8_t> b{'P', 'R', 'Y', 'S', 2, (uint8_t)prysm_patch_version(), (uint8_t)(n >> 8), (uint8_t)n};
         b.insert(b.end(), prysm_patch(), prysm_patch() + n);
         for (auto& e : s->extra) b.push_back((uint8_t)e.load());
+        b.push_back((uint8_t)prysm_seqs_version());
+        b.push_back((uint8_t)(sn >> 8));
+        b.push_back((uint8_t)sn);
+        b.insert(b.end(), prysm_seqs(), prysm_seqs() + sn);
         for (size_t at = 0; at < b.size();) {
             const int64_t w = st->write(st, b.data() + at, b.size() - at);
             if (w <= 0) return false;
@@ -490,7 +520,7 @@ const clap_plugin_state_t STATE = {
         std::vector<uint8_t> b;
         uint8_t buf[1024];
         for (int64_t r; (r = st->read(st, buf, sizeof buf)) > 0;) b.insert(b.end(), buf, buf + r);
-        if (b.size() < 8 || std::memcmp(b.data(), "PRYS", 4) || b[4] != 1) return false;
+        if (b.size() < 8 || std::memcmp(b.data(), "PRYS", 4) || (b[4] != 1 && b[4] != 2)) return false;
         const uint32_t n = (uint32_t)b[6] << 8 | b[7];
         if (b.size() < 8 + n || !s->owner) return false;
         for (int i = 0; i < 4 && 8 + n + i < b.size(); i++) s->setExtra(P_SYNC + i, b[8 + n + i]);
@@ -498,6 +528,15 @@ const clap_plugin_state_t STATE = {
             std::lock_guard<std::mutex> g(s->loadLock);
             s->loadPending.assign({b[5], 0, 0, 0});
             s->loadPending.insert(s->loadPending.end(), b.begin() + 8, b.begin() + 8 + n);
+            s->seqsPending.clear();
+            const size_t at = 8 + n + 4;        // (version 2: the patterns after the switches)
+            if (b[4] >= 2 && b.size() >= at + 3) {
+                const size_t sn = (size_t)b[at + 1] << 8 | b[at + 2];
+                if (b.size() >= at + 3 + sn) {
+                    s->seqsPending.push_back(b[at]);
+                    s->seqsPending.insert(s->seqsPending.end(), b.begin() + at + 3, b.begin() + at + 3 + sn);
+                }
+            }
         }
         s->loadReady = true;
         if (!s->active) s->drain(nullptr);
@@ -594,6 +633,7 @@ const clap_plugin_t* create(const clap_host_t* host)
             }
             s->link = std::make_unique<Fm1Link>();
             s->link->onChange = [s](uint32_t o, uint8_t v) { std::lock_guard<std::mutex> g(s->inboxLock); s->inbox.emplace_back(o, v); };
+            s->link->onSeqChange = [s](uint32_t o, uint8_t v) { std::lock_guard<std::mutex> g(s->inboxLock); s->sinbox.emplace_back(o, v); };
         }
         if (s->hostTimer) s->hostTimer->register_timer(s->host, 33, &s->timer);
         return true;

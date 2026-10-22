@@ -320,26 +320,40 @@ int main(void)
         static int16_t s[2u * 44100u * 3u];
         static const uint8_t PAT[8] = {48, 52, 55, 0, 60, 0, 55, 52};   /* C3 E3 G3 - C4 - G3 E3 (0: a rest) */
         uint32_t variant;
-        for (variant = 0; variant < 5u; variant++) {   /* plain, length 3, accents, slide, no slide */
+        for (variant = 0; variant < 7u; variant++) {   /* plain, length 3, accents, slide, no slide, tie, song */
             patch_t q = solo();
+            pattern_t *pt = &seqs.pat[0];
             uint32_t done = 0, total = 44100u * 3u / FRAMES * FRAMES, k;
-            static const char *const NAMES[5] = {"seq", "seq_len3", "seq_accent", "seq_slide", "seq_noslide"};
-            q.amp_r = 5; q.arp_bpm = 80; q.seq_div = DIV_16; q.seq_gate = 64; q.seq_len = 8;
+            static const char *const NAMES[7] = {"seq", "seq_len3", "seq_accent", "seq_slide", "seq_noslide", "seq_tie",
+                                                 "seq_song"};
+            memset(voice, 0, sizeof voice);
+            engine_init();                      /* (the patterns: empty) */
+            q.amp_r = 5; q.arp_bpm = 80; seqs.div = DIV_16; seqs.gate = 64; pt->len = 8;
             q.vel_amp = 127;                    /* (accents: louder by velocity) */
             for (k = 0; k < 8u; k++) {
-                q.seq_note[k] = PAT[k] ? PAT[k] : 48;
-                q.seq_trig[k] = PAT[k] ? SEQ_NOTE : SEQ_REST;
-                q.seq_slide[k] = 0;
+                pt->note[k] = PAT[k] ? PAT[k] : 48;
+                pt->trig[k] = PAT[k] ? SEQ_NOTE : SEQ_REST;
+                pt->slide[k] = 0;
             }
-            if (variant == 1u) q.seq_len = 3;
-            if (variant == 2u) { q.seq_trig[0] = SEQ_ACCENT; q.seq_trig[4] = SEQ_ACCENT; }
-            if (variant >= 3u) {                /* two steps, C3 then G3, over and over; slide on the first */
-                q.seq_len = 2; q.seq_note[0] = 48; q.seq_note[1] = 55;
-                q.seq_trig[0] = q.seq_trig[1] = SEQ_NOTE;
-                q.seq_slide[0] = variant == 3u;
+            if (variant == 1u) pt->len = 3;
+            if (variant == 2u) { pt->trig[0] = SEQ_ACCENT; pt->trig[4] = SEQ_ACCENT; }
+            if (variant == 3u || variant == 4u) {   /* two steps, C3 then G3, over and over; slide on the first */
+                pt->len = 2; pt->note[0] = 48; pt->note[1] = 55;
+                pt->trig[0] = pt->trig[1] = SEQ_NOTE;
+                pt->slide[0] = variant == 3u;
             }
-            memset(voice, 0, sizeof voice);
-            engine_init(); engine_set(&q); engine_sync(0);
+            if (variant == 5u) {                /* C3 tied over three steps, then a rest */
+                pt->len = 4; pt->note[0] = 48;
+                pt->trig[0] = SEQ_NOTE; pt->trig[1] = pt->trig[2] = SEQ_TIE; pt->trig[3] = SEQ_REST;
+            }
+            if (variant == 6u) {                /* the song: P1 (C3 C3) twice, P2 (G3 G3) once, round */
+                pt->len = 2; pt->note[0] = pt->note[1] = 48; pt->trig[0] = pt->trig[1] = SEQ_NOTE;
+                seqs.pat[1].len = 2; seqs.pat[1].note[0] = seqs.pat[1].note[1] = 55;
+                seqs.pat[1].trig[0] = seqs.pat[1].trig[1] = SEQ_NOTE;
+                seqs.mode = 1; seqs.song_len = 2;
+                seqs.song_pat[0] = 0; seqs.song_rep[0] = 2; seqs.song_pat[1] = 1; seqs.song_rep[1] = 1;
+            }
+            engine_set(&q); engine_sync(0);
             last_note = -1;
             engine_seq_play(1);
             while (done < total) {
@@ -365,10 +379,11 @@ int main(void)
         uint32_t done = 0, total = 44100u * 2u / FRAMES * FRAMES, k;
         double at = 22050.0 + 100.0;
         int started = 0;
-        q.amp_r = 5; q.seq_div = DIV_16; q.seq_gate = 64; q.seq_len = 4;
-        for (k = 0; k < 4u; k++) { q.seq_note[k] = (uint8_t)(48 + 4 * k); q.seq_trig[k] = SEQ_NOTE; }
         memset(voice, 0, sizeof voice);
-        engine_init(); engine_set(&q); engine_sync(1);
+        engine_init();
+        q.amp_r = 5; seqs.div = DIV_16; seqs.gate = 64; seqs.pat[0].len = 4;
+        for (k = 0; k < 4u; k++) { seqs.pat[0].note[k] = (uint8_t)(48 + 4 * k); seqs.pat[0].trig[k] = SEQ_NOTE; }
+        engine_set(&q); engine_sync(1);
         clk_r = clk.w; engine_frames = 0;
         mc.last_at = 0; mc.period_q8 = 0; mc.count = -1; mc.running = 0; mc.wait = -1;
         engine_seq_play(1);

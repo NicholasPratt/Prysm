@@ -60,6 +60,20 @@ void prysm_render(float *l, float *r, uint32_t n)
     }
 }
 
+const uint8_t *prysm_seqs(void) { return (const uint8_t *)&seqs; }
+uint32_t prysm_seqs_size(void) { return sizeof seqs; }
+uint32_t prysm_seqs_version(void) { return SEQS_VERSION; }
+int prysm_seq_set(uint32_t off, uint32_t v) { return ed_seq_set(off, v); }
+int prysm_seqs_load(const uint8_t *p, uint32_t n, uint32_t version)
+{
+    if (version != SEQS_VERSION || n != sizeof seqs)
+        return -1;
+    memcpy(&seqs, p, n);
+    engine_set(&edit);
+    return 0;
+}
+const char *prysm_seq_layout(void) { return prm_seq_layout(); }
+
 uint32_t prysm_nparams(void) { return prm_n(); }
 const char *prysm_param(uint32_t i) { return prm_info(i); }
 const char *prysm_fmt(uint32_t i, uint32_t v) { return prm_fmt(i, v); }

@@ -26,7 +26,7 @@ const el = (tag, props = {}, kids = []) => { const e = Object.assign(document.cr
 
 let M, size, version, params = [], pages = [], tab = 0;
 let ctx = null, node = null, gain = null, produced = 0, played = 0, playedBase = 0, t0 = performance.now();
-let lastFb = -1, lastStore = -1, lastPatch = null, lastPage = -1, lastRow = -1;
+let lastFb = -1, lastStore = -1, lastPatch = null, lastSeqs = null, lastPlay = -1, lastPage = -1, lastRow = -1;
 
 // ---- the emulator
 Prysm({
@@ -46,6 +46,7 @@ Prysm({
   M.callMain();                                 // (returns at the first sleep; the app goes on between frames)
   size = M._web_patch_size();
   version = M._web_patch_version();
+  seqLayout();
   readParams();
   buildFm1();
   buildTabs();
@@ -200,31 +201,146 @@ function showTab(n) {
     r.box = el("div", { className: "prow" }, [h, grid]);
     box.append(r.box);
   });
-  if (pg.name === "SEQ") box.append(el("div", { className: "prow" }, [el("h3", { textContent: "STEPS: click note / accent / rest, shift-click slide, scroll the note" }), seqGrid()]));
-  lastPatch = null;                             // (draw every value afresh)
+  if (pg.name === "SEQ") box.prepend(seqUI());
+  lastPatch = lastSeqs = null;                             // (draw every value afresh)
 }
-const rowIndex = (pg, r) => {                   // the row's place on the FM-1 (the SEQ page's STEP row has no knobs here)
-  if (pg.name === "SEQ") return 1;
+const rowIndex = (pg, r) => {                   // the row's place on the FM-1 (the SEQ page: only its SONG row has a knob of the sound)
+  if (pg.name === "SEQ") return ["STEP", "PATTERN", "EDIT", "SONG", "ENTRY"].indexOf(r.name);
   return pg.rows.indexOf(r);
 };
 
-let seqCells = [];
-function seqGrid() {
-  const g = el("div", { id: "seq" });
-  const [on, ot, os] = [0, 1, 2].map((w) => M._web_seq_off(w));
-  seqCells = [];
-  for (let i = 0; i < 64; i++) {
-    const c = el("div");
-    c.onclick = (ev) => {
-      const pt = patch();
-      if (ev.shiftKey) M._web_set(os + i, pt[os + i] ? 0 : 1);
-      else M._web_set(ot + i, (pt[ot + i] + 1) % 3);   // REST -> NOTE -> ACCENT
-    };
-    c.onwheel = (ev) => { ev.preventDefault(); const pt = patch(); M._web_set(on + i, Math.max(0, Math.min(127, pt[on + i] + (ev.deltaY < 0 ? 1 : -1)))); };
-    seqCells.push(c);
-    g.append(c);
+// ---- the SEQ tab: the patterns and song (not part of the sound: their own bytes, seqs_t, laid out as web_seq_layout says)
+let SQ = null, seqEls = null, seqClip = null, initArmed = 0;
+const DIVS = ["1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"];
+const TRIG_CLASS = ["", "note", "acc", "tie"];
+const seqs = () => M.HEAPU8.subarray(M._web_seqs(), M._web_seqs() + SQ.size);
+const seqSet = (off, v) => M._web_seq_set(off, v);
+function seqLayout() {
+  const L = M.UTF8ToString(M._web_seq_layout()).split("|").map(Number);
+  const k = ["pat", "patSize", "len", "note", "trig", "slide", "div", "gate", "cur", "mode", "songLen", "songPat", "songRep",
+             "size", "pats", "entries"];
+  SQ = Object.fromEntries(k.map((n, i) => [n, L[i]]));
+}
+const patAt = (sq, p) => SQ.pat + (p % SQ.pats) * SQ.patSize;   // where pattern p starts
+
+function seqUI() {
+  const box = el("div", { className: "prow" });
+  const E = seqEls = { pats: [], cells: [], entries: [] };
+  // the pattern: which, its length; the step and gate (all patterns)
+  const bar = el("div", { className: "seqbar" });
+  for (let i = 0; i < SQ.pats; i++) {
+    const b = el("button", { textContent: "P" + (i + 1), title: "Edit pattern " + (i + 1) });
+    b.onclick = () => seqSet(SQ.cur, i);
+    E.pats.push(b);
+    bar.append(b);
   }
-  return g;
+  E.len = el("input", { type: "range", min: 1, max: 64, title: "the pattern's length" });
+  E.len.oninput = () => seqSet(patAt(seqs(), seqs()[SQ.cur]) + SQ.len, +E.len.value);
+  E.lenV = el("span");
+  E.div = el("select", { title: "the step (all patterns)" });
+  DIVS.forEach((n, i) => E.div.append(el("option", { value: i, textContent: n })));
+  E.div.onchange = () => seqSet(SQ.div, +E.div.value);
+  E.gate = el("input", { type: "range", min: 0, max: 127, title: "the gate (all patterns)" });
+  E.gate.oninput = () => seqSet(SQ.gate, +E.gate.value);
+  E.gateV = el("span");
+  const cp = el("button", { textContent: "Copy pattern" }), pp = el("button", { textContent: "Paste pattern" });
+  cp.onclick = () => { const sq = seqs(), a = patAt(sq, sq[SQ.cur]); seqClip = { rows: 4, b: sq.slice(a, a + SQ.patSize) }; status("Pattern copied"); };
+  pp.onclick = () => {
+    if (!seqClip || seqClip.rows !== 4) return status("Copy a pattern first");
+    const a = patAt(seqs(), seqs()[SQ.cur]);
+    for (let j = 0; j < SQ.patSize; j++) seqSet(a + j, seqClip.b[j]);
+  };
+  bar.append(el("label", { textContent: "LENGTH " }, [E.len, E.lenV]), el("label", { textContent: "DIV " }, [E.div]),
+             el("label", { textContent: "GATE " }, [E.gate, E.gateV]), cp, pp);
+  // the steps: 4 rows of 16, each with copy / paste / clear
+  const grid = el("div");
+  for (let r = 0; r < 4; r++) {
+    const row = el("div", { className: "seqrow" }, [el("span", { textContent: r + 1, className: "rowno" })]);
+    for (let c = 0; c < 16; c++) {
+      const i = r * 16 + c, cell = el("div", { className: "cell" });
+      cell.onclick = (ev) => {
+        const sq = seqs(), a = patAt(sq, sq[SQ.cur]);
+        if (ev.shiftKey) seqSet(a + SQ.slide + i, sq[a + SQ.slide + i] ? 0 : 1);
+        else seqSet(a + SQ.trig + i, (sq[a + SQ.trig + i] + 1) % 4);   // REST -> NOTE -> ACCENT -> TIE
+      };
+      cell.onwheel = (ev) => {
+        ev.preventDefault();
+        const sq = seqs(), a = patAt(sq, sq[SQ.cur]) + SQ.note + i, d = (ev.deltaY < 0 ? 1 : -1) * (ev.shiftKey ? 12 : 1);
+        seqSet(a, Math.max(0, Math.min(127, sq[a] + d)));
+      };
+      E.cells.push(cell);
+      row.append(cell);
+    }
+    const tools = el("span", { className: "rowtools" });
+    const rowBytes = (f) => { const sq = seqs(), a = patAt(sq, sq[SQ.cur]); return [0, 1, 2].map((k) => a + [SQ.note, SQ.trig, SQ.slide][k] + r * 16); };
+    const copy = el("button", { textContent: "COPY" }), paste = el("button", { textContent: "PASTE" }), clear = el("button", { textContent: "CLEAR" });
+    copy.onclick = () => { const sq = seqs(); seqClip = { rows: 1, b: rowBytes().map((o) => sq.slice(o, o + 16)) }; status(`Row ${r + 1} copied`); };
+    paste.onclick = () => {
+      if (!seqClip || seqClip.rows !== 1) return status("Copy a row first");
+      rowBytes().forEach((o, k) => { for (let j = 0; j < 16; j++) seqSet(o + j, seqClip.b[k][j]); });
+    };
+    clear.onclick = () => { const [, t, sl] = rowBytes(); for (let j = 0; j < 16; j++) { seqSet(t + j, 0); seqSet(sl + j, 0); } };
+    tools.append(copy, paste, clear);
+    row.append(tools);
+    grid.append(row);
+  }
+  // the song
+  const songBar = el("div", { className: "seqbar" });
+  E.modeP = el("button", { textContent: "PATTERN mode" });
+  E.modeS = el("button", { textContent: "SONG mode" });
+  E.modeP.onclick = () => seqSet(SQ.mode, 0);
+  E.modeS.onclick = () => seqSet(SQ.mode, 1);
+  E.songLen = el("select", { title: "the song's length (entries)" });
+  for (let i = 1; i <= SQ.entries; i++) E.songLen.append(el("option", { value: i, textContent: i }));
+  E.songLen.onchange = () => seqSet(SQ.songLen, +E.songLen.value);
+  E.init = el("button", { textContent: "INIT" , title: "Start over: every pattern empty, the song P1 P2 P3 P4" });
+  E.init.onclick = () => {
+    if (Date.now() - initArmed > 3000) { initArmed = Date.now(); E.init.textContent = "Click again to clear all"; setTimeout(() => { E.init.textContent = "INIT"; }, 3000); return; }
+    initArmed = 0; E.init.textContent = "INIT";
+    M._web_seqs_init();
+  };
+  songBar.append(E.modeP, E.modeS, el("label", { textContent: "ENTRIES " }, [E.songLen]), E.init);
+  const song = el("div", { className: "song" });
+  for (let i = 0; i < SQ.entries; i++) {
+    const pat = el("select"), rep = el("select");
+    for (let p = 0; p < SQ.pats; p++) pat.append(el("option", { value: p, textContent: "P" + (p + 1) }));
+    for (let x = 1; x <= 16; x++) rep.append(el("option", { value: x, textContent: "x" + x }));
+    pat.onchange = () => seqSet(SQ.songPat + i, +pat.value);
+    rep.onchange = () => seqSet(SQ.songRep + i, +rep.value);
+    const e = el("div", { className: "entry" }, [el("span", { textContent: i + 1 }), pat, rep]);
+    E.entries.push({ e, pat, rep });
+    song.append(e);
+  }
+  box.append(el("h3", { textContent: "PATTERN: click a step for note / accent / tie / rest, shift-click to slide, scroll for the note (shift: an octave)" }),
+             bar, grid, el("h3", { textContent: "SONG: the patterns in order, each played so many times, round and round" }), songBar, song);
+  return box;
+}
+
+function refreshSeq(sq) {                       // the SEQ tab from the patterns
+  const E = seqEls;
+  if (!E || !document.body.contains(E.len)) return;
+  const cur = sq[SQ.cur] % SQ.pats, a = patAt(sq, cur), len = sq[a + SQ.len] || 16, pl = M._web_seq_playing();
+  E.pats.forEach((b, i) => b.classList.toggle("on", i === cur));
+  if (document.activeElement !== E.len) E.len.value = len;
+  E.lenV.textContent = " " + len;
+  E.div.value = sq[SQ.div];
+  if (document.activeElement !== E.gate) E.gate.value = sq[SQ.gate];
+  E.gateV.textContent = " " + Math.round(5 + sq[SQ.gate] * 95 / 127) + "%";
+  E.cells.forEach((c, i) => {
+    const t = sq[a + SQ.trig + i] & 3;
+    c.className = "cell " + TRIG_CLASS[t] + (sq[a + SQ.slide + i] ? " slide" : "") + (i >= len ? " past" : "") +
+                  (pl !== 0xFFFF && (pl >> 8) === cur && (pl & 255) === i ? " play" : "");
+    c.textContent = t === 1 || t === 2 ? noteName(sq[a + SQ.note + i]) : "";
+  });
+  E.modeP.classList.toggle("on", !sq[SQ.mode]);
+  E.modeS.classList.toggle("on", !!sq[SQ.mode]);
+  E.songLen.value = sq[SQ.songLen];
+  const pe = M._web_seq_entry();
+  E.entries.forEach((x, i) => {
+    x.pat.value = sq[SQ.songPat + i] % SQ.pats;
+    x.rep.value = sq[SQ.songRep + i] || 1;
+    x.e.className = "entry" + (i >= sq[SQ.songLen] ? " past" : "") + (i === pe ? " play" : "");
+  });
 }
 
 function refresh(pt) {                          // the controls and values of the shown tab, from the sound
@@ -235,14 +351,6 @@ function refresh(pt) {                          // the controls and values of th
       if (document.activeElement !== p.input || p.input.tagName === "SELECT") p.input.value = v;
       p.valEl.textContent = fmt(p, v);
     }
-  if (pg.name === "SEQ" && seqCells.length) {
-    const [on, ot, os] = [0, 1, 2].map((w) => M._web_seq_off(w)), len = pt[params.find((p) => p.label === "LENGTH").off];
-    seqCells.forEach((c, i) => {
-      const t = pt[ot + i];
-      c.className = (t === 1 ? "note" : t === 2 ? "acc" : "") + (pt[os + i] ? " slide" : "") + (i >= len ? " past" : "");
-      c.textContent = t ? noteName(pt[on + i]) : "";
-    });
-  }
 }
 
 // ---- each frame: the screen, the LEDs, the editor, the FM-1
@@ -270,22 +378,32 @@ function frame() {
   }
   const pt = patch();
   if (!lastPatch || pt.some((v, i) => v !== lastPatch[i])) { refresh(pt); lastPatch = pt.slice(); }
+  const sq = seqs(), play = M._web_seq_playing() << 8 | M._web_seq_entry();
+  if (!lastSeqs || play !== lastPlay || sq.some((v, i) => v !== lastSeqs[i])) { refreshSeq(sq); lastSeqs = sq.slice(); lastPlay = play; }
   if (M._web_store_gen() !== lastStore) { lastStore = M._web_store_gen(); keep(); }
-  (PLUGIN ? plug : dev).sync(pt);
+  (PLUGIN ? plug : dev).sync(pt, sq);
   requestAnimationFrame(frame);
 }
 
 // ---- the FM-1 over USB-MIDI
 const dev = {
-  out: null, inp: null, shadow: null, dump: null, busy: false, waiting: null,
+  out: null, inp: null, shadow: null, dump: null, sshadow: null, sdump: null, busy: false, waiting: null,
   send(type, data = []) { this.out.send([0xF0, 0x7D, 0x50, type.charCodeAt(0), ...data, 0xF7]); },
-  sync(pt) {                                    // what the FM-1 does not have yet: one 'V' at a time
+  sync(pt, sq) {                                // what the FM-1 does not have yet: one 'V' (or 'U') at a time
     if (!this.shadow || this.busy || this.waiting) return;
     for (let o = 0; o < size; o++)
       if (pt[o] !== this.shadow[o]) {
         const v = pt[o];
         this.shadow[o] = v;
         this.ask("V", [o >> 7, o & 127, v >> 7, v & 127]);
+        return;
+      }
+    if (!this.sshadow) return;                  // (an FM-1 before the patterns (0.8): the sound only)
+    for (let o = 0; o < SQ.size; o++)
+      if (sq[o] !== this.sshadow[o]) {
+        const v = sq[o];
+        this.sshadow[o] = v;
+        this.ask("U", [o >> 7, o & 127, v >> 7, v & 127]);
         return;
       }
   },
@@ -308,8 +426,18 @@ const dev = {
     } else if (t === "E") {                     // the dump: 64 bytes at b[0] * 64
       this.dump = this.dump || new Uint8Array(size);
       for (let j = 0; j < 64 && b[0] * 64 + j < size; j++) this.dump[b[0] * 64 + j] = b[1 + 2 * j] << 4 | b[2 + 2 * j];
+    } else if (t === "Q") {                     // the patterns: 64 bytes at b[0] * 64
+      this.sdump = this.sdump || new Uint8Array(SQ.size);
+      for (let j = 0; j < 64 && b[0] * 64 + j < SQ.size; j++) this.sdump[b[0] * 64 + j] = b[1 + 2 * j] << 4 | b[2 + 2 * j];
     } else if (t === "F") {                     // the dump is complete: into the emulator
       const n = b[0] << 7 | b[1];
+      this.sshadow = null;
+      if (b.length >= 7 && this.sdump && (b[4] << 7 | b[5]) === SQ.size && b[6] === M._web_seqs_version()) {
+        M.HEAPU8.set(this.sdump, M._web_seqs());   // (the FM-1's patterns and song)
+        M._web_seqs_loaded();
+        this.sshadow = this.sdump.slice();
+      }
+      this.sdump = null;
       if (n !== size || b[2] !== version) { status(`FM-1: its firmware's patch format differs (${n} B, v${b[2]}): update one of them`); this.shadow = null; return; }
       M.HEAPU8.set(this.dump, M._web_patch());
       M._web_load(M._web_patch(), size, b[3] - 1);
@@ -320,6 +448,10 @@ const dev = {
       const o = b[0] << 7 | b[1], v = b[2] << 7 | b[3];
       this.shadow[o] = v;
       M._web_set(o, v);
+    } else if (t === "G" && this.sshadow) {     // its patterns changed on the FM-1
+      const o = b[0] << 7 | b[1], v = b[2] << 7 | b[3];
+      this.sshadow[o] = v;
+      seqSet(o, v);
     } else if (t === "N") status("FM-1: connected" + (b[0] ? `, slot ${b[0]}` : ""));
   },
 };
@@ -391,19 +523,34 @@ const plug = {
     M.HEAPU8.set(b, M._web_patch());
     M._web_load(M._web_patch(), size, -1);
     this.shadow = b.slice();
+    this.sshadow = null;
+    if (r.seqs && r.seqs.length === SQ.size) {  // (the plugin's patterns and song)
+      const q = Uint8Array.from(r.seqs);
+      M.HEAPU8.set(q, M._web_seqs());
+      M._web_seqs_loaded();
+      this.sshadow = q.slice();
+    }
     status(r.status || "");
   },
-  sync(pt) {                                    // what the plugin does not have yet
+  sync(pt, sq) {                                // what the plugin does not have yet
     if (!this.shadow) return;
     const out = [];
     for (let o = 0; o < size; o++) if (pt[o] !== this.shadow[o]) { this.shadow[o] = pt[o]; out.push(o, pt[o]); }
     if (out.length) prysm_set(...out);
+    if (!this.sshadow || typeof prysm_seqset !== "function") return;
+    const so = [];
+    for (let o = 0; o < SQ.size; o++) if (sq[o] !== this.sshadow[o]) { this.sshadow[o] = sq[o]; so.push(o, sq[o]); }
+    if (so.length) prysm_seqset(...so);
   },
 };
 window.prysmNative = {
   changes(list) {                               // [offset, value, ...]: changed in the plugin (automation, the FM-1)
     if (!plug.shadow) return;
     for (let i = 0; i + 1 < list.length; i += 2) { plug.shadow[list[i]] = list[i + 1]; M._web_set(list[i], list[i + 1]); }
+  },
+  seqChanges(list) {                            // the patterns changed in the plugin (the project, the FM-1)
+    if (!plug.sshadow) return;
+    for (let i = 0; i + 1 < list.length; i += 2) { plug.sshadow[list[i]] = list[i + 1]; seqSet(list[i], list[i + 1]); }
   },
   status(s) { status(s); },
   reload() { plug.shadow = null; plug.hello(); },   // (the project loaded another sound)
