@@ -326,6 +326,12 @@ check("vca open: a drone chord", min(lv) > -6 and rms(dc, 0.8, 1.4) > 0.02 and r
 di = load("drone_instant")
 fi = peak_hz(*spectrum(di, 0.3, 1.3))
 check("vca open: an instant drone", rms(di, 0.3, 1.3) > 0.02 and abs(fi - 130.81) < 2, f"no note played: {fi:.1f} Hz (C3)")
+dl = load("drone_last")
+fl, sl = spectrum(dl, 0.2, 0.65)
+fh, sh_ = spectrum(dl, 0.8, 1.3)
+pk_, h2a, h2b = peak_hz(fl, sl), level_db(fl, sl, 784, 8), level_db(fh, sh_, 784, 8)
+check("vca open: where it was", abs(pk_ - 392) < 3 and h2b > h2a + 20,
+      f"opened after G4: {pk_:.0f} Hz; AMT1 turned up while it drones: 2nd harmonic {h2a:.0f} -> {h2b:.0f} dB")
 do = load("drone_off")
 jump = float(np.max(np.abs(np.diff(do[int(0.79 * 44100):int(0.9 * 44100)]))))
 check("vca closed again: it fades", rms(do, 1.0, 1.4) < 0.0005 and jump < 0.05,

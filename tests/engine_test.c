@@ -136,6 +136,17 @@ int main(void)
         p.vca = 80;                             /* nothing played: OPEN up drones C3 at once */
         last_note = -1;                         /* (nothing played since power-on) */
         render("drone_instant", &p, CEG, 0, 300, 1500);
+        {                                       /* opened after a note: on that note; AMT1 turned: heard at once */
+            patch_t z = p, y;
+            z.vca = 0; engine_set(&z);          /* (closed first: opening is what starts it) */
+            last_note = 67;
+            z.vca = 80; z.osc[0].amt[0] = 0;
+            y = z; y.osc[0].amt[0] = 110;
+            render_p2 = &y; render_change_ms = 700;
+            render("drone_last", &z, CEG, 0, 300, 1400);
+            render_p2 = 0;
+            z.vca = 0; engine_set(&z);
+        }
         q = p; q.vca = 0;                       /* OPEN back to 0 at 800 ms: it fades out (no click) */
         render_p2 = &q; render_change_ms = 800;
         render("drone_off", &p, CEG, 3, 300, 1500);

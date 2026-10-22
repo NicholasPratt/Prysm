@@ -320,7 +320,8 @@ static struct {
     uint16_t cw;                                /* where it writes next */
     uint8_t comb_live;                          /* its line holds this note's sound (else cleared first) */
     int32_t amp_q15, mod_q15[NOSC][2];          /* the levels now (per frame, gliding to each block's target) */
-    uint8_t drone;                              /* it has played a note: with VCA OPEN it sounds on, after its release */
+    uint8_t drone;                              /* it has played a note: with VCA OPEN it sounds on, after its release, its
+                                                 * envelopes but the amp's held as if its key were down */
     uint32_t lfo_ph, lfo_rng;                   /* its LFO (retrig on): phase, S&H's random sequence */
     int32_t lfo_sh, lfo_fade;                   /* the S&H value held; the fade-in (Q24) */
     int32_t rate16;                             /* the mod envelope's move of its LFO's rate, 1/16 semitones */
@@ -1191,6 +1192,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 if (voice[v].glide_q8 > -64 && voice[v].glide_q8 < 64) voice[v].glide_q8 = 0;
             }
             int32_t a_to = env_step(&voice[v].amp, gate, eg.a_att, eg.a_dec, eg.a_sus, eg.a_rel) >> 9;
+            uint32_t hold = gate || (eg.vca && voice[v].drone);   /* (a drone: its other envelopes held, as if down) */
             int32_t a, da, l, acc[BLK];
             lfo_mod_t m;
             /* the mod envelope first (it may move the LFO's rate and depth) */
@@ -1200,8 +1202,8 @@ static void engine_render(int32_t *out, uint32_t n)
                 me_amt += x2;
                 me_amt = me_amt > 32767 ? 32767 : me_amt < -32767 ? -32767 : me_amt;
             }
-            int32_t me = menv_step(&voice[v].menv[0], gate, 0) >> 9, me_x = (me * me_amt) >> 15;
-            int32_t me2 = menv_step(&voice[v].menv[1], gate, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
+            int32_t me = menv_step(&voice[v].menv[0], hold, 0) >> 9, me_x = (me * me_amt) >> 15;
+            int32_t me2 = menv_step(&voice[v].menv[1], hold, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
             voice[v].rate16 = (((eg.me_dest[0] == DEST_LFORATE ? me_x : 0) +   /* +-4 octaves (each) */
                                 (eg.me_dest[1] == DEST_LFORATE ? me2_x : 0)) * 768) >> 15;
             /* the LFO: this voice's own, or the free-running one; its shape moved (LFOSHAPE); faded in; -> what it
@@ -1277,9 +1279,9 @@ static void engine_render(int32_t *out, uint32_t n)
                     am1 = (am1 * m.vmod) >> 15;
                     am2 = (am2 * m.vmod) >> 15;
                 }
-                e1_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][0], gate, eg.m_att[o][0], 0, ENV_FULL,
+                e1_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][0], hold, eg.m_att[o][0], 0, ENV_FULL,
                                                      eg.m_rel[o][0]) * am1) >> 24);
-                e2_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][1], gate, eg.m_att[o][1], 0, ENV_FULL,
+                e2_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][1], hold, eg.m_att[o][1], 0, ENV_FULL,
                                                      eg.m_rel[o][1]) * am2) >> 24);
                 e1 = voice[v].mod_q15[o][0];
                 e2 = voice[v].mod_q15[o][1];
@@ -1327,7 +1329,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].ph[o][2] = p2;
             }
             {                                   /* drive, the filter, the high-pass, the amp: the voice into both channels */
-                int32_t fe = env_step(&voice[v].flt, gate, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
+                int32_t fe = env_step(&voice[v].flt, hold, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
                 int32_t f[3], f2[3], a1, a2, a3, d1, d2, d3, b1 = 0, b2 = 0, b3 = 0, e1 = 0, e2 = 0, e3 = 0;
                 int32_t ic1 = voice[v].ic1, ic2 = voice[v].ic2, ic3 = voice[v].ic3, ic4 = voice[v].ic4, pk;
                 int32_t drive = eg.drive, hg, hp1 = voice[v].hp1, hp2 = voice[v].hp2, c;
@@ -1688,17 +1690,25 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
     eg.a_sus = (int32_t)((patch.amp_s & 127u) * (uint32_t)(ENV_FULL / 127));
     eg.a_rel = PR_ENV_EXP[patch.amp_r & 127u];
-    eg.vca = (int32_t)(patch.vca & 127u) * 32767 / 127;
-    if (eg.vca) {                               /* an instant drone: nothing played yet, a voice on its last note (C3) */
-        uint32_t w, any = 0;
-        for (w = 0; w < NV; w++) any |= voice[w].drone;
-        if (!any) {                             /* (voice 0 is silent: the ISR leaves it be until drone is set) */
-            voice[0].note = (uint8_t)(last_note >= 0 ? last_note : 48);
-            voice[0].glide_q8 = 0;
-            voice_tune(0);
-            voice_fresh(0);
-            voice[0].drone = 1;
+    {                                           /* VCA OPEN */
+        int32_t vca = (int32_t)(patch.vca & 127u) * 32767 / 127;
+        if (vca && !eg.vca) {                   /* opened: the oscillators drone where they were (if nothing sounds) */
+            uint32_t w, busy = 0;
+            for (w = 0; w < NV; w++) {
+                busy |= voice[w].amp.st || voice[w].gate || voice[w].trig;
+                if (!voice[w].amp.st && !voice[w].gate) voice[w].drone = 0;   /* (silent ones: not their old notes) */
+            }
+            if (!busy) {                        /* a note started without a key: its envelopes run, its amp at the floor */
+                voice[0].glide_q8 = 0;
+                voice[0].note = (uint8_t)(last_note >= 0 ? last_note : 48);   /* (the last note; at power-on C3) */
+                voice[0].vel = 127;
+                voice[0].age = ++ages;
+                voice_tune(0);
+                voice[0].gate = 0;
+                voice[0].trig = 1;              /* (the ISR starts it: voice_start) */
+            }
         }
+        eg.vca = vca;
     }
     for (v = 0; v < NV; v++)                    /* ratios and tuning may have changed: retune what sounds */
         if (voice[v].gate || voice_on(v))

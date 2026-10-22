@@ -208,12 +208,12 @@ The LFO and the mod envelopes move the comb through **CUTOFF**, and its spread t
 Times go from 1 ms to 10 s.
 
 **OPEN** (VCA row) holds the amp open whatever the envelope does, as a VCA bias on an analog synth (the Neutron's,
-say): an instant **drone**. Turn it up and the notes you let go keep sounding at that level, each on its last note,
-so a chord let go becomes a drone chord; with nothing played since power-on, it drones C3. Keys still play over it
-with their envelope (from the drone's level up), and a new note takes a droning voice first. The picture draws the
-level as a line across the envelope. Turn OPEN back to 0 and the drone fades out. Filter and mod envelopes still run
-from each note, so a drone can open and close with the filter envelope's release, the LFOs or LFO 2 moving it.
-(A drone keeps up to four voices running: watch the CPU bar with every effect on.)
+say): an instant **drone**. Turn it up and the oscillators sound at once, at the pitch they were last played at (C3
+when nothing has been played since power-on), the whole sound: FM, filter and all. While a voice drones, its other
+envelopes (the modulators', the filter's, the mod envelopes) hold as if its key were down, so every knob works on it
+live: turn AMT1 and the drone brightens. Keys play over it with their envelope (from the drone's level up), and the
+notes you let go drone on, so a chord let go becomes a drone chord. The picture draws the level as a line across the
+envelope. Turn OPEN back to 0 and the drone releases and fades out. (A drone keeps up to four voices running: watch the CPU bar with every effect on.)
 
 **Velocity** comes from MIDI: a keyboard or a DAW playing Prysm over USB. The FM-1's own keys have no velocity (they
 are on / off), so they always play at full velocity and these settings do not change them. Each sensitivity says how
