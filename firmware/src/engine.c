@@ -38,6 +38,7 @@ enum { DEST_OFF, DEST_PITCH, DEST_PITCH2, DEST_WAVE1, DEST_WAVE2, DEST_MWAVE1, D
        DEST_LFORATE, DEST_LFOAMT,               /* (the mod envelope's only: the LFO itself) */
        DEST_SPREAD,                             /* (after: the saved numbers above stay) */
        DEST_M1PITCH, DEST_M2PITCH,              /* (format 10: mod 1's / mod 2's pitch; LFO 2's own move up 2) */
+       DEST_LFOSHAPE,                           /* (format 11: the LFO's wave, morphed; not the LFO's own) */
        DEST_N,                                  /* (the LFO's and the mod envelope's end here; LFO 2's go on) */
        DEST_RES = DEST_N, DEST_DRIVE, DEST_HPF, DEST_DAMP, DEST_FENV, DEST_LVL1, DEST_LVL2, DEST_DETUNE, DEST_MENVAMT,
        DEST_CHORUS, DEST_DELAY, DEST_DLYTIME, DEST_DLYFB, DEST_REVERB, DEST_REVSIZE, DEST2_N };
@@ -57,11 +58,12 @@ enum { FLT_LP12, FLT_LP24, FLT_COMBP, FLT_COMBM, FLT_N };   /* the filter: COMB-
 static const char *const FLT_NAME[FLT_N] = {"LP 12", "LP 24", "COMB+", "COMB-"};
 static const char *const DEST_NAME[DEST2_N] = {"OFF", "PITCH", "PITCH2", "WAVE1", "WAVE2", "MWAVE1", "MWAVE2",
                                               "MOD1", "MOD2", "MPITCH", "CUTOFF", "AMP", "MIX", "LFORATE", "LFOAMT",
-                                              "SPREAD", "M1PITCH", "M2PITCH", "RES", "DRIVE", "HPF", "DAMP", "FENV", "LEVEL1", "LEVEL2",
+                                              "SPREAD", "M1PITCH", "M2PITCH", "LFOSHAPE", "RES", "DRIVE", "HPF", "DAMP", "FENV", "LEVEL1", "LEVEL2",
                                               "DETUNE", "MENVAMT", "CHORUS", "DELAY", "DLYTIME", "DLYFDBK", "REVERB",
                                               "REVSIZE"};
-#define DEST_LFO_OK(d) ((d) < DEST_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)   /* the LFO's own (not itself) */
-#define DEST_V9_N 16u                           /* (format 9's DEST_N: its LFO 2 destinations from here are 2 lower) */
+#define DEST_LFO_OK(d) ((d) < DEST_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT && (d) != DEST_LFOSHAPE)   /* (not itself) */
+#define DEST_V9_N 16u                           /* (format 9's DEST_N: its LFO 2 destinations from here are 3 lower) */
+#define DEST_V10_N 18u                          /* (format 10's: from here 1 lower) */
 #define DEST_LFO2_OK(d) ((d) < DEST2_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)  /* LFO 2's: those, and more */
 
 /* ---- the patch: what the pages edit (all small integers, 0..127 unless said) */
@@ -538,6 +540,22 @@ static int32_t lfo_wave(uint32_t w, uint32_t ph, int32_t sh)   /* -> -32767..327
         y += ((((y * ay) >> 15) - y) * 7373) >> 15;
         return y > 32767 ? 32767 : y < -32767 ? -32767 : y;
     }
+}
+
+/* wave w moved by x (Q15: +-32767 = the whole row of shapes, SINE .. S&H), each between two crossfaded (LFOSHAPE) */
+static int32_t lfo_morph(uint32_t w, int32_t x, uint32_t ph, int32_t sh)
+{
+    int32_t p, a, b, f;
+    if (!x)
+        return lfo_wave(w, ph, sh);
+    p = (int32_t)w * 256 + (int32_t)(((int64_t)x * ((LFO_N - 1) * 256)) >> 15);
+    p = p < 0 ? 0 : p > (LFO_N - 1) * 256 ? (LFO_N - 1) * 256 : p;
+    f = p & 255;
+    a = lfo_wave((uint32_t)(p >> 8), ph, sh);
+    if (!f)
+        return a;
+    b = lfo_wave((uint32_t)(p >> 8) + 1u, ph, sh);
+    return a + (((b - a) * f) >> 8);
 }
 
 static int32_t lfo_random(uint32_t *r)          /* S&H: the next value of a sequence, -32767..32767 */
@@ -1186,16 +1204,19 @@ static void engine_render(int32_t *out, uint32_t n)
             int32_t me2 = menv_step(&voice[v].menv[1], gate, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
             voice[v].rate16 = (((eg.me_dest[0] == DEST_LFORATE ? me_x : 0) +   /* +-4 octaves (each) */
                                 (eg.me_dest[1] == DEST_LFORATE ? me2_x : 0)) * 768) >> 15;
-            /* the LFO: this voice's own, or the free-running one; faded in; -> what it does this block */
+            /* the LFO: this voice's own, or the free-running one; its shape moved (LFOSHAPE); faded in; -> what it
+             * does this block */
+            int32_t shp = (eg.me_dest[0] == DEST_LFOSHAPE ? me_x : 0) + (eg.me_dest[1] == DEST_LFOSHAPE ? me2_x : 0) +
+                          (eg.l2_dest == DEST_LFOSHAPE ? x2 : 0);
             if (eg.lfo_retrig) {
                 uint32_t nx = voice[v].lfo_ph + rate_moved(eg.lfo_inc, voice[v].rate16);
                 if (nx < voice[v].lfo_ph) voice[v].lfo_sh = lfo_random(&voice[v].lfo_rng);
                 voice[v].lfo_ph = nx;
                 ph = nx;
-                l = lfo_wave(eg.lfo_wave, ph, voice[v].lfo_sh);
+                l = lfo_morph(eg.lfo_wave, shp, ph, voice[v].lfo_sh);
             } else {
                 ph = g_ph[bi];
-                l = lfo_wave(eg.lfo_wave, ph, g_sh[bi]);
+                l = lfo_morph(eg.lfo_wave, shp, ph, g_sh[bi]);
             }
             voice[v].lfo_fade += (int32_t)eg.lfo_fade;
             if (voice[v].lfo_fade > ENV_FULL) voice[v].lfo_fade = ENV_FULL;

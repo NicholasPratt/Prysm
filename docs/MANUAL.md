@@ -247,6 +247,7 @@ any of the LFO's (below), plus two of its own:
 | --- | --- |
 | LFORATE | the LFO's rate, up to +-4 octaves: an envelope that speeds the LFO up and slows it down |
 | LFOAMT | the LFO's depth, from nothing up to double |
+| LFOSHAPE | the LFO's wave, morphed: from the one you chose along SINE, TRI, SAW UP, SAW DN, SQUARE, S&H (a full amount: the whole row), each fading into the next |
 
 The two can share a destination (they add up), or split the work: say M.ENV 1 sweeps the cutoff while M.ENV 2,
 short and looping, flicks mod 1's pitch. The picture shows two seconds of the envelope (the key held for 1.5 s, the
@@ -310,6 +311,7 @@ it is set, as far as the whole knob):
 | LEVEL1, LEVEL2 | the oscillators' levels (the MIX page's) |
 | DETUNE | osc 2, up to +-1 semitone |
 | MENVAMT | the mod envelope's amount |
+| LFOSHAPE | the LFO's wave, morphed along its shapes (as the mod envelopes' LFOSHAPE) |
 | CHORUS, DELAY, REVERB | the effects' mixes (from 0: an effect that comes and goes) |
 | DLYTIME | the delay time (the repeats bend, as tape does) |
 | DLYFDBK | the delay's feedback |

@@ -606,7 +606,8 @@ static void gfx_menv(uint32_t lit, uint32_t k)
 {
     const int32_t x0 = 4, w = 232, top = 4, h = G_H - 10;
     const uint32_t blocks = 2000u * 44100u / 1000u / BLK, held = blocks * 3u / 4u;
-    uint32_t b, ph = 0, lfo = eg.me_dest[k] == DEST_LFORATE || eg.me_dest[k] == DEST_LFOAMT, rng = 12345u;
+    uint32_t b, ph = 0, lfo = eg.me_dest[k] == DEST_LFORATE || eg.me_dest[k] == DEST_LFOAMT || eg.me_dest[k] == DEST_LFOSHAPE;
+    uint32_t rng = 12345u;
     int32_t px = -1, pe = 0, pl = 0, sh = lfo_random(&rng);
     env_t e = {0, 1};
     cv_text(x0 + 2, top, &FONT_S, DEST_NAME[eg.me_dest[k] < DEST2_N ? eg.me_dest[k] : 0u], C_FAINT);
@@ -620,7 +621,7 @@ static void gfx_menv(uint32_t lit, uint32_t k)
         }
         if (x == px)
             continue;
-        l = lfo_wave(eg.lfo_wave, ph, sh);
+        l = lfo_morph(eg.lfo_wave, eg.me_dest[k] == DEST_LFOSHAPE ? mx : 0, ph, sh);
         if (eg.me_dest[k] == DEST_LFOAMT) {
             int32_t f = 32767 + mx;
             l = (l * (f < 0 ? 0 : f)) >> 15;
@@ -1495,6 +1496,8 @@ static int ui_input(uint32_t buttons)
         if ((p->kind == K_LDEST || p->kind == K_L2DEST) && (x == DEST_LFORATE || x == DEST_LFOAMT))
             /* the LFOs: past the mod envelope's own (LFORATE, LFOAMT) */
             x = d > 0 ? DEST_SPREAD : DEST_MIX;
+        if (p->kind == K_LDEST && x == DEST_LFOSHAPE)   /* (the LFO: not its own shape) */
+            x = DEST_LFOSHAPE - 1;
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;

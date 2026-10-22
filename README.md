@@ -30,8 +30,8 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Filter** | state-variable low-pass, 12 or 24 dB/oct (zero-delay feedback), or a Blofeld-style comb (COMB+ / COMB-: the cutoff its frequency, resonance its feedback, plus damping and spread); self-oscillation at the top of RES (a steady, keytracked sine at any cutoff); drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance) |
 | **Amp** | ADSR; VCA OPEN (a bias: an instant drone, each voice on its last note) |
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch (together or mod 1 / mod 2 alone), cutoff, amp, mix) |
-| **LFO 2** | one for all the voices; the same shapes; free (0.05 .. 40 Hz) or in time (4/1 .. 1/32, triplets); any LFO destination, or resonance, drive, high-pass, comb damping, filter envelope amount, levels, osc 2 detune, the mod envelope's amount, the effects' mixes, delay time and feedback, reverb size |
-| **Mod envelopes** | two, each an ADSR with LOOP (attack-decay until release) and its own destination and amount; into the LFO's rate or depth, or any LFO destination |
+| **LFO 2** | one for all the voices; the same shapes; free (0.05 .. 40 Hz) or in time (4/1 .. 1/32, triplets); any LFO destination, or resonance, drive, high-pass, comb damping, filter envelope amount, levels, osc 2 detune, the mod envelope's amount, the LFO's shape (morphed), the effects' mixes, delay time and feedback, reverb size |
+| **Mod envelopes** | two, each an ADSR with LOOP (attack-decay until release) and its own destination and amount; into the LFO's rate, depth or shape (a morph through its waves), or any LFO destination |
 | **Effects** | stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer |
 | **Velocity** | from MIDI, to level, cutoff and modulation (the FM-1's keys play at full velocity) |
 | **Glide** | portamento, always or legato |

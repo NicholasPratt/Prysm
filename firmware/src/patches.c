@@ -16,7 +16,7 @@
  *  10  - the pattern (seq_len .. seq_slide: the sequencer's patterns are seqs now, beside the bank); + mod envelope 2,
  *      the modulators' pitch and fine (menv2_a .. mfine). LFO 2's destinations past format 9's DEST_N move up 2
  *      (M1PITCH, M2PITCH before them); a modulator in MIX or RING takes its RATIO's pitch (up to +24 semitones)
- *  11  + the VCA's bias (vca: 0, closed, as before) */
+ *  11  + the VCA's bias (vca: 0, closed, as before); LFO 2's destinations past M2PITCH move up 1 (LFOSHAPE) */
 #define PATCH_SLOTS 8u
 #define PATCH_VERSION 11u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
@@ -62,13 +62,15 @@ static int patch_from(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version
     *p = PATCH_INIT;                            /* the new fields: as the default sound has them */
     if (version >= 10u) {                       /* (format 10 on: each a prefix of the next) */
         memcpy(p, b, n);
+        if (p->lfo2_dest >= DEST_V10_N)
+            p->lfo2_dest = (uint8_t)(p->lfo2_dest + 1u);
         return 0;
     }
     memcpy(p, b, n < PATCH_SEQ_AT ? n : PATCH_SEQ_AT);
     if (n > PATCH_V7_SIZE)                      /* (after the pattern: the high-pass .. LFO 2) */
         memcpy((uint8_t *)p + PATCH_SEQ_AT, b + PATCH_V7_SIZE, n - PATCH_V7_SIZE);
     if (version == 9u && p->lfo2_dest >= DEST_V9_N)
-        p->lfo2_dest = (uint8_t)(p->lfo2_dest + 2u);
+        p->lfo2_dest = (uint8_t)(p->lfo2_dest + 3u);
     for (o = 0; o < NOSC; o++)
         for (k = 0; k < 2u; k++)
             if (p->osc[o].mode[k] != MODE_FM && p->osc[o].ratio[k + 1u] < PR_RATIOS) {

@@ -227,7 +227,7 @@ int main(void)
     }
     {                                           /* 0.9's store: format 10 patches, the patterns of version 2 */
         patch_t c = PATCH_INIT;
-        c.cut = 33; c.mpitch[1][1] = 40;
+        c.cut = 33; c.mpitch[1][1] = 40; c.lfo2_dest = DEST_V10_N;   /* (format 10's RES) */
         seqs_init();
         seqs.pat[2].xnote[7][1] = 64; seqs.pat[2].xvel[7][1] = 90;
         memset(old_store, 0, sizeof old_store);
@@ -238,8 +238,9 @@ int main(void)
         seqs_init();
         memset(&bank, 0, sizeof bank);
         patches_load();
-        CHECK(patch_get(6, &a) == 0 && !memcmp(&a, &c, PATCH_V10_SIZE) && a.vca == 0 && !seqs_fresh &&
-              seqs.pat[2].xnote[7][1] == 64, "0.9's bank (format 10): sounds and chords kept, the VCA closed");
+        CHECK(patch_get(6, &a) == 0 && a.vca == 0 && !seqs_fresh && seqs.pat[2].xnote[7][1] == 64 && a.cut == 33 &&
+              a.mpitch[1][1] == 40, "0.9's bank (format 10): sounds and chords kept, the VCA closed");
+        CHECK(a.lfo2_dest == DEST_RES, "format 10: LFO 2 on RES stays on RES (%u)", (unsigned)a.lfo2_dest);
     }
     CHECK(sizeof bank + sizeof seqs <= STORE_MAX, "the bank and the patterns fit the store (%u of %u bytes)",
           (unsigned)(sizeof bank + sizeof seqs), (unsigned)STORE_MAX);

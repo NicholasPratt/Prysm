@@ -173,6 +173,27 @@ int main(void)
     p.menv_a = 0; p.menv_s = 127; p.menv_dest = DEST_PITCH; p.menv_amt = 127;
     render("menv1_pitch", &p, A4, 1, 900, 1000);
 
+    {                                           /* LFOSHAPE: the morph itself, then a square pulled down to a sine */
+        uint32_t ph = 0x30000000u, ok = 1;
+        int32_t t = lfo_wave(LFO_TRI, ph, 0), si = lfo_wave(LFO_SINE, ph, 0);
+        ok &= lfo_morph(LFO_SINE, 32767 / 5 + 1, ph, 0) - t <= 200 && lfo_morph(LFO_SINE, 32767 / 5 + 1, ph, 0) - t >= -200;
+        ok &= abs(lfo_morph(LFO_SINE, 32767 / 10, ph, 0) - (si + t) / 2) < 400;   /* halfway: between the two */
+        ok &= lfo_morph(LFO_SQR, 32767, ph, 1234) == 1234;                         /* (past the end: S&H) */
+        printf("  %s lfo morph: sine + a fifth of the way = triangle; halfway between; clamped at the end\n",
+               ok ? "ok  " : "FAIL");
+        if (!ok) return 1;
+        p = solo();                             /* a slow square vibrato, M.ENV 2 holding it fully down: a sine */
+        p.lfo_wave = LFO_SQR; p.lfo_rate = 40; p.lfo_dest[0] = DEST_PITCH; p.lfo_amt[0] = 100;
+        p.menv2_a = 0; p.menv2_s = 127; p.menv2_dest = DEST_LFOSHAPE; p.menv2_amt = 0;
+        render("lfoshape_menv2", &p, A4, 1, 1400, 1500);
+        p.lfo_wave = LFO_SINE; p.menv2_dest = DEST_OFF; p.menv2_amt = 64;
+        render("lfoshape_sine", &p, A4, 1, 1400, 1500);
+        p.lfo_wave = LFO_SQR; p.lfo2_dest = DEST_LFOSHAPE; p.lfo2_amt = 127; p.lfo2_rate = 70;   /* LFO 2 morphing it */
+        render("lfoshape_lfo2", &p, A4, 1, 1400, 1500);
+        p.lfo2_dest = DEST_OFF;
+        render("lfoshape_sqr", &p, A4, 1, 1400, 1500);
+    }
+
     p = solo();                                 /* the series chain: mod 2 (x1) FM into mod 1 (x1) FM into the carrier */
     p.osc[0].amt[0] = 80;
     p.osc[0].amt[1] = 80;

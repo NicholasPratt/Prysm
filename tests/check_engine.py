@@ -247,6 +247,14 @@ def inst_freq(x, t0, t1, win=0.02):
 def cents(f):
     return 1200 * np.log2(f / 440)
 
+tr = {n: inst_freq(load(n), 0.1, 1.3) for n in ("lfoshape_menv2", "lfoshape_sine", "lfoshape_sqr")}
+dm = float(np.nanmax(np.abs(1200 * np.log2(tr["lfoshape_menv2"] / tr["lfoshape_sine"]))))
+dq = float(np.nanmax(np.abs(1200 * np.log2(tr["lfoshape_sqr"] / tr["lfoshape_sine"]))))
+check("lfoshape: m.env 2", dm < 3 and dq > 20,
+      f"a square vibrato, M.ENV 2 on LFOSHAPE at -full: the sine's pitch to {dm:.1f} cents (the square alone: {dq:.0f})")
+c_, q_ = load("lfoshape_lfo2"), load("lfoshape_sqr")
+check("lfoshape: lfo 2", float(np.max(np.abs(c_ - q_))) > 0.1, "LFO 2 on LFOSHAPE changes the square's vibrato")
+
 
 fv = cents(inst_freq(load("lfo_vib"), 0.1, 1.8))
 check("lfo vibrato depth", 80 < np.nanmax(fv) < 130 and -130 < np.nanmin(fv) < -80,
