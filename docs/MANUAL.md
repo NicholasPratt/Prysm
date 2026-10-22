@@ -27,7 +27,7 @@ restart. Do not unplug it while it writes.
 **From the command line** (a built package, see the README):
 
 ```sh
-python3 tools/fm1_install.py prysm-1.0.fwsc
+python3 tools/fm1_install.py prysm-1.1.fwsc
 ```
 
 **Coming from another firmware.** Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
