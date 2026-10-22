@@ -15,9 +15,10 @@
  *   9  + LFO 2 (lfo2_wave .. lfo2_amt: 306 bytes)
  *  10  - the pattern (seq_len .. seq_slide: the sequencer's patterns are seqs now, beside the bank); + mod envelope 2,
  *      the modulators' pitch and fine (menv2_a .. mfine). LFO 2's destinations past format 9's DEST_N move up 2
- *      (M1PITCH, M2PITCH before them); a modulator in MIX or RING takes its RATIO's pitch (up to +24 semitones) */
+ *      (M1PITCH, M2PITCH before them); a modulator in MIX or RING takes its RATIO's pitch (up to +24 semitones)
+ *  11  + the VCA's bias (vca: 0, closed, as before) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 10u
+#define PATCH_VERSION 11u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
@@ -27,6 +28,7 @@
 #define PATCH_V7_SIZE 297u                      /* format 7's: everything before hp_cut */
 #define PATCH_V8_SIZE 301u                      /* format 8's: everything before lfo2_wave */
 #define PATCH_V9_SIZE 306u                      /* format 9's: all of it */
+#define PATCH_V10_SIZE 125u                     /* format 10's: everything before vca */
 #define PATCH_OLD_MAX PATCH_V9_SIZE
 #define PATCH_SEQ_AT PATCH_V6_SIZE              /* formats 7 .. 9: the pattern (seq_len, div, gate, pad, note[64], */
 #define PATCH_SEQ_N (PATCH_V7_SIZE - PATCH_V6_SIZE)   /* trig[64], slide[64]) here, the rest after it */
@@ -38,13 +40,14 @@ _Static_assert(__builtin_offsetof(patch_t, glide) == PATCH_V5_SIZE, "format 5 is
 _Static_assert(__builtin_offsetof(patch_t, hp_cut) == PATCH_V6_SIZE, "format 6 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, lfo2_wave) + PATCH_SEQ_N == PATCH_V8_SIZE, "format 8 is, but the pattern");
 _Static_assert(__builtin_offsetof(patch_t, menv2_a) + PATCH_SEQ_N == PATCH_V9_SIZE, "format 9 is, but the pattern");
+_Static_assert(__builtin_offsetof(patch_t, vca) == PATCH_V10_SIZE, "format 10 is a prefix of patch_t");
 
 /* patch p from n bytes of format version (a patch file, the plugin's state, a slot): 0 = done */
 static int patch_from(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version)
 {
     static const uint16_t SIZE[PATCH_VERSION] = {0, PATCH_V1_SIZE, PATCH_V2_SIZE, PATCH_V3_SIZE, PATCH_V4_SIZE,
                                                  PATCH_V5_SIZE, PATCH_V6_SIZE, PATCH_V7_SIZE, PATCH_V8_SIZE,
-                                                 PATCH_V9_SIZE};
+                                                 PATCH_V9_SIZE, PATCH_V10_SIZE};
     /* RATIO -> PITCH (0..48, 24 = in tune) and FINE: 0.5 .. 4 as near as they go, 5 and up as far: +24 */
     static const uint8_t R_SEMI[PR_RATIOS] = {12, 24, 31, 36, 43, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48};
     static const uint8_t R_FINE[PR_RATIOS] = {64, 64, 66, 64, 66, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64};
@@ -57,6 +60,10 @@ static int patch_from(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version
     if (version < 1u || version >= PATCH_VERSION || n != SIZE[version])
         return -1;
     *p = PATCH_INIT;                            /* the new fields: as the default sound has them */
+    if (version >= 10u) {                       /* (format 10 on: each a prefix of the next) */
+        memcpy(p, b, n);
+        return 0;
+    }
     memcpy(p, b, n < PATCH_SEQ_AT ? n : PATCH_SEQ_AT);
     if (n > PATCH_V7_SIZE)                      /* (after the pattern: the high-pass .. LFO 2) */
         memcpy((uint8_t *)p + PATCH_SEQ_AT, b + PATCH_V7_SIZE, n - PATCH_V7_SIZE);
@@ -172,7 +179,8 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     seqs_fresh = 0;
     old_size = 0;
     if (store_try(PATCH_VERSION, sizeof(patch_t), SEQS_VERSION, sizeof seqs) == 0 ||
-        store_try(PATCH_VERSION, sizeof(patch_t), 1u, SEQS_V1_SIZE) == 0 ||
+        store_try(10u, PATCH_V10_SIZE, SEQS_VERSION, sizeof seqs) == 0 ||   /* (0.9) */
+        store_try(10u, PATCH_V10_SIZE, 1u, SEQS_V1_SIZE) == 0 ||
         store_try(9u, PATCH_V9_SIZE, 1u, SEQS_V1_SIZE) == 0)   /* (kept in RAM; the next save writes them anew) */
         return;
     for (i = 0; i < sizeof OLD / sizeof OLD[0]; i++)

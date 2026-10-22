@@ -28,7 +28,7 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Voices** | 4, polyphonic |
 | **Oscillators** | 2 per voice; each a carrier modulated by mod 1, modulated by mod 2. Each operator: 6 banks x 8 morphing waves (BASIC, HARM, PULSE, VOCAL, DIGI, CMPLX), a ratio to the note (0.5 .. 16); each modulator: FM / RING / MIX (in MIX / RING a pitch, -24 .. +24 semitones, instead of the ratio), fine tune, an amount, its own AR envelope |
 | **Filter** | state-variable low-pass, 12 or 24 dB/oct (zero-delay feedback), or a Blofeld-style comb (COMB+ / COMB-: the cutoff its frequency, resonance its feedback, plus damping and spread); self-oscillation at the top of RES (a steady, keytracked sine at any cutoff); drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance) |
-| **Amp** | ADSR |
+| **Amp** | ADSR; VCA OPEN (a bias: an instant drone, each voice on its last note) |
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch (together or mod 1 / mod 2 alone), cutoff, amp, mix) |
 | **LFO 2** | one for all the voices; the same shapes; free (0.05 .. 40 Hz) or in time (4/1 .. 1/32, triplets); any LFO destination, or resonance, drive, high-pass, comb damping, filter envelope amount, levels, osc 2 detune, the mod envelope's amount, the effects' mixes, delay time and feedback, reverb size |
 | **Mod envelopes** | two, each an ADSR with LOOP (attack-decay until release) and its own destination and amount; into the LFO's rate or depth, or any LFO destination |
@@ -56,7 +56,7 @@ envelopes, the LFO, the effects chain.
 | --- | --- | --- |
 | OSC 1, OSC 2 | EDIT | WAVE, WAVE2, RATIO, MODE, ENV, MIX |
 | FILTER | SELECT (the button) | FILTER, TYPE, COMB |
-| AMP | ENV | ENV, VEL |
+| AMP | ENV | ENV, VEL, VCA |
 | F.ENV, M.ENV 1, M.ENV 2 | ENV (2, 3, 4 times) | ENV; the mod envelopes: ENV, DEST |
 | LFO | LFO (twice: LFO 2) | LFO, DEST; LFO 2: LFO, DEST |
 | MIX | GLO | OSC, GLIDE |

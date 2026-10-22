@@ -138,6 +138,9 @@ typedef struct {
     uint8_t menv2_loop, menv2_dest, menv2_amt;
     uint8_t mpitch[NOSC][2];                    /* mod 1, mod 2 in MIX or RING (RATIO then): 0..48, 24 = the carrier's */
     uint8_t mfine[NOSC][2];                     /* mod 1, mod 2 (any mode): 64 = in tune, +-50 cents */
+    /* (added in patch format 11: the VCA's bias) */
+    uint8_t vca;                                /* the amp open by this much, whatever the envelope: 0 = closed; up: */
+                                                /* every voice drones its last note at that level (Neutron's bias) */
 } patch_t;
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
@@ -220,6 +223,7 @@ static const patch_t PATCH_INIT = {
     .menv2_a = 0, .menv2_d = 60, .menv2_s = 0, .menv2_r = 50, .menv2_loop = 0,   /* no amount yet */
     .menv2_dest = DEST_PITCH, .menv2_amt = 64,
     .mpitch = {{24, 24}, {24, 24}}, .mfine = {{64, 64}, {64, 64}},
+    .vca = 0,
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -229,6 +233,7 @@ static volatile struct {
     uint8_t mode[NOSC][2];
     int32_t lvl[NOSC];                          /* oscillator output levels, Q15 */
     uint32_t a_att, a_dec, a_rel;               /* amp ADSR */
+    int32_t vca;                                /* the amp's floor (VCA OPEN), Q15: 0 closed */
     int32_t a_sus;                              /* Q24 */
     uint32_t f_att, f_dec, f_rel;               /* filter ADSR */
     int32_t f_sus;
@@ -313,6 +318,7 @@ static struct {
     uint16_t cw;                                /* where it writes next */
     uint8_t comb_live;                          /* its line holds this note's sound (else cleared first) */
     int32_t amp_q15, mod_q15[NOSC][2];          /* the levels now (per frame, gliding to each block's target) */
+    uint8_t drone;                              /* it has played a note: with VCA OPEN it sounds on, after its release */
     uint32_t lfo_ph, lfo_rng;                   /* its LFO (retrig on): phase, S&H's random sequence */
     int32_t lfo_sh, lfo_fade;                   /* the S&H value held; the fade-in (Q24) */
     int32_t rate16;                             /* the mod envelope's move of its LFO's rate, 1/16 semitones */
@@ -623,23 +629,34 @@ static void arp_clear(void);
 static void engine_all_off(void);
 
 /* ---- a voice starts (its note and pitch set): the envelopes (re)start from where they are */
+static int voice_on(uint32_t v)                 /* it sounds: its envelope runs, or VCA OPEN holds it (or fades it out) */
+{
+    return voice[v].amp.st || (voice[v].drone && (eg.vca || voice[v].amp_q15 > 16));
+}
+
+static void voice_fresh(uint32_t v)             /* from silence: the phases from 0, the filter as the knobs are now */
+{
+    uint32_t o;
+    for (o = 0; o < NOSC; o++)
+        voice[v].ph[o][0] = voice[v].ph[o][1] = voice[v].ph[o][2] = 0;
+    voice[v].ic1 = voice[v].ic2 = voice[v].ic3 = voice[v].ic4 = 0;
+    voice[v].f_cs = eg.f_cut << 8;              /* the knob as it is now; the first block starts on its own */
+    voice[v].f_ks = (int32_t)eg.f_k;
+    voice[v].fc[0] = -1;
+    voice[v].hp1 = voice[v].hp2 = 0;
+    voice[v].hp_gs = eg.hp_g;
+    voice[v].cd_q8 = 0;
+    voice[v].clp = 0;
+    voice[v].cfb = eg.comb_fb; voice[v].cdk = eg.comb_dk; voice[v].cin = eg.comb_in;
+    voice[v].comb_live = 0;
+}
+
 static void voice_start(uint32_t v)
 {
     uint32_t o;
-    if (!voice[v].amp.st) {                     /* from silence: the phases from 0, the same attack every time */
-        for (o = 0; o < NOSC; o++)
-            voice[v].ph[o][0] = voice[v].ph[o][1] = voice[v].ph[o][2] = 0;
-        voice[v].ic1 = voice[v].ic2 = voice[v].ic3 = voice[v].ic4 = 0;
-        voice[v].f_cs = eg.f_cut << 8;          /* the knob as it is now; the first block starts on its own */
-        voice[v].f_ks = (int32_t)eg.f_k;
-        voice[v].fc[0] = -1;
-        voice[v].hp1 = voice[v].hp2 = 0;
-        voice[v].hp_gs = eg.hp_g;
-        voice[v].cd_q8 = 0;
-        voice[v].clp = 0;
-        voice[v].cfb = eg.comb_fb; voice[v].cdk = eg.comb_dk; voice[v].cin = eg.comb_in;
-        voice[v].comb_live = 0;
-    }
+    if (!voice_on(v))                           /* from silence: the same attack every time (a drone: it goes on) */
+        voice_fresh(v);
+    voice[v].drone = 1;
     voice[v].amp.st = 1;
     voice[v].flt.st = 1;
     for (o = 0; o < NOSC; o++)
@@ -1120,7 +1137,7 @@ static void engine_render(int32_t *out, uint32_t n)
             voice[v].trig = 0;
             voice_start(v);
         }
-        if (!voice[v].amp.st && voice[v].itrig == 0xFFu) {
+        if (!voice_on(v) && voice[v].itrig == 0xFFu) {
             voice[v].islide = 0xFF;             /* (a slide into a voice gone quiet: nothing to slide) */
             continue;                           /* silent: costs nothing */
         }
@@ -1148,7 +1165,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].gate = 1;
                 voice_start(v);
             }
-            if (!voice[v].amp.st)
+            if (!voice_on(v))
                 continue;
             gate = voice[v].gate;
             if (voice[v].glide_q8) {            /* glide: the rest of the slide, exponentially */
@@ -1210,6 +1227,8 @@ static void engine_render(int32_t *out, uint32_t n)
                 if (eg.vel_mod)
                     m.vmod = 32767 - ((eg.vel_mod * soft) >> 15);
             }
+            if (eg.vca)                         /* VCA OPEN: the envelope over a floor */
+                a_to = eg.vca + ((a_to * (32767 - eg.vca)) >> 15);
             a_to = (a_to * m.amp) >> 15;
             a = voice[v].amp_q15;
             da = (a_to - a) >> BLK_SHIFT;
@@ -1648,8 +1667,20 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
     eg.a_sus = (int32_t)((patch.amp_s & 127u) * (uint32_t)(ENV_FULL / 127));
     eg.a_rel = PR_ENV_EXP[patch.amp_r & 127u];
+    eg.vca = (int32_t)(patch.vca & 127u) * 32767 / 127;
+    if (eg.vca) {                               /* an instant drone: nothing played yet, a voice on its last note (C3) */
+        uint32_t w, any = 0;
+        for (w = 0; w < NV; w++) any |= voice[w].drone;
+        if (!any) {                             /* (voice 0 is silent: the ISR leaves it be until drone is set) */
+            voice[0].note = (uint8_t)(last_note >= 0 ? last_note : 48);
+            voice[0].glide_q8 = 0;
+            voice_tune(0);
+            voice_fresh(0);
+            voice[0].drone = 1;
+        }
+    }
     for (v = 0; v < NV; v++)                    /* ratios and tuning may have changed: retune what sounds */
-        if (voice[v].gate || voice[v].amp.st)
+        if (voice[v].gate || voice_on(v))
             voice_tune(v);
 }
 

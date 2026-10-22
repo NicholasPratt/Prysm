@@ -115,6 +115,7 @@ static const row_t AMP_ROWS[] = {
              {"S", PO(amp_s), 127, K_NUM}, {"R", PO(amp_r), 127, K_NUM}}, LIT_ENV},
     {"VEL", {{"AMP", PO(vel_amp), 127, K_NUM}, {"CUTOFF", PO(vel_cut), 127, K_NUM},     /* MIDI velocity */
              {"MOD", PO(vel_mod), 127, K_NUM}, NOPRM}, LIT_ENV},
+    {"VCA", {{"OPEN", PO(vca), 127, K_NUM}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},   /* (a drone: the amp's floor) */
 };
 static const row_t FENV_ROWS[] = {               /* (the filter's envelope; its amount: FILTER's ENV) */
     {"ENV", {{"A", PO(flt_a), 127, K_NUM}, {"D", PO(flt_d), 127, K_NUM},
@@ -921,7 +922,14 @@ static void draw_gfx(void)
     case PG_OSC1: gfx_osc(0, lit); break;
     case PG_OSC2: gfx_osc(1, lit); break;
     case PG_FILTER: gfx_filter(lit); break;
-    case PG_AMP: cv_adsr(8, 6, 224, G_H - 14, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC); break;
+    case PG_AMP:                                /* the envelope; VCA OPEN: its floor, a line across */
+        cv_adsr(8, 6, 224, G_H - 14, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC);
+        if (edit.vca) {
+            int32_t y = 6 + (int32_t)(G_H - 14) - (int32_t)edit.vca * (int32_t)(G_H - 14) / 127;
+            cv_rect(8, y, 224, lit & LIT_CURVE ? 2 : 1, lit & LIT_CURVE ? C_BRIGHT : C_MID);
+            cv_text(12, y > 24 ? y - 18 : y + 4, &FONT_S, "DRONE", lit & LIT_CURVE ? C_BRIGHT : C_MID);
+        }
+        break;
     case PG_FENV:                               /* the filter's envelope, and how far it moves the cutoff */
         cv_adsr(8, 6, 224, G_H - 14, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, C_ACC);
         {

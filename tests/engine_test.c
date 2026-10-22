@@ -126,6 +126,22 @@ int main(void)
     engine_bend(0, 2); render("bend_down", &p, A4, 1, 900, 1000);      /* full down, +-2: G4 */
     engine_bend(8192, 2);
 
+    {                                           /* VCA OPEN: a chord let go drones on; OPEN at 0: it dies away */
+        static const uint8_t CEG[] = {60, 64, 67};
+        patch_t q;
+        p = solo(); p.amp_r = 30; p.vca = 80;
+        render("drone_chord", &p, CEG, 3, 300, 1500);
+        p.vca = 0;
+        render("drone_closed", &p, CEG, 3, 300, 1500);
+        p.vca = 80;                             /* nothing played: OPEN up drones C3 at once */
+        last_note = -1;                         /* (nothing played since power-on) */
+        render("drone_instant", &p, CEG, 0, 300, 1500);
+        q = p; q.vca = 0;                       /* OPEN back to 0 at 800 ms: it fades out (no click) */
+        render_p2 = &q; render_change_ms = 800;
+        render("drone_off", &p, CEG, 3, 300, 1500);
+        render_p2 = 0;
+    }
+
     p = solo();                                 /* FM: mod 1 at x1 into the carrier: harmonics of 440 */
     p.osc[0].amt[0] = 100;
     render("fm", &p, A4, 1, 900, 1000);

@@ -225,6 +225,22 @@ int main(void)
               "version 1 patterns convert (the plugin's state)");
         CHECK(seqs_from(v1, 3) != 0, "a newer version: refused");
     }
+    {                                           /* 0.9's store: format 10 patches, the patterns of version 2 */
+        patch_t c = PATCH_INIT;
+        c.cut = 33; c.mpitch[1][1] = 40;
+        seqs_init();
+        seqs.pat[2].xnote[7][1] = 64; seqs.pat[2].xvel[7][1] = 90;
+        memset(old_store, 0, sizeof old_store);
+        old_store[0] = 10; old_store[4u + 6u] = 1;
+        memcpy(old_store + BANK_SIZE(0) + 6u * PATCH_V10_SIZE, &c, PATCH_V10_SIZE);
+        memcpy(old_store + BANK_SIZE(PATCH_V10_SIZE), &seqs, sizeof seqs);
+        store_save(old_store, BANK_SIZE(PATCH_V10_SIZE) + sizeof seqs);
+        seqs_init();
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(6, &a) == 0 && !memcmp(&a, &c, PATCH_V10_SIZE) && a.vca == 0 && !seqs_fresh &&
+              seqs.pat[2].xnote[7][1] == 64, "0.9's bank (format 10): sounds and chords kept, the VCA closed");
+    }
     CHECK(sizeof bank + sizeof seqs <= STORE_MAX, "the bank and the patterns fit the store (%u of %u bytes)",
           (unsigned)(sizeof bank + sizeof seqs), (unsigned)STORE_MAX);
     printf(fails ? "%d failed\n" : "all passed\n", fails);

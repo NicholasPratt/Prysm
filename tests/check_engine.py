@@ -310,6 +310,18 @@ check("velocity off", np.array_equal(voff, v127), "no sensitivity: velocity 40 g
 
 # ---- the arpeggiator
 NOTE = {60: 261.63, 64: 329.63, 67: 392.0, 72: 523.25, 76: 659.26, 79: 783.99}
+dc, dx = load("drone_chord"), load("drone_closed")
+f, s = spectrum(dc, 0.8, 1.4)
+lv = [level_db(f, s, NOTE[m], 6) for m in (60, 64, 67)]
+check("vca open: a drone chord", min(lv) > -6 and rms(dc, 0.8, 1.4) > 0.02 and rms(dx, 1.0, 1.4) < 0.0005,
+      f"a second after letting go: C4 {lv[0]:.1f}, E4 {lv[1]:.1f}, G4 {lv[2]:.1f} dB; closed: {rms(dx, 1.0, 1.4):.5f}")
+di = load("drone_instant")
+fi = peak_hz(*spectrum(di, 0.3, 1.3))
+check("vca open: an instant drone", rms(di, 0.3, 1.3) > 0.02 and abs(fi - 130.81) < 2, f"no note played: {fi:.1f} Hz (C3)")
+do = load("drone_off")
+jump = float(np.max(np.abs(np.diff(do[int(0.79 * 44100):int(0.9 * 44100)]))))
+check("vca closed again: it fades", rms(do, 1.0, 1.4) < 0.0005 and jump < 0.05,
+      f"after: {rms(do, 1.0, 1.4):.5f}; the largest step meanwhile {jump:.3f}")
 STEP = 60 / 120 / 4                              # 1/16 at 120 BPM
 
 

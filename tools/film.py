@@ -28,7 +28,7 @@ PAGES = {"OSC1": "OSC 1", "OSC2": "OSC 2", "FILTER": "FILTER", "AMP": "AMP", "FE
          "SETUP": "SETUP", "PATCH": "PATCH", "SCOPE": "SCOPE"}   # (ui.c's order: PG_OSC1 .. PG_SETUP, PG_PATCH, PG_SCOPE)
 PG = {p: i for i, p in enumerate(PAGES)}
 ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"],
-        "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
+        "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL", "VCA"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
         "MENV2": ["ENV", "DEST"], "LFO": ["LFO", "DEST"],
         "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "GLIDE"], "ARP": ["ARP", "TIME"], "SEQ": ["STEP", "CHORD", "PATTERN", "EDIT", "CLICK", "SONG", "ENTRY"],
         "CHO": ["CHORUS"], "DLY": ["DELAY", "D.MOD"], "REV": ["REVERB", "R.MOD"], "SETUP": ["MIDI"],
@@ -70,7 +70,8 @@ def info():
     names = {v: k for k, v in PAGES.items()}
     for line in out[1:-1]:
         page, row, label, knob, off, mx, mn, kind = line.split("|")
-        knobs.setdefault((names[page], row, int(knob)), (int(off), int(mx), int(mn), int(kind), label))   # (not PIT1, PIT2)
+        k = (names[page], row, int(knob))       # (a knob's other parameter, PIT1 / PIT2: under k + ("alt",))
+        knobs[k + ("alt",) if k in knobs else k] = (int(off), int(mx), int(mn), int(kind), label)
     s = [int(x) for x in out[-1].split()[1:]]
     _info = {"init": init, "knobs": knobs, "arp_on": s[0]}
     return _info
@@ -115,11 +116,14 @@ class Scene:
         if after:
             self.patch, self.page, self.rows = bytearray(after.patch), after.page, dict(after.rows)
             self.back, self.rec, self.cursor = after.back, after.rec, after.cursor
+            self.playing = after.playing
         else:
             self.patch, self.page, self.rows = bytearray(I["init"]), "OSC1", {p: 0 for p in PAGES}
             self.back, self.rec, self.cursor = "OSC1", False, 0
+            self.playing = False
+        self.entry = set()                      # (step entry: the chord's keys down)
         self.pa_slot = 0
-        self.start = (bytes(self.patch), PG[self.page], {PG[p]: n for p, n in self.rows.items() if n and PG[p] < 13},
+        self.start = (bytes(self.patch), PG[self.page], {PG[p]: n for p, n in self.rows.items() if n and PG[p] < PG["PATCH"]},
                       self.cursor, self.rows["PATCH"])
         self.t, self.ev, self.caps, self.how = 0, [], [], []
 
@@ -169,6 +173,7 @@ class Scene:
         elif b == "GLO": self.page = "SETUP" if p == "MIX" else "MIX"
         elif b == "SEQ": self.page = "SEQ"
         elif b == "REC": self.page, self.rec = "SEQ", not self.rec
+        elif b == "PLAY": self.playing = not self.playing
         elif b == "ARP":
             if p == "ARP": self.patch[I["arp_on"]] ^= 1
             else: self.page = "ARP"
@@ -197,7 +202,11 @@ class Scene:
     def _knob(self, knob):
         if knob == "cut":
             return info()["knobs"][("FILTER", "FILTER", 0)][:3] + (1, "CUTOFF")
-        return info()["knobs"].get((self.page, ROWS[self.page][self.rows[self.page]], knob - 1))
+        k = (self.page, ROWS[self.page][self.rows[self.page]], knob - 1)
+        if self.page in ("OSC1", "OSC2") and k[1] == "RATIO" and knob in (2, 3):   # MIX / RING: PIT1 / PIT2
+            mode = info()["knobs"][(self.page, "MODE", knob - 2)][0]
+            if self.patch[mode]: return info()["knobs"].get(k + ("alt",))
+        return info()["knobs"].get(k)
 
     def turn(self, knob, to, ms=1500, block=True):   # knob 1..4 or "cut" (PRESETS) to a value, over ms
         k = self._knob(knob)
@@ -221,6 +230,15 @@ class Scene:
         if block: self.t = t + 250
         return self
 
+    def twist(self, knob, detents, label, ms=None):   # a knob that is not the sound's (a step, CHORD, CLICK): raw turns
+        n, enc, t = abs(detents), ENC_KNOB1 + knob - 1, self.t
+        for i in range(n):
+            self.ev.append((t, f"enc {enc} {1 if detents > 0 else -1}"))
+            t += max(TURN_MS, (ms or 0) // max(1, n))
+        self._how(f"turn KNOB {knob} ({label})")
+        self.t = t + 250
+        return self
+
     def patch_row(self, name):                  # on the PATCH screen: SAVE, LOAD or INIT
         return self.row(name)
 
@@ -237,13 +255,16 @@ class Scene:
         I = info()
         for n in notes:                         # (with REC, the firmware enters them in the pattern: not the sound)
             self.ev.append((self.t, f"midi 0x90 {n} {vel}"))
-            if self.rec and self.page == "SEQ":
-                self.cursor = (self.cursor + 1) % 16
+            if self.rec and self.page == "SEQ" and not self.playing:
+                self.entry.add(n)               # (step entry: the cursor moves on when the chord is let go)
         self._how("play keys")
         return self
 
     def off(self, *notes):
         self.ev += [(self.t, f"midi 0x80 {n} 0") for n in notes]
+        if self.entry and not (self.entry - set(notes)):
+            self.cursor = (self.cursor + 1) % 16
+        self.entry -= set(notes)
         return self
 
     def play(self, notes, dur=250, gap=300, at=None):   # one after another (a chord: a tuple); at: without moving t
@@ -327,7 +348,7 @@ def _ts(s, srt=True):
     return f"{s // 60}:{s % 60:02d}"
 
 
-def film(scenes, name, footer, only=(), fps=60, ver="0.8"):
+def film(scenes, name, footer, only=(), fps=60, ver="0.9"):
     """Film the scenes (only: just these, the others as filmed before) and join them: takes/NAME/NAME.mp4, .wav,
     .srt, chapters.txt."""
     import capture
