@@ -399,7 +399,10 @@ go the cursor moves to the next, so you can type a line in. **Hold keys together
 step, and the cursor moves on once you let them all go. MIDI notes enter the same way. Press REC again to play the
 keys normally.
 
-**Recording in real time** (playing): press **PLAY**, then **REC**, and play. Each note lands on the nearest step
+**Recording in real time** (playing): press **PLAY**, then **REC**, and play. Or press **REC** first, then **PLAY**:
+you get a **count-in**, a bar of ticks (whatever CLICK is set to), and recording starts on the downbeat; a note
+played just before it lands on step 1. (On the MIDI clock there is no count-in: the clock's START is the
+downbeat.) Each note lands on the nearest step
 (the one playing, or the next if you are past its middle), with its velocity (the FM-1's keys: full; a MIDI
 keyboard: as played), and a held note is tied over the steps you held it through. Recording **overdubs**: what is
 there stays, and each pass adds to it, up to four notes a step (playing a note that is already in the step records

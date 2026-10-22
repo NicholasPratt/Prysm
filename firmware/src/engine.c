@@ -768,6 +768,8 @@ static struct {
     volatile uint32_t step_at, step_len;        /* when it started (engine_frames), its length (frames Q8) */
     volatile uint8_t rec_mute;                  /* lanes a key is recording into (the main loop's): they rest */
     uint32_t n;                                 /* steps since PLAY (the metronome's count) */
+    volatile uint32_t ci;                       /* the count-in: its steps still to come (a bar's, from PLAY) */
+    volatile uint8_t in_ci, want_ci;            /* counting in; PLAY with a count-in (the main loop's) */
 } seq = {.v = {-1, -1, -1, -1}, .count = -1, .wait = -1};
 
 /* lane l of step k: SEQ_REST, SEQ_NOTE or SEQ_TIE (an accent: a NOTE at 127), its note and velocity */
@@ -793,11 +795,11 @@ static volatile struct { uint8_t mode, rec, lvl; } clk_set;   /* (the main loop'
 static struct { int32_t at, left, amp; uint32_t ph, inc; } tick = {-1, 0, 0, 0, 0};
 static void click_start(uint32_t bi, uint32_t bar)   /* (the ISR) a tick from block bi of this render */
 {
-    if (!clk_set.mode || (clk_set.mode == 2u && !clk_set.rec) || !clk_set.lvl)
-        return;
+    if (!seq.in_ci && (!clk_set.mode || (clk_set.mode == 2u && !clk_set.rec) || !clk_set.lvl))
+        return;                                 /* (the count-in ticks whatever CLICK says) */
     tick.at = (int32_t)(bi * BLK);
     tick.left = 1764;
-    tick.amp = (int32_t)clk_set.lvl * 180;      /* (127: ~0.7 of full scale) */
+    tick.amp = (int32_t)(clk_set.lvl ? clk_set.lvl : 80u) * 180;   /* (127: ~0.7 of full scale) */
     tick.ph = 0;
     tick.inc = bar ? 194783632u : 97391816u;    /* 2 kHz, 1 kHz: f * 2^32 / 44100 */
 }
@@ -854,6 +856,23 @@ static seqpos_t seq_adv(seqpos_t s)             /* the step after s: on in the p
 static uint32_t seq_step_len(uint32_t odd)
 {
     return (uint32_t)(((uint64_t)eg.seq_len_q8 * (uint32_t)(32768 + (odd ? -eg.arp_swing : eg.arp_swing))) >> 15);
+}
+
+static void seq_step(uint32_t bi, uint32_t len);
+static void seq_tick(uint32_t bi, uint32_t len)  /* a step's time: a count-in's step (a tick each beat), or the next */
+{
+    uint32_t spb = eg.seq_spb ? eg.seq_spb : 4u;
+    if (seq.ci) {
+        uint32_t i = 4u * spb - seq.ci;         /* (its place in the bar) */
+        seq.in_ci = 1;
+        seq.step_at = engine_frames + bi * BLK;
+        seq.step_len = len;
+        if (i % spb == 0u) click_start(bi, i == 0u);
+        seq.ci--;
+        return;
+    }
+    seq.in_ci = 0;
+    seq_step(bi, len);
 }
 
 static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
@@ -922,6 +941,9 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
         seq.at.pos = seq.at.entry = seq.at.rep = 0;
         seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
         seq.n = 0;
+        seq.ci = seq.want_ci && !eg.arp_midi ? 4u * (eg.seq_spb ? eg.seq_spb : 4u) : 0u;   /* (a bar) */
+        seq.want_ci = 0;
+        seq.in_ci = 0;
         seq.now = 1;
         seq.odd = 0;
         seq.count = -1;
@@ -955,7 +977,7 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
         if (seq.now) { seq.now = 0; seq.phase_q8 = 0; seq.odd = 1; }
         else seq.phase_q8 -= seq_step_len(seq.odd);
         seq.odd ^= 1u;
-        seq_step(bi, seq_step_len(seq.odd));
+        seq_tick(bi, seq_step_len(seq.odd));
     }
 }
 
@@ -1729,6 +1751,7 @@ static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16
 }
 
 static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */
+static void engine_seq_countin(void) { seq.want_ci = 1; }   /* the next PLAY: a bar's count-in first */
 static void engine_click(uint32_t mode, uint32_t lvl, uint32_t rec)   /* the metronome: OFF, ON, REC; its level; recording */
 {
     clk_set.mode = (uint8_t)mode;
@@ -1751,6 +1774,13 @@ static int engine_seq_now(seqpos_t *at, uint32_t *ord)
         t = (int32_t)(engine_frames - seq.step_at);   /* (under 0: the step starts later in this render) */
         len = seq.step_len;
     } while (n != seq.steps);
+    if (seq.in_ci) {                            /* counting in: only late in its last step, for the first */
+        if (seq.ci || t <= 0 || ((uint64_t)t << 9) <= len)
+            return 0;
+        *at = nx;
+        *ord = n;
+        return 1;
+    }
     if (!eg.seq_play || !seq.was || !n)
         return 0;
     if (t > 0 && ((uint64_t)t << 9) > len) { *at = nx; *ord = n; }   /* past half the step (len: frames Q8) */

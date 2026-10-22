@@ -8,7 +8,8 @@
  *                    the SELECT button = FILTER)
  *   PLAY             the sequencer: run / stop (anywhere; its LED shows it)
  *   REC              stopped: step entry on the SEQ page (keys held together: a chord), the cursor moving on;
- *                    playing: real-time recording, from any page (each key into the nearest step, held: tied)
+ *                    playing: real-time recording, from any page (each key into the nearest step, held: tied);
+ *                    PLAY with REC on: a bar's count-in (ticks), then it plays and records
  *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
@@ -1373,6 +1374,10 @@ static int ui_input(uint32_t buttons)
     uint32_t i, changed = 0;
     if (buttons & (1u << BTN_PLAY)) {           /* PLAY: the sequencer runs / stops, from anywhere */
         rec_end();                              /* (a key recording: its length as it is now) */
+        if (!eg.seq_play && seq_rec && !gset.clock) {   /* REC armed: a bar's count-in, then recording */
+            engine_seq_countin();
+            pop("REC", "COUNT-IN");
+        }
         engine_seq_play(!eg.seq_play);
         dirty |= D_GFX;
     }

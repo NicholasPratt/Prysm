@@ -84,6 +84,31 @@ int main(void)
     ui_seq_key_up(50);
     CHECK(seq_lane(p, 9, 0, &nn, &nv) == SEQ_NOTE && nn == 50 && seq_lane(p, 9, 1, &nn, &nv) == SEQ_REST,
           "a single key: a single note");
+    {                                           /* PLAY with REC on: a bar's count-in, ticking (CLICK OFF), then on */
+        static int32_t blk[2u * 256u];
+        uint32_t steps0, k, loud = 0, f;
+        gset.click = 0;
+        engine_click(0, 80, 1);
+        seq_rec = 1;
+        page = PG_SEQ;
+        memset(p, 0, sizeof *p);
+        p->len = 16;
+        steps0 = seq.steps;
+        ui_input(1u << BTN_PLAY);
+        for (f = 0; f < 16u * STEP_F - STEP_F / 4u; f += 256u) {   /* the bar, but its last quarter step */
+            for (k = 0; k < 2u * 256u; k++) blk[k] = 0;
+            engine_render(blk, 256u);
+            for (k = 0; k < 2u * 256u; k++) loud += blk[k] > 2000 || blk[k] < -2000;
+        }
+        CHECK(seq.steps == steps0 && seq.in_ci && loud > 0, "counting in: no step yet, ticks heard (CLICK OFF)");
+        ui_seq_key(62, 100);                    /* a key just before the downbeat: on step 1 */
+        run_frames(STEP_F);
+        ui_seq_key_up(62);
+        CHECK(seq_lane(p, 0, 0, &nn, &nv) == SEQ_NOTE && nn == 62, "a key late in the count-in: into step 1");
+        CHECK(!seq.in_ci && seq.steps == steps0 + 1u, "then it plays, from step 1, in time");
+        ui_input(1u << BTN_PLAY);
+        run_frames(512u);
+    }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }
