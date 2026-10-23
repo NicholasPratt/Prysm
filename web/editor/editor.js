@@ -363,14 +363,15 @@ function refreshSeq(sq) {                       // the SEQ tab from the patterns
   });
 }
 
-// ---- the DRUM tab: the drums' lanes of the pattern edited (bits: dhit, dacc, 8 bytes a drum), and the kit
+// ---- the DRUM tab: the drums' lanes of the pattern edited (bits: dhit, dacc, 8 bytes a drum; an accent with no hit:
+// a flam, the snare's), and the kit
 let drEls = null;
 const DRUMS = ["KICK", "SNARE", "HAT"];
-const drumAt = (sq, a, d, k) => { const b = 1 << (k & 7), o = d * 8 + (k >> 3); return sq[a + SQ.dhit + o] & b ? (sq[a + SQ.dacc + o] & b ? 2 : 1) : 0; };
-function drumPut(a, d, k, v) {                  // step k of drum d (in the pattern at a): 0 none, 1 a hit, 2 an accent
+const drumAt = (sq, a, d, k) => { const b = 1 << (k & 7), o = d * 8 + (k >> 3); return sq[a + SQ.dhit + o] & b ? (sq[a + SQ.dacc + o] & b ? 2 : 1) : sq[a + SQ.dacc + o] & b ? 3 : 0; };
+function drumPut(a, d, k, v) {                  // step k of drum d (in the pattern at a): 0 none, 1 a hit, 2 an accent, 3 a flam
   const b = 1 << (k & 7), o = d * 8 + (k >> 3);
-  seqSet(a + SQ.dhit + o, v ? seqs()[a + SQ.dhit + o] | b : seqs()[a + SQ.dhit + o] & ~b);
-  seqSet(a + SQ.dacc + o, v === 2 ? seqs()[a + SQ.dacc + o] | b : seqs()[a + SQ.dacc + o] & ~b);
+  seqSet(a + SQ.dhit + o, v === 1 || v === 2 ? seqs()[a + SQ.dhit + o] | b : seqs()[a + SQ.dhit + o] & ~b);
+  seqSet(a + SQ.dacc + o, v >= 2 ? seqs()[a + SQ.dacc + o] | b : seqs()[a + SQ.dacc + o] & ~b);
 }
 function drumUI() {
   const box = el("div", { className: "prow" });
@@ -393,7 +394,7 @@ function drumUI() {
       const row = el("div", { className: "seqrow" }, [el("span", { textContent: name[0], className: "rowno", title: name })]);
       for (let c = 0; c < 16; c++) {
         const k = r * 16 + c, cell = el("div", { className: "cell drum" });
-        cell.onclick = (ev) => { const a = patAt(seqs(), seqs()[SQ.cur]); drumPut(a, d, k, ev.shiftKey ? 0 : (drumAt(seqs(), a, d, k) + 1) % 3); };
+        cell.onclick = (ev) => { const a = patAt(seqs(), seqs()[SQ.cur]); drumPut(a, d, k, ev.shiftKey ? 0 : (drumAt(seqs(), a, d, k) + 1) % (d === 1 ? 4 : 3)); };
         E.cells.push({ cell, d, k });
         row.append(cell);
       }
@@ -418,7 +419,7 @@ function drumUI() {
   knob("CRUSH", SQ.drCrush, 127, (v) => v);
   knob("DELAY SEND", SQ.drDly, 127, (v) => v);
   knob("REVERB SEND", SQ.drRev, 127, (v) => v);
-  box.append(el("h3", { textContent: "DRUMS of the pattern edited: click a step for a hit, then an accent (the hat opens), then none; shift-click: none" }),
+  box.append(el("h3", { textContent: "DRUMS of the pattern edited: click a step for a hit, then an accent (the hat opens), then (the snare) a flam, then none; shift-click: none" }),
              bar, grid, el("h3", { textContent: "KIT: for every pattern (FILTER: how much goes through the sound's filter, its CUTOFF and RES; the delay and reverb sends: the sound's effects, their MIX the return)" }), kit);
   return box;
 }
@@ -429,7 +430,7 @@ function refreshDrum(sq) {                      // the DRUM tab from the pattern
   E.pats.forEach((b, i) => b.classList.toggle("on", i === cur));
   for (const { cell, d, k } of E.cells) {
     const h = drumAt(sq, a, d, k);
-    cell.className = "cell drum" + (h === 2 ? " acc" : h ? " note" : "") + (k >= len ? " past" : "") +
+    cell.className = "cell drum" + (h === 3 ? " flam" : h === 2 ? " acc" : h ? " note" : "") + (k >= len ? " past" : "") +
                      (pl !== 0xFFFF && (pl >> 8) === cur && (pl & 255) === k ? " play" : "");
   }
   for (const x of E.knobs) {

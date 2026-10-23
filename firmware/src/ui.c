@@ -201,7 +201,7 @@ static const row_t MIX_ROWS[] = {
     {"GLIDE", {{"TIME", PO(glide), 127, K_NUM}, {"MODE", PO(glide_mode), GLIDE_N - 1u, K_GLIDEM}, NOPRM, NOPRM}, LIT_ALL},
 };
 static const row_t DRUM_ROWS[] = {               /* (the drums' lanes of the pattern edited; the kit, for all of them) */
-    {"STEP", {{"DRUM", 0, DRUMS - 1u, K_DRUM}, {"STEP", 0, 63, K_DCUR}, {"HIT", 0, 2, K_DHIT},
+    {"STEP", {{"DRUM", 0, DRUMS - 1u, K_DRUM}, {"STEP", 0, 63, K_DCUR}, {"HIT", 0, 3, K_DHIT},
               {"CLEAR", 0, 1, K_DCLR}}, LIT_CURVE},
     {"KICK", {{"LEVEL", SO(dr_lvl[0]), 127, K_DNUM}, {"TUNE", SO(dr_tune[0]), 48, K_DSEMI},
               {"DECAY", SO(dr_dec[0]), 127, K_DDEC}, {"FILTER", SO(dr_flt[0]), 127, K_DNUM}}, LIT_C},
@@ -416,7 +416,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_ROUTE: put(s, *v ? "DIRECT" : "FILTER"); break;
     case K_DRUM: put(s, DRUM_NAME[*v % DRUMS]); break;
     case K_DCUR: num(s, *v + 1u); break;
-    case K_DHIT: put(s, *v == 2u ? "ACCENT" : *v ? "HIT" : "--"); break;
+    case K_DHIT: put(s, *v == 3u ? "FLAM" : *v == 2u ? "ACCENT" : *v ? "HIT" : "--"); break;
     case K_DCLR: put(s, "TURN"); break;
     case K_DNUM: num(s, *v); break;
     case K_DSEMI: put(snum(s, (int32_t)*v - 24), "st"); break;
@@ -1027,7 +1027,8 @@ static void gfx_noise(uint32_t lit)
     }
 }
 
-/* the drums: the three lanes of the pattern edited, the 16 steps the cursor is in (a hit grey, an accent white, past
+/* the drums: the three lanes of the pattern edited, the 16 steps the cursor is in (a hit grey, an accent white, a flam
+ * white and grey, past
  * the length a dot), the lane chosen marked, the cursor ringed, the step playing marked under them; below, the chosen
  * drum's sound as it will play (its length tuned, DECAY over it), or the bus's settings */
 static uint32_t dr_drawn = 0xFFFFFFFFu;
@@ -1050,7 +1051,8 @@ static void gfx_drum(uint32_t lit)
             int32_t x = 44 + (int32_t)k * 12;
             if (k == 4u || k == 8u || k == 12u) cv_vdots(x - 2, y, y + 18, 2);   /* (the beats) */
             if (st >= len) { cv_rect(x + 4, y + 8, 2, 2, C_BOX); continue; }
-            if (h) cv_rect(x, y, 10, 18, h == 2u ? C_BRIGHT : C_MID);
+            if (h == 3u) { cv_rect(x, y, 6, 18, C_BRIGHT); cv_rect(x + 7, y, 3, 18, C_MID); }   /* (the two hits) */
+            else if (h) cv_rect(x, y, 10, 18, h == 2u ? C_BRIGHT : C_MID);
             else cv_frame(x, y, 10, 18, on ? C_MID : C_BOX);
             if (on && st == dr_cursor && r == 0u) cv_frame(x - 2, y - 2, 14, 22, C_BRIGHT);
             if (d == DRUMS - 1u && eg.seq_play && st == seq.playing && seq.playing_pat == seqs.cur % SEQ_PATS)
@@ -1406,7 +1408,7 @@ static void drum_clear(void)                    /* the DRUM page's CLEAR: the la
 }
 
 /* ---- the DRUM page's keys (key k: 0 = F3 .. 26 = G5): the 16 white ones (F3 .. G5) the 16 steps the cursor is in,
- * each press a hit, an accent, none in turn; F#3 G#3 A#3: KICK, SNARE, HAT (heard too); C#4 / D#4: the 16 before /
+ * each press a hit, an accent (the snare: then a flam), none in turn; F#3 G#3 A#3: KICK, SNARE, HAT (heard too); C#4 / D#4: the 16 before /
  * after (round within the length) */
 static int ui_drum_keys(void) { return page == PG_DRUM; }   /* the keys are the drums' */
 static void ui_drum_key(uint32_t k)
@@ -1416,16 +1418,17 @@ static void ui_drum_key(uint32_t k)
     const pattern_t *pt = seq_ed();
     uint32_t len = pt->len >= 1u && pt->len <= 64u ? pt->len : 16u, base = dr_cursor / 16u * 16u;
     int32_t w = k < 27u ? WHITE[k] : -99;
-    if (w >= 0) {                               /* a step: on, accented, off */
+    if (w >= 0) {                               /* a step: on, accented, (the snare) a flam, off */
         uint32_t st = base + (uint32_t)w, h;
         char val[16];
         if (st >= len) return;
-        h = (drum_at(pt, dr_sel, st) + 1u) % 3u;
+        h = (drum_at(pt, dr_sel, st) + 1u) % (dr_sel == 1u ? 4u : 3u);
         drum_put(seq_ed(), dr_sel, st, h);
         dr_cursor = (uint8_t)st;
-        if (h) engine_drum(dr_sel == 2u && h == 2u ? DR_OHAT_S : dr_sel, h == 2u ? 127u : 106u);
+        if (h == 3u) engine_drum(DR_FLAM_S, 106u);
+        else if (h) engine_drum(dr_sel == 2u && h == 2u ? DR_OHAT_S : dr_sel, h == 2u ? 127u : 106u);
         put(num(put(put(val, DRUM_NAME[dr_sel]), " "), st + 1u), "");
-        pop(val, h == 2u ? "ACCENT" : h ? "HIT" : "--");
+        pop(val, h == 3u ? "FLAM" : h == 2u ? "ACCENT" : h ? "HIT" : "--");
         seqs_dirty = 1;
     } else if (w >= -3) {                       /* a drum */
         dr_sel = (uint8_t)(-w - 1);
@@ -1443,14 +1446,14 @@ static void ui_drum_key(uint32_t k)
 }
 
 static uint32_t ui_drum_leds(void)             /* the keys' LEDs on the DRUM page: the lane's 16 steps (an accent */
-{                                               /* blinks; the step playing the other way round); the drum's key */
+{                                               /* blinks, a flam faster; the step playing the other way round); the drum's key */
     static const uint8_t STEP_KEY[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
     static const uint8_t DRUM_KEY[DRUMS] = {1, 3, 5};
     const pattern_t *pt = seq_ed();
     uint32_t len = pt->len >= 1u && pt->len <= 64u ? pt->len : 16u, base = dr_cursor / 16u * 16u, lit = 0, i;
-    uint32_t blink = (fm1_ms / 120u) & 1u, playing = eg.seq_play && seq.playing_pat == seqs.cur % SEQ_PATS;
+    uint32_t blink = (fm1_ms / 120u) & 1u, flick = (fm1_ms / 50u) & 1u, playing = eg.seq_play && seq.playing_pat == seqs.cur % SEQ_PATS;
     for (i = 0; i < 16u && base + i < len; i++) {
-        uint32_t h = drum_at(pt, dr_sel, base + i), on = h == 2u ? blink : h != 0u;
+        uint32_t h = drum_at(pt, dr_sel, base + i), on = h == 3u ? flick : h == 2u ? blink : h != 0u;
         if (playing && seq.playing == base + i) on = !on;
         lit |= on << STEP_KEY[i];
     }
@@ -1768,6 +1771,8 @@ static int ui_input(uint32_t buttons)
             x = d > 0 ? DEST_SPREAD : DEST_MIX;
         if (p->kind == K_LDEST && x == DEST_LFOSHAPE)   /* (the LFO: not its own shape) */
             x = DEST_LFOSHAPE - 1;
+        if (p->kind == K_DHIT && x == 3 && dr_sel != 1u)   /* (a flam: the snare's alone) */
+            x = 2;
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;

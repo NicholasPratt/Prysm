@@ -602,19 +602,22 @@ int main(void)
     }
     {                                           /* the drums: 120 BPM, 1/16, 8 steps: kick on 1 and 5, snare on 3 and
                                                  * 7, the hat on every step (on 4 and 8 accented: open); 2 s, the
-                                                 * sequencer stopped at 1 s (the tails after) */
+                                                 * sequencer stopped at 1 s (the tails after); then the snare alone on
+                                                 * 3 and 7, flams, and plain hits */
         static int16_t s[2u * 44100u * 2u];
-        static const char *const NAMES[6] = {"drums", "drums_crush", "drums_rev", "drums_midi", "drums_tune",
-                                              "drums_filter"};
+        static const char *const NAMES[8] = {"drums", "drums_crush", "drums_rev", "drums_midi", "drums_tune",
+                                              "drums_filter", "drums_flam", "drums_snare"};
         uint32_t variant;
-        for (variant = 0; variant < 6u; variant++) {
+        for (variant = 0; variant < 8u; variant++) {
             patch_t q = solo();
             pattern_t *pt = &seqs.pat[0];
             uint32_t done = 0, total = 44100u * 2u / FRAMES * FRAMES, k;
             memset(voice, 0, sizeof voice);
             engine_init();
             q.arp_bpm = 80; seqs.div = DIV_16; pt->len = 8;
-            if (variant != 3u)
+            if (variant >= 6u)
+                for (k = 2; k < 8u; k += 4u) drum_put(pt, 1, k, variant == 6u ? 3u : 1u);
+            else if (variant != 3u)
                 for (k = 0; k < 8u; k++) {
                     if (k == 0u || k == 4u) drum_put(pt, 0, k, 1);
                     if (k == 2u || k == 6u) drum_put(pt, 1, k, 1);

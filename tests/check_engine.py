@@ -688,5 +688,12 @@ kf = octave_db(fl, 63, 0, 1) - octave_db(load("drums"), 63, 0, 1)
 check("drums filter", hf < -20 and abs(kf) < 0.5 and np.abs(fl[int(1.5 * FS):]).max() < 0.002,
       f"the snare and hat through it: 8k octave {hf:+.1f} dB; the kick (not sent) {kf:+.2f} dB; silent after")
 
+sp, fd = load("drums_snare"), load("drums_flam") - load("drums_snare")   # (the bus is linear: the difference is the second)
+first = lambda y: int(np.argmax(np.abs(y[int(0.2 * FS):int(0.5 * FS)]) > 1e-4))
+on = first(fd) - first(sp)
+ratio = np.abs(fd[int(0.2 * FS):int(0.5 * FS)]).max() / np.abs(sp[int(0.2 * FS):int(0.5 * FS)]).max()
+check("drums flam", 870 <= on <= 890 and 0.2 < ratio < 0.8,
+      f"the second snare {on} frames after the first (880), at {ratio:.2f} of its peak; the first rings on under it")
+
 print("all passed" if not fails else f"{len(fails)} failed: {', '.join(fails)}")
 sys.exit(1 if fails else 0)

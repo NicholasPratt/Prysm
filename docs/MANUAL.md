@@ -490,25 +490,27 @@ rate (11 kHz for the kick, 16 kHz the snare, 22 kHz the hats), and played back w
 by design. The kit (levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, not part of a
 sound: change the sound, the beat goes on.
 
-The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, past the pattern's length
-dots; the drum you are editing named bright; a mark under the step playing. Below, that drum's sound as it will play
-(its length tuned, DECAY over it), or on the BUS row its settings.
+The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, past
+the pattern's length dots; the drum you are editing named bright; a mark under the step playing. Below, that drum's
+sound as it will play (its length tuned, DECAY over it), or on the BUS row its settings.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| STEP | the drum: KICK / SNARE / HAT | the step (the cursor) | its HIT: --, HIT, ACCENT | CLEAR the drum's lane (turn twice) |
+| STEP | the drum: KICK / SNARE / HAT | the step (the cursor) | its HIT: --, HIT, ACCENT (the snare: FLAM too) | CLEAR the drum's lane (turn twice) |
 | KICK, SNARE, HAT | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
 | BUS | DRIVE | CRUSH: fewer bits and a lower rate still | DELAY send | REVERB send |
 
 **On the DRUM page the keys are the drum machine's**, as on a TR (they play no notes here):
 
-- The **16 white keys** (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; again: none. Their
-  **LEDs** show the lane (an accent blinks; the step playing flips its LED as it passes).
+- The **16 white keys** (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; (the snare) again: a
+  flam; again: none. Their **LEDs** show the lane (an accent blinks, a flam faster; the step playing flips its LED as
+  it passes).
 - **F#3, G#3, A#3** (the three lowest black keys) pick KICK, SNARE, HAT, and play it.
 - **C#4 / D#4**: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).
 
 - **Accents** play at full level, hits a little softer; the hat's accent is the **open hat**, and the next hat (open
   or closed) cuts it off, as on an 808.
+- **A flam** (the snare's) is two snares: a hit, then ~20 ms later a softer one, the first ringing on under it.
 - **The sends** feed the drums into the sound's **delay** and **reverb**: what comes back is that effect's MIX on its
   page (a mixer's send and return), so with the effect's MIX at 0 nothing comes back. The rest of the drums stay dry.
 - **FILTER** sends a drum through a filter of the drums' own that follows the sound's **CUTOFF** and **RES** (and

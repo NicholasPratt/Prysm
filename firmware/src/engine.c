@@ -183,10 +183,12 @@ typedef struct {
     uint8_t vel[64];                            /* lane 0's velocity (recorded): 0 = its trig's (NOTE 100) */
     uint8_t xnote[64][SEQ_LANES - 1u];          /* lanes 1 .. 3: a note (| SEQ_XTIE: a tie) */
     uint8_t xvel[64][SEQ_LANES - 1u];           /* their velocity; 0 and no tie: nothing in the lane */
-    uint8_t dhit[3][8], dacc[3][8];             /* the drums (DRUMS): step k's hit, its accent: bit k & 7 of byte k >> 3 */
+    uint8_t dhit[3][8], dacc[3][8];             /* the drums (DRUMS): step k's hit, its accent: bit k & 7 of byte k >> 3
+                                                 * (an accent with no hit: a flam, the snare's) */
 } pattern_t;
 #define DRUMS 3u                                /* kick, snare, hat */
-enum { DR_KICK_S, DR_SNARE_S, DR_CHAT_S, DR_OHAT_S };   /* (prysm_drums.h's sounds: the hat's accent is the open one) */
+enum { DR_KICK_S, DR_SNARE_S, DR_CHAT_S, DR_OHAT_S, DR_FLAM_S };   /* (prysm_drums.h's sounds: the hat's accent is the
+                                                                        open one; DR_FLAM_S: the snare twice) */
 static const char *const DRUM_NAME[DRUMS] = {"KICK", "SNARE", "HAT"};
 typedef struct {
     uint32_t version;
@@ -228,21 +230,22 @@ static void seqs_init(void)                     /* four empty patterns (16 rests
     }
 }
 
-static uint32_t drum_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d on step k: 0 none, 1 a hit, 2 accented */
-{
+static uint32_t drum_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d on step k: 0 none, 1 a hit, 2 accented, */
+{                                               /* 3 a flam */
+    uint32_t hit, acc;
     k %= 64u;
-    if (!(p->dhit[d % DRUMS][k >> 3] >> (k & 7u) & 1u))
-        return 0;
-    return p->dacc[d % DRUMS][k >> 3] >> (k & 7u) & 1u ? 2u : 1u;
+    hit = p->dhit[d % DRUMS][k >> 3] >> (k & 7u) & 1u;
+    acc = p->dacc[d % DRUMS][k >> 3] >> (k & 7u) & 1u;
+    return hit ? 1u + acc : acc ? 3u : 0u;
 }
 
-static void drum_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t v)   /* (0, 1, 2 as drum_at) */
+static void drum_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t v)   /* (0 .. 3 as drum_at) */
 {
     uint8_t b = (uint8_t)(1u << (k % 64u & 7u));
     d %= DRUMS;
     k = k % 64u >> 3;
-    p->dhit[d][k] = (uint8_t)(v ? p->dhit[d][k] | b : p->dhit[d][k] & ~b);
-    p->dacc[d][k] = (uint8_t)(v == 2u ? p->dacc[d][k] | b : p->dacc[d][k] & ~b);
+    p->dhit[d][k] = (uint8_t)(v == 1u || v == 2u ? p->dhit[d][k] | b : p->dhit[d][k] & ~b);
+    p->dacc[d][k] = (uint8_t)(v >= 2u ? p->dacc[d][k] | b : p->dacc[d][k] & ~b);
 }
 #define SEQ_VEL 100u                            /* a step's velocity (an accent: 127): AMP's VEL row makes the accent */
 #define SEQ_SLIDE_K 58u                         /* a slide's speed (PR_ENV_EXP: there in ~30 ms, as a 303) */
@@ -998,15 +1001,18 @@ static void click_render(int32_t *out, uint32_t n)
  * an envelope (DECAY) over it. Each drum's FILTER: how much of it goes through a filter of the drums' own, set as the
  * sound's (its CUTOFF, RES; LP 24 or else LP 12; no envelope, no self-oscillation), the rest dry. Into a bus of their
  * own: drive, then CRUSH (a sample held 1 .. 16 frames, 12 down to 4 bits); some of it into the delay and the reverb
- * (fx_render), all of it into the output after them */
+ * (fx_render), all of it into the output after them. A flam: the snare, then again FLAM_GAP later, softer, in a voice
+ * of its own (drv[DRUMS]: the first rings on under it) */
 #define DRUM_GAIN 10000                         /* Q15: the whole kit at its levels as new peaks at ~0.65 of full scale */
 static struct {
     const int8_t *d;                            /* playing (0: silent) */
     uint32_t n, pos_q16, inc_q16;               /* its length, where it is (Q16), its step */
     int32_t amp, dk;                            /* its level (Q15); DECAY's coefficient a block (Q16; 0: its own) */
     int32_t at;                                 /* frames into this render it starts (-1: already playing) */
-} drv[DRUMS];
-static volatile uint8_t dr_midi[4];             /* a sound's hit from MIDI or the DRUM page's keys (its velocity; the */
+} drv[DRUMS + 1u];                               /* (drv[DRUMS]: a flam's second snare) */
+#define FLAM_GAP 880u                           /* frames: ~20 ms */
+#define FLAM_VEL 64u                            /* the second's velocity */
+static volatile uint8_t dr_midi[5];             /* a sound's hit from MIDI or the DRUM page's keys (its velocity; the */
                                                 /* main loop's: engine_drum), played at the next render's start */
 static struct { int32_t held, left; } crush;    /* CRUSH: the value held, the frames it is still held for */
 static struct { int32_t ic1, ic2, ic3, ic4, cs; } dflt;   /* the drums' filter: its state, its cutoff (glided, Q8) */
@@ -1027,11 +1033,23 @@ static void drum_hit(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR) a
     drv[d].at = (int32_t)at;
 }
 
+static void drum_flam(uint32_t vel, uint32_t at)   /* (the ISR) a flam from frame at: the snare, then softer */
+{
+    if (!seqs.dr_lvl[1])
+        return;
+    drum_hit(DR_SNARE_S, FLAM_VEL, at);         /* (the second: the snare's voice set up, then moved to its own) */
+    drv[DRUMS] = drv[1];
+    drv[DRUMS].at = (int32_t)(at + FLAM_GAP);
+    drum_hit(DR_SNARE_S, vel, at);
+}
+
 static void drum_step(const pattern_t *p, uint32_t k, uint32_t bi)   /* step k's drums (block bi): an accent at full, */
 {                                               /* a hit at 0.7 (the hat's accent opens it) */
     uint32_t d, h;
     for (d = 0; d < DRUMS; d++)
-        if ((h = drum_at(p, d, k)) != 0)
+        if ((h = drum_at(p, d, k)) == 3u)
+            drum_flam(106u, bi * BLK);
+        else if (h)
             drum_hit(d == 2u && h == 2u ? DR_OHAT_S : d, h == 2u ? 127u : 106u, bi * BLK);
 }
 
@@ -1069,13 +1087,15 @@ static int drums_render(int32_t *bus, uint32_t n)   /* the drums into bus (n fra
 {
     static int32_t fb[MAXBLK * BLK];            /* what goes through the filter */
     uint32_t d, i, any = 0, fz = 0, wet = dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4;   /* (its tail rings on) */
-    for (d = 0; d < 4u; d++)                    /* (MIDI, the keys: from the top of this render) */
-        if (dr_midi[d]) { drum_hit(d, dr_midi[d], 0); dr_midi[d] = 0; }
-    for (d = 0; d < DRUMS; d++) {
+    for (d = 0; d < 5u; d++)                    /* (MIDI, the keys: from the top of this render) */
+        if (dr_midi[d]) { if (d == DR_FLAM_S) drum_flam(dr_midi[d], 0); else drum_hit(d, dr_midi[d], 0); dr_midi[d] = 0; }
+    for (d = 0; d < DRUMS + 1u; d++) {
         const int8_t *sm = drv[d].d;
         uint32_t pos = drv[d].pos_q16, inc = drv[d].inc_q16, end = drv[d].n << 16;
-        int32_t amp = drv[d].amp, dk = drv[d].dk, fs = (int32_t)(seqs.dr_flt[d] & 127u) * 258, x;   /* (Q15) */
+        int32_t amp = drv[d].amp, dk = drv[d].dk, x;
+        int32_t fs = (int32_t)(seqs.dr_flt[d < DRUMS ? d : 1u] & 127u) * 258;   /* (Q15; the flam's: the snare's) */
         if (!sm) continue;
+        if (drv[d].at >= (int32_t)n) { drv[d].at -= (int32_t)n; continue; }   /* (a later render's) */
         if (!any) memset(bus, 0, n * sizeof bus[0]);
         if (fs && !fz) { memset(fb, 0, n * sizeof fb[0]); fz = 1; }
         any = 1;
@@ -2072,7 +2092,7 @@ static int engine_quiet(void)                   /* nothing sounds, not even a re
     uint32_t v;
     if ((eg.arp_on && held.n) || eg.seq_play)
         return 0;
-    for (v = 0; v < DRUMS; v++)                 /* (nor a drum) */
+    for (v = 0; v < DRUMS + 1u; v++)            /* (nor a drum) */
         if (drv[v].d) return 0;
     if (dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4)   /* (nor the drums' filter, ringing) */
         return 0;
@@ -2130,8 +2150,8 @@ static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16
 }
 
 static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */
-/* a drum, now (the DRUM page's keys, MIDI): sound DR_KICK_S .. DR_OHAT_S at velocity vel (1 .. 127) */
-static void engine_drum(uint32_t sound, uint32_t vel) { if (sound < 4u) dr_midi[sound] = (uint8_t)(vel ? vel : 1u); }
+/* a drum, now (the DRUM page's keys, MIDI): sound DR_KICK_S .. DR_FLAM_S at velocity vel (1 .. 127) */
+static void engine_drum(uint32_t sound, uint32_t vel) { if (sound < 5u) dr_midi[sound] = (uint8_t)(vel ? vel : 1u); }
 static int engine_drum_note(uint32_t note)      /* a MIDI note's sound on channel 10 (General MIDI's), or -1 */
 {
     switch (note) {
