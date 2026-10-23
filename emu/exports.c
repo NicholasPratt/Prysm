@@ -71,6 +71,7 @@ WEB const char *web_fmt(uint32_t i, uint32_t v) { return prm_fmt(i, v); }
 WEB uint32_t web_page(void) { return page; }
 WEB uint32_t web_row(void) { return page < PG_N ? row[page] : 0u; }
 WEB uint32_t web_npages(void) { return PG_N; }
+WEB const char *web_page_name(uint32_t i) { return i < PG_N ? PAGES[i].name : ""; }
 /* the patterns and song (not part of the sound): their bytes, set one at a time (checked), their layout */
 WEB uint8_t *web_seqs(void) { return (uint8_t *)&seqs; }
 WEB uint32_t web_seqs_size(void) { return sizeof seqs; }

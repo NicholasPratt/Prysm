@@ -41,8 +41,15 @@ static void seqs_as_v1(uint8_t *d)              /* seqs as SEQS_VERSION 1 had th
     memcpy(d, &one, 4);
     for (i = 0; i < SEQ_PATS; i++)
         memcpy(d + 4u + i * SEQS_V1_PAT, &seqs.pat[i], SEQS_V1_PAT);
-    memcpy(d + 4u + SEQ_PATS * SEQS_V1_PAT, (uint8_t *)&seqs + __builtin_offsetof(seqs_t, div),
-           sizeof seqs - __builtin_offsetof(seqs_t, div));
+    memcpy(d + 4u + SEQ_PATS * SEQS_V1_PAT, (uint8_t *)&seqs + __builtin_offsetof(seqs_t, div), SEQS_TAIL);
+}
+static void seqs_as_v2(uint8_t *d)              /* seqs as SEQS_VERSION 2 had them: chords, no drums */
+{
+    uint32_t i, two = 2;
+    memcpy(d, &two, 4);
+    for (i = 0; i < SEQ_PATS; i++)
+        memcpy(d + 4u + i * SEQS_V2_PAT, &seqs.pat[i], SEQS_V2_PAT);
+    memcpy(d + 4u + SEQ_PATS * SEQS_V2_PAT, (uint8_t *)&seqs + __builtin_offsetof(seqs_t, div), SEQS_TAIL);
 }
 static void store_old(uint32_t version, uint32_t size, uint32_t slot, const patch_t *c, const uint8_t *seq)
 {                                               /* a bank of that format, with c in slot (and nothing after it) */
@@ -223,7 +230,7 @@ int main(void)
         seqs_init();
         CHECK(seqs_from(v1, 1) == 0 && seqs.pat[1].note[9] == 70 && seqs.pat[1].trig[9] == SEQ_NOTE && seqs.mode == 1,
               "version 1 patterns convert (the plugin's state)");
-        CHECK(seqs_from(v1, 3) != 0, "a newer version: refused");
+        CHECK(seqs_from(v1, SEQS_VERSION + 1u) != 0, "a newer version: refused");
     }
     {                                           /* 0.9's store: format 10 patches, the patterns of version 2 */
         patch_t c = PATCH_INIT;
@@ -233,14 +240,57 @@ int main(void)
         memset(old_store, 0, sizeof old_store);
         old_store[0] = 10; old_store[4u + 6u] = 1;
         memcpy(old_store + BANK_SIZE(0) + 6u * PATCH_V10_SIZE, &c, PATCH_V10_SIZE);
-        memcpy(old_store + BANK_SIZE(PATCH_V10_SIZE), &seqs, sizeof seqs);
-        store_save(old_store, BANK_SIZE(PATCH_V10_SIZE) + sizeof seqs);
+        seqs_as_v2(old_store + BANK_SIZE(PATCH_V10_SIZE));
+        store_save(old_store, BANK_SIZE(PATCH_V10_SIZE) + SEQS_V2_SIZE);
         seqs_init();
         memset(&bank, 0, sizeof bank);
         patches_load();
         CHECK(patch_get(6, &a) == 0 && a.vca == 0 && !seqs_fresh && seqs.pat[2].xnote[7][1] == 64 && a.cut == 33 &&
               a.mpitch[1][1] == 40, "0.9's bank (format 10): sounds and chords kept, the VCA closed");
         CHECK(a.lfo2_dest == DEST_RES, "format 10: LFO 2 on RES stays on RES (%u)", (unsigned)a.lfo2_dest);
+    }
+    {                                           /* 1.0 / 1.1's store: format 11 patches, the patterns of version 2 */
+        patch_t c = PATCH_INIT;
+        uint32_t d, k, any = 0;
+        c.vca = 77; c.lfo2_dest = DEST_RES; c.cut = 44;
+        seqs_init();
+        seqs.pat[1].len = 48; seqs.pat[1].xnote[40][2] = 70; seqs.pat[1].xvel[40][2] = 99; seqs.song_rep[15] = 9;
+        memset(old_store, 0, sizeof old_store);
+        old_store[0] = 11; old_store[4u + 3u] = 1;
+        memcpy(old_store + BANK_SIZE(0) + 3u * PATCH_V11_SIZE, &c, PATCH_V11_SIZE);
+        seqs_as_v2(old_store + BANK_SIZE(PATCH_V11_SIZE));
+        store_save(old_store, BANK_SIZE(PATCH_V11_SIZE) + SEQS_V2_SIZE);
+        memset(&seqs, 0x55, sizeof seqs);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(3, &a) == 0 && a.vca == 77 && a.cut == 44 && a.lfo2_dest == DEST_RES && !seqs_fresh &&
+              seqs.version == SEQS_VERSION && seqs.pat[1].len == 48 && seqs.pat[1].xnote[40][2] == 70 &&
+              seqs.pat[1].xvel[40][2] == 99 && seqs.song_rep[15] == 9, "1.1's bank (format 11, patterns v2): kept");
+        CHECK(a.noise_lvl == 0 && a.route[0] == ROUTE_FILTER && a.route[1] == ROUTE_FILTER && a.route[2] == ROUTE_FILTER,
+              "format 11: no noise, everything through the filter");
+        for (d = 0; d < DRUMS; d++)
+            for (k = 0; k < 64u; k++) any |= drum_at(&seqs.pat[k % SEQ_PATS], d, k);
+        CHECK(!any && seqs.dr_lvl[0] == 110 && seqs.dr_tune[2] == 24 && seqs.dr_dec[1] == 127 && seqs.dr_crush == 0 &&
+              seqs.dr_rev == 0, "patterns v2: the drums' lanes empty, the kit as new");
+    }
+    {                                           /* format 12: the noise, the routing, the drums save and load back */
+        patch_t c = PATCH_INIT;
+        c.noise_type = NOISE_DIGI; c.noise_col = 90; c.noise_lvl = 101; c.route[1] = ROUTE_DIRECT;
+        seqs_init();
+        drum_put(&seqs.pat[2], 0, 0, 1); drum_put(&seqs.pat[2], 2, 63, 2); drum_put(&seqs.pat[2], 1, 9, 2);
+        drum_put(&seqs.pat[2], 1, 9, 1);
+        seqs.dr_crush = 50; seqs.dr_tune[1] = 30;
+        CHECK(patch_save(0, &c) == 0, "format 12 saved");
+        memset(&bank, 0, sizeof bank);
+        seqs_init();
+        patches_load();
+        CHECK(patch_get(0, &a) == 0 && a.noise_type == NOISE_DIGI && a.noise_col == 90 && a.noise_lvl == 101 &&
+              a.route[1] == ROUTE_DIRECT && a.route[0] == ROUTE_FILTER, "the noise and the routing load back");
+        CHECK(drum_at(&seqs.pat[2], 0, 0) == 1 && drum_at(&seqs.pat[2], 2, 63) == 2 && drum_at(&seqs.pat[2], 1, 9) == 1 &&
+              drum_at(&seqs.pat[2], 0, 1) == 0 && drum_at(&seqs.pat[1], 0, 0) == 0 && seqs.dr_crush == 50 &&
+              seqs.dr_tune[1] == 30, "the drums' lanes (hits, accents) and the kit load back");
+        CHECK(patch_from(&got, (const uint8_t *)&c, PATCH_V11_SIZE, 11) == 0 && got.noise_lvl == 0 && got.vca == c.vca,
+              "a format 11 file converts (no noise)");
     }
     CHECK(sizeof bank + sizeof seqs <= STORE_MAX, "the bank and the patterns fit the store (%u of %u bytes)",
           (unsigned)(sizeof bank + sizeof seqs), (unsigned)STORE_MAX);

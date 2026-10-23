@@ -581,6 +581,67 @@ int main(void)
     p = PATCH_INIT;                             /* the default patch, a chord: four voices, no clipping */
     render("chord", &p, CHORD, 4, 1500, 2500);
 
+    {                                           /* the noise, each type alone (osc 1 down), A4 for a second */
+        static const char *const NAMES[NOISE_N] = {"noise_white", "noise_pink", "noise_brown", "noise_digi",
+                                                   "noise_crackle", "noise_sh"};
+        uint32_t t;
+        for (t = 0; t < NOISE_N; t++) {
+            p = solo(); p.lvl1 = 0;
+            p.noise_type = (uint8_t)t; p.noise_lvl = 127; p.noise_col = NOISE_RATED(t) || t == NOISE_CRACKLE ? 64 : 127;
+            render(NAMES[t], &p, A4, 1, 1000, 1100);
+        }
+        p.noise_type = NOISE_WHITE; p.noise_col = 30; render("noise_dark", &p, A4, 1, 1000, 1100);
+        p.noise_type = NOISE_DIGI; p.noise_col = 64 + 16; render("noise_digi_up", &p, A4, 1, 1000, 1100);   /* +12 st */
+    }
+    {                                           /* the routing: a saw into a nearly closed filter, or DIRECT past it */
+        p = saw_through(20, 0); render("route_filter", &p, A4, 1, 900, 1000);
+        p.route[0] = ROUTE_DIRECT; render("route_direct", &p, A4, 1, 900, 1000);
+        p.route[0] = ROUTE_FILTER; p.lvl1 = 0; p.noise_lvl = 127; p.noise_col = 127;   /* the noise: the same */
+        render("route_nfilter", &p, A4, 1, 900, 1000);
+        p.route[2] = ROUTE_DIRECT; render("route_ndirect", &p, A4, 1, 900, 1000);
+    }
+    {                                           /* the drums: 120 BPM, 1/16, 8 steps: kick on 1 and 5, snare on 3 and
+                                                 * 7, the hat on every step (on 4 and 8 accented: open); 2 s, the
+                                                 * sequencer stopped at 1 s (the tails after) */
+        static int16_t s[2u * 44100u * 2u];
+        static const char *const NAMES[6] = {"drums", "drums_crush", "drums_rev", "drums_midi", "drums_tune",
+                                              "drums_filter"};
+        uint32_t variant;
+        for (variant = 0; variant < 6u; variant++) {
+            patch_t q = solo();
+            pattern_t *pt = &seqs.pat[0];
+            uint32_t done = 0, total = 44100u * 2u / FRAMES * FRAMES, k;
+            memset(voice, 0, sizeof voice);
+            engine_init();
+            q.arp_bpm = 80; seqs.div = DIV_16; pt->len = 8;
+            if (variant != 3u)
+                for (k = 0; k < 8u; k++) {
+                    if (k == 0u || k == 4u) drum_put(pt, 0, k, 1);
+                    if (k == 2u || k == 6u) drum_put(pt, 1, k, 1);
+                    drum_put(pt, 2, k, k == 3u || k == 7u ? 2u : 1u);
+                }
+            if (variant == 1u) seqs.dr_crush = 127;
+            if (variant == 2u) { seqs.dr_rev = 127; q.rev_mix = 100; q.rev_size = 110; }
+            if (variant == 4u) { seqs.dr_tune[0] = 36; seqs.dr_dec[0] = 40; }   /* the kick up an octave, short */
+            if (variant == 5u) { seqs.dr_flt[1] = seqs.dr_flt[2] = 127; q.cut = 50; q.res = 60; }   /* snare, hat: a low cutoff */
+            engine_click(0, 0, 0);              /* (no metronome) */
+            engine_set(&q); engine_sync(0);
+            engine_seq_play(variant != 3u);
+            while (done < total) {
+                int32_t blk[2u * FRAMES] = {0};
+                uint32_t i;
+                if (variant == 3u && done % 22016u == 0u && done < 44100u) engine_drum(DR_KICK_S, 127);   /* MIDI: every ~0.5 s */
+                if (done == 44032u) engine_seq_play(0);
+                engine_render(blk, FRAMES);
+                for (i = 0; i < 2u * FRAMES; i++)
+                    s[2u * done + i] = (int16_t)(blk[i] > 32767 ? 32767 : blk[i] < -32767 ? -32767 : blk[i]);
+                done += FRAMES;
+            }
+            wav(NAMES[variant], s, total);
+            printf("%-14s %u frames\n", NAMES[variant], total);
+        }
+    }
+
     for (bank = 0; bank < PW_BANKS; bank++) {   /* every wave of every bank, 250 ms each: to listen to */
         static int16_t all[PW_WAVES * 8u * 11025u * 2u];
         uint32_t at = 0;
@@ -622,13 +683,17 @@ int main(void)
         p.hp_cut = 40; p.flt_type = getenv("PRYSM_LP24") ? FLT_LP24 : FLT_COMBP; p.res = 120; p.comb_spread = 100;   /* the high-pass, the comb, spread */
         p.lfo2_dest = DEST_RES; p.lfo2_amt = 127; p.lfo2_rate = 100;   /* LFO 2 on RES: the comb's, each block */
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
+        p.noise_lvl = 127; p.noise_type = NOISE_PINK; p.route[1] = ROUTE_DIRECT;   /* the noise, a route past the filter */
         memset(voice, 0, sizeof voice);
         engine_init();
+        seqs.dr_drive = 100; seqs.dr_crush = 60; seqs.dr_dly = seqs.dr_rev = 127;   /* the drums, all three, all the time, */
+        seqs.dr_flt[0] = seqs.dr_flt[1] = seqs.dr_flt[2] = 64;   /* half through their filter (both paths) */
         engine_set(&p);
         engine_note_on(57); engine_note_on(60); engine_note_on(64); engine_note_on(67);
         t0 = clock();
         for (r = 0; r < reps; r++) {
             memset(blk, 0, sizeof blk);
+            if (r % 8u == 0u) { engine_drum(DR_KICK_S, 127); engine_drum(DR_SNARE_S, 127); engine_drum(DR_OHAT_S, 127); }
             engine_render(blk, FRAMES);
         }
         printf("worst case on this computer: %.1f us per 256-frame render (the FM-1 has 5805 us)\n",

@@ -36,6 +36,13 @@ void prysm_note(uint32_t note, uint32_t vel)
     else stop(note);
 }
 void prysm_bend(uint32_t v14, uint32_t range) { engine_bend(v14, range); }
+int prysm_drum(uint32_t note, uint32_t vel)
+{
+    int s = engine_drum_note(note);
+    if (s < 0) return 0;
+    if (vel) engine_drum((uint32_t)s, vel > 127u ? 127u : vel);
+    return 1;
+}
 void prysm_all_off(void)
 {
     uint32_t n;
@@ -65,7 +72,8 @@ uint32_t prysm_seqs_version(void) { return SEQS_VERSION; }
 int prysm_seq_set(uint32_t off, uint32_t v) { return ed_seq_set(off, v); }
 int prysm_seqs_load(const uint8_t *p, uint32_t n, uint32_t version)
 {
-    if (n != (version == SEQS_VERSION ? sizeof seqs : version == 1u ? SEQS_V1_SIZE : 0u) || seqs_from(p, version) != 0)
+    if (n != (version == SEQS_VERSION ? sizeof seqs : version == 2u ? SEQS_V2_SIZE : version == 1u ? SEQS_V1_SIZE : 0u) ||
+        seqs_from(p, version) != 0)
         return -1;                              /* (an older version: converted, as the FM-1 converts its store) */
     engine_set(&edit);
     return 0;

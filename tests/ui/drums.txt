@@ -1,0 +1,89 @@
+# the NOISE page (EDIT twice): its types; the MIX page's ROUTE row; the DRUM page (SEQ twice): a beat entered on the
+# keys (white: steps, F# G# A#: the drum), an accent, playing; its KICK and BUS rows (tests/run_ui.sh)
+100 btn 6
+120 btn 6
+200 enc 4 90
+320 shot
+380 enc 2 2
+460 shot
+520 enc 2 4
+540 enc 3 -10
+620 shot
+680 enc 2 2
+700 enc 3 -20
+780 shot
+840 btn 7
+860 enc 0 1
+880 enc 2 2
+960 shot
+1020 btn 11
+1040 btn 11
+1120 shot
+1140 keys 0x1
+1160 keys 0
+1180 keys 0x80
+1200 keys 0
+1220 keys 0x4000
+1240 keys 0
+1260 keys 0x200000
+1280 keys 0
+1300 keys 0x1000000
+1320 keys 0
+1340 keys 0x8
+1360 keys 0
+1380 keys 0x80
+1400 keys 0
+1420 keys 0x200000
+1440 keys 0
+1460 keys 0x20
+1480 keys 0
+1500 keys 0x1
+1520 keys 0
+1540 keys 0x4
+1560 keys 0
+1580 keys 0x10
+1600 keys 0
+1620 keys 0x40
+1640 keys 0
+1660 keys 0x80
+1680 keys 0
+1700 keys 0x200
+1720 keys 0
+1740 keys 0x800
+1760 keys 0
+1780 keys 0x1000
+1800 keys 0
+1820 keys 0x4000
+1840 keys 0
+1860 keys 0x10000
+1880 keys 0
+1900 keys 0x40000
+1920 keys 0
+1940 keys 0x80000
+1960 keys 0
+1980 keys 0x200000
+2000 keys 0
+2020 keys 0x800000
+2040 keys 0
+2060 keys 0x1000000
+2080 keys 0
+2100 keys 0x4000000
+2120 keys 0
+2140 keys 0x10
+2160 keys 0
+2180 keys 0x800
+2200 keys 0
+2220 keys 0x40000
+2240 keys 0
+2260 keys 0x1000000
+2280 keys 0
+2360 shot
+2380 btn 12
+3100 shot
+3140 enc 0 1
+3220 shot
+3260 enc 0 3
+3280 enc 3 60
+3360 shot
+3380 btn 12
+3500 end

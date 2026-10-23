@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Prysm's sound engine: 4 voices, each 2 oscillators, each a wavetable carrier modulated by a series chain of two
  * wavetable modulators (mod 2 -> mod 1 -> carrier), each modulator with its own AR envelope and a mode (FM, RING,
- * MIX); the two oscillators mixed, driven, through the filter (with its own ADSR): a 2- or 4-pole low-pass, or a
+ * MIX), and a noise source (white, pink, brown, digital, crackle, S&H); the oscillators and the noise mixed, each
+ * through the filter or (DIRECT) straight to the amp; through the filter: driven, then (with its own ADSR) a 2- or 4-pole low-pass, or a
  * comb (many resonant peaks, on the cutoff's frequency and its harmonics, SPREAD stretching the upper ones apart);
  * then a 2-pole high-pass (no resonance) and the amp ADSR. An LFO
  * per voice (or one for all, free-running) modulates two destinations: pitch, wave positions, mod amounts, the
@@ -11,7 +12,9 @@
  * and again until the key is let go) modulates one: the LFO's rate or depth, or any of the LFO's. Glide slides each
  * new note from the last one. The arpeggiator (in the ISR: its notes start and stop on the exact 16-frame block)
  * plays the held notes in turn; the sequencer (beside it, on the same clock) plays up to 64 steps, 303-style: a
- * note, a rest or an accent each, and slides (the note held into the next, its pitch gliding, no new attack).
+ * note, a rest or an accent each, and slides (the note held into the next, its pitch gliding, no new attack); and, on
+ * each step, the drum machine's three lanes (kick, snare, hat: lo-fi samples, prysm_drums.h), into a bus of their own
+ * (drive, crush, sends into the delay and the reverb), outside the voices.
  *
  * Who runs what:
  *   main loop   engine_set(): the patch changed -> the derived values below; engine_note_on / _off.
@@ -20,6 +23,7 @@
  * Integers only (no FPU): levels Q15, envelopes Q24, phases 32 bit. Every float is in tools/gen_prysm_tables.py.
  * The file stands alone (stdint, the tables) so tests/engine_test.c runs it on a computer. */
 #include "prysm_tables.h"
+#include "prysm_drums.h"
 
 #define NV 4u                                   /* voices */
 #define NOSC 2u                                 /* oscillators per voice */
@@ -56,6 +60,12 @@ enum { GLIDE_ALWAYS, GLIDE_LEGATO, GLIDE_N };
 static const char *const GLIDE_NAME[GLIDE_N] = {"ALWAYS", "LEGATO"};
 enum { FLT_LP12, FLT_LP24, FLT_COMBP, FLT_COMBM, FLT_N };   /* the filter: COMB- (feedback inverted) is hollow */
 static const char *const FLT_NAME[FLT_N] = {"LP 12", "LP 24", "COMB+", "COMB-"};
+enum { NOISE_WHITE, NOISE_PINK, NOISE_BROWN, NOISE_DIGI, NOISE_CRACKLE, NOISE_SH, NOISE_N };
+static const char *const NOISE_NAME[NOISE_N] = {"WHITE", "PINK", "BROWN", "DIGI", "CRACKLE", "S&H"};
+#define NOISE_RATED(t) ((t) == NOISE_DIGI || (t) == NOISE_SH)   /* (its COLOUR is a rate, from the note) */
+enum { ROUTE_FILTER, ROUTE_DIRECT, ROUTE_N };
+static const char *const ROUTE_NAME[ROUTE_N] = {"FILTER", "DIRECT"};
+#define NSRC 3u                                 /* the sources routed: osc 1, osc 2, the noise */
 static const char *const DEST_NAME[DEST2_N] = {"OFF", "PITCH", "PITCH2", "WAVE1", "WAVE2", "MWAVE1", "MWAVE2",
                                               "MOD1", "MOD2", "MPITCH", "CUTOFF", "AMP", "MIX", "LFORATE", "LFOAMT",
                                               "SPREAD", "M1PITCH", "M2PITCH", "LFOSHAPE", "RES", "DRIVE", "HPF", "DAMP", "FENV", "LEVEL1", "LEVEL2",
@@ -143,6 +153,12 @@ typedef struct {
     /* (added in patch format 11: the VCA's bias) */
     uint8_t vca;                                /* the amp open by this much, whatever the envelope: 0 = closed; up: */
                                                 /* every voice drones its last note at that level (Neutron's bias) */
+    /* (added in patch format 12: the noise, the routing) */
+    uint8_t noise_type;                         /* NOISE_WHITE .. NOISE_SH */
+    uint8_t noise_col;                          /* WHITE, PINK, BROWN: the tone (127 open); DIGI, S&H: the rate, 64 = */
+                                                /* the note's (+-48 semitones); CRACKLE: how dense */
+    uint8_t noise_lvl;                          /* its level: 0 = off */
+    uint8_t route[NSRC];                        /* osc 1, osc 2, the noise: ROUTE_FILTER, or ROUTE_DIRECT (to the amp) */
 } patch_t;
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
@@ -155,7 +171,8 @@ static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT", "
  * each a pattern played 1 .. 16 times, round and round. A step is a chord of up to SEQ_LANES notes: lane 0 is the
  * step's own (note, trig, slide: what the STEP row edits; ACCENT and SLIDE are the whole step's), lanes 1 .. 3 the
  * chord's others, each a note and a velocity, or a tie. Each lane plays as a voice of its own: a lane's TIE carries
- * that lane's note on. (Patterns of SEQS_VERSION 1 were lane 0 alone: patches.c converts them.) */
+ * that lane's note on. Beside them, the drums' lanes: a bit a step for each drum, and a bit for its accent (the hat
+ * opens). (Patterns of SEQS_VERSION 1 were lane 0 alone, of 2 had no drums: patches.c converts them.) */
 #define SEQ_PATS 4u
 #define SONG_N 16u
 #define SEQ_LANES 4u
@@ -166,7 +183,11 @@ typedef struct {
     uint8_t vel[64];                            /* lane 0's velocity (recorded): 0 = its trig's (NOTE 100) */
     uint8_t xnote[64][SEQ_LANES - 1u];          /* lanes 1 .. 3: a note (| SEQ_XTIE: a tie) */
     uint8_t xvel[64][SEQ_LANES - 1u];           /* their velocity; 0 and no tie: nothing in the lane */
+    uint8_t dhit[3][8], dacc[3][8];             /* the drums (DRUMS): step k's hit, its accent: bit k & 7 of byte k >> 3 */
 } pattern_t;
+#define DRUMS 3u                                /* kick, snare, hat */
+enum { DR_KICK_S, DR_SNARE_S, DR_CHAT_S, DR_OHAT_S };   /* (prysm_drums.h's sounds: the hat's accent is the open one) */
+static const char *const DRUM_NAME[DRUMS] = {"KICK", "SNARE", "HAT"};
 typedef struct {
     uint32_t version;
     pattern_t pat[SEQ_PATS];
@@ -175,8 +196,16 @@ typedef struct {
     uint8_t mode;                               /* 0: PATTERN (the pattern edited, over and over); 1: SONG */
     uint8_t song_len, pad2[3];                  /* 1 .. SONG_N entries */
     uint8_t song_pat[SONG_N], song_rep[SONG_N]; /* each entry: a pattern (0..3), played 1 .. 16 times */
+    /* (SEQS_VERSION 3: the drums' kit, for every pattern) */
+    uint8_t dr_lvl[DRUMS];                      /* each drum's level: 0 = silent */
+    uint8_t dr_tune[DRUMS];                     /* 0..48: -24 .. +24 semitones (24: as made) */
+    uint8_t dr_dec[DRUMS];                      /* 127: its own length; down: shorter (an envelope over it) */
+    uint8_t dr_drive;                           /* the drums' bus: 0 = clean; up: saturated, as the filter's drive */
+    uint8_t dr_crush;                           /* 0 = as stored; up: fewer bits, a lower rate */
+    uint8_t dr_dly, dr_rev;                     /* the bus into the delay, the reverb (their MIX: how much comes back) */
+    uint8_t dr_flt[DRUMS];                      /* each drum through the sound's filter: 0 = none (dry) .. 127 = all */
 } seqs_t;
-#define SEQS_VERSION 2u
+#define SEQS_VERSION 3u
 static seqs_t seqs;
 
 static void seqs_init(void)                     /* four empty patterns (16 rests, C3 waiting), a song of P1 .. P4 */
@@ -192,6 +221,28 @@ static void seqs_init(void)                     /* four empty patterns (16 rests
     seqs.gate = 64;
     seqs.song_len = SEQ_PATS;
     for (i = 0; i < SONG_N; i++) { seqs.song_pat[i] = (uint8_t)(i % SEQ_PATS); seqs.song_rep[i] = 1; }
+    for (i = 0; i < DRUMS; i++) {               /* the kit: as made, the kick loudest */
+        seqs.dr_lvl[i] = (uint8_t)(i == 0u ? 110u : i == 1u ? 100u : 90u);
+        seqs.dr_tune[i] = 24;
+        seqs.dr_dec[i] = 127;
+    }
+}
+
+static uint32_t drum_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d on step k: 0 none, 1 a hit, 2 accented */
+{
+    k %= 64u;
+    if (!(p->dhit[d % DRUMS][k >> 3] >> (k & 7u) & 1u))
+        return 0;
+    return p->dacc[d % DRUMS][k >> 3] >> (k & 7u) & 1u ? 2u : 1u;
+}
+
+static void drum_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t v)   /* (0, 1, 2 as drum_at) */
+{
+    uint8_t b = (uint8_t)(1u << (k % 64u & 7u));
+    d %= DRUMS;
+    k = k % 64u >> 3;
+    p->dhit[d][k] = (uint8_t)(v ? p->dhit[d][k] | b : p->dhit[d][k] & ~b);
+    p->dacc[d][k] = (uint8_t)(v == 2u ? p->dacc[d][k] | b : p->dacc[d][k] & ~b);
 }
 #define SEQ_VEL 100u                            /* a step's velocity (an accent: 127): AMP's VEL row makes the accent */
 #define SEQ_SLIDE_K 58u                         /* a slide's speed (PR_ENV_EXP: there in ~30 ms, as a 303) */
@@ -226,6 +277,7 @@ static const patch_t PATCH_INIT = {
     .menv2_dest = DEST_PITCH, .menv2_amt = 64,
     .mpitch = {{24, 24}, {24, 24}}, .mfine = {{64, 64}, {64, 64}},
     .vca = 0,
+    .noise_type = NOISE_WHITE, .noise_col = 100, .noise_lvl = 0, .route = {ROUTE_FILTER, ROUTE_FILTER, ROUTE_FILTER},
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -277,6 +329,11 @@ static volatile struct {
     uint32_t seq_len_q8, seq_spb, seq_steps;    /* the sequencer: a step (frames Q8), steps a beat, its length */
     int32_t seq_gate;                           /* Q15 */
     volatile uint8_t seq_play;                  /* running (PLAY; the main loop's) */
+    uint8_t route[NSRC];                        /* osc 1, osc 2, the noise: 1 DIRECT (past the filter, to the amp) */
+    uint8_t n_type;                             /* the noise: NOISE_WHITE .. NOISE_SH */
+    int32_t n_lvl;                              /* its level, Q15 (0: off) */
+    int32_t n_g;                                /* WHITE, PINK, BROWN: the tone's one-pole, Q15 (32767: open) */
+    uint32_t n_thr;                             /* CRACKLE: a crackle's chance a frame (of 2^32) */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -302,6 +359,11 @@ static const uint32_t INC_C9[12] = {            /* MIDI 120..131 (C9..B9): f * 2
 
 /* ---- voices */
 typedef struct { int32_t lvl; uint8_t st; } env_t;   /* st: 0 idle, 1 attack, 2 decay / hold, 3 release */
+typedef struct {                                /* a noise source: its random sequence; DIGI, S&H: its clock */
+    uint32_t rng, ph;
+    int32_t lp, b0, b1, b2, hold;               /* its tone; PINK's three poles, BROWN's integrator; the value held */
+    uint16_t lfsr;                              /* DIGI: the shift register */
+} noise_t;
 static struct {
     volatile uint32_t inc[NOSC][NOP];           /* phase steps (main loop) */
     volatile uint8_t gate;                      /* the key is down (main loop) */
@@ -333,6 +395,8 @@ static struct {
     /* the arpeggiator's notes (ISR only): start / stop at block itrig / ioff of this render (0xFF: none) */
     uint8_t itrig, ioff, inote, ivel, islide;   /* (islide: the sequencer's legato move to inote, no new attack) */
     int32_t iglide;
+    noise_t ns;                                 /* its noise */
+    uint32_t n_inc;                             /* DIGI, S&H: the note's step (RATE in it) */
 } voice[NV];
 
 _Static_assert(BLK == 1u << BLK_SHIFT, "BLK is a power of two");
@@ -418,6 +482,81 @@ static inline int32_t modulated(uint32_t mode, const src_t *t, uint32_t ph, int3
         return (s * (32767 - e + y)) >> 15;
     s += y;                                     /* MIX: the modulator's wave added */
     return s > 32767 ? 32767 : s < -32767 ? -32767 : s;
+}
+
+/* ---- the noise: a block of it, times lvl, added into dst. WHITE, PINK (Kellet's three poles), BROWN (white
+ * integrated, leaking): through a one-pole, the tone. DIGI: a 15-bit shift register in its short loop (93 steps, as the
+ * NES's), clocked 93 times the note (so it plays the note), RATE moving it; S&H: white held for a step, the step 16
+ * times the note's. CRACKLE: sparse clicks, each a random height, gone in a few frames. The levels are matched to
+ * WHITE's RMS (tests/check_engine.py: within 2 dB; CRACKLE, sparse, is its peaks) */
+static void noise_block(noise_t *ns, int32_t *dst, int32_t lvl, uint32_t inc)   /* inc: its clock's step (Q16) */
+{
+    uint32_t i, r = ns->rng ? ns->rng : 0x2545F491u;
+    int32_t lp = ns->lp, g = eg.n_g, x, b0 = ns->b0, b1 = ns->b1, b2 = ns->b2, hold = ns->hold;
+#define WHITE_NEXT() (r ^= r << 13, r ^= r >> 17, r ^= r << 5, ((int32_t)r >> 16) * 3 >> 2)   /* (xorshift: -24576 .. 24575) */
+#define TONE_OUT(v) do { int32_t y = (v) > 32767 ? 32767 : (v) < -32767 ? -32767 : (v); lp += ((y - lp) * g) >> 15; \
+                         dst[i] += (lp * lvl) >> 15; } while (0)   /* (the tone, then out) */
+    switch (eg.n_type) {                        /* (a loop each: no choice made a frame) */
+    case NOISE_PINK:                            /* (b2's 1.0527 as 1 + 1727 / 32768) */
+        for (i = 0; i < BLK; i++) {
+            x = WHITE_NEXT();
+            b0 = ((b0 * 32690) >> 15) + ((x * 3246) >> 15);
+            b1 = ((b1 * 31556) >> 15) + ((x * 9716) >> 15);
+            b2 = ((b2 * 18678) >> 15) + x + ((x * 1727) >> 15);
+            x = ((b0 + b1 + b2 + ((x * 6056) >> 15)) * 5) >> 4;
+            TONE_OUT(x);
+        }
+        break;
+    case NOISE_BROWN:
+        for (i = 0; i < BLK; i++) {
+            x = WHITE_NEXT();
+            b0 += (x >> 3) - (b0 >> 7);
+            TONE_OUT(b0);
+        }
+        break;
+    case NOISE_DIGI: case NOISE_SH: {           /* clocked: so many steps a frame (Q16), held between; no tone */
+        uint32_t ph = ns->ph, l = ns->lfsr ? ns->lfsr : 1u, digi = eg.n_type == NOISE_DIGI;
+        for (i = 0; i < BLK; i++) {
+            uint32_t n;
+            ph += inc;
+            n = ph >> 16;
+            ph &= 0xFFFFu;
+            if (n > 32u) n = 32u;               /* (past ~1.4 MHz: aliasing all the same) */
+            if (n) {
+                if (digi) {
+                    while (n--) l = l >> 1 | ((l ^ l >> 6) & 1u) << 14;
+                    hold = l & 1u ? 12000 : -12000;
+                } else
+                    hold = WHITE_NEXT();        /* (a new value: the steps between it are not heard) */
+            }
+            dst[i] += (hold * lvl) >> 15;
+        }
+        ns->ph = ph;
+        ns->lfsr = (uint16_t)l;
+        break;
+    }
+    case NOISE_CRACKLE:                         /* a click now and then: a random height, falling away */
+        for (i = 0; i < BLK; i++) {
+            x = WHITE_NEXT();
+            if ((r ^ 0x9E3779B9u) * 2654435761u < eg.n_thr)
+                hold = (int32_t)(r << 9) >> 16; /* (another part of r: -32768 .. 32767) */
+            else
+                hold -= hold >> 2;
+            dst[i] += (hold * lvl) >> 15;
+        }
+        break;
+    default:                                    /* WHITE */
+        for (i = 0; i < BLK; i++) {
+            x = WHITE_NEXT();
+            TONE_OUT(x);
+        }
+    }
+#undef WHITE_NEXT
+#undef TONE_OUT
+    ns->rng = r;
+    ns->lp = lp;
+    ns->b0 = b0; ns->b1 = b1; ns->b2 = b2;
+    ns->hold = hold;
 }
 
 /* ---- drive: a cubic soft clip, x - 4/27 x^3, flat (at full scale) from 1.5 x full scale on */
@@ -854,6 +993,141 @@ static void click_render(int32_t *out, uint32_t n)
     }
 }
 
+/* ---- the drum machine: a voice a drum (the hat's two sounds share one: the closed one chokes the open), each its
+ * sound played from the start, its step tuned, each stored sample held (no interpolation: the crunch); its level and
+ * an envelope (DECAY) over it. Each drum's FILTER: how much of it goes through a filter of the drums' own, set as the
+ * sound's (its CUTOFF, RES; LP 24 or else LP 12; no envelope, no self-oscillation), the rest dry. Into a bus of their
+ * own: drive, then CRUSH (a sample held 1 .. 16 frames, 12 down to 4 bits); some of it into the delay and the reverb
+ * (fx_render), all of it into the output after them */
+#define DRUM_GAIN 10000                         /* Q15: the whole kit at its levels as new peaks at ~0.65 of full scale */
+static struct {
+    const int8_t *d;                            /* playing (0: silent) */
+    uint32_t n, pos_q16, inc_q16;               /* its length, where it is (Q16), its step */
+    int32_t amp, dk;                            /* its level (Q15); DECAY's coefficient a block (Q16; 0: its own) */
+    int32_t at;                                 /* frames into this render it starts (-1: already playing) */
+} drv[DRUMS];
+static volatile uint8_t dr_midi[4];             /* a sound's hit from MIDI or the DRUM page's keys (its velocity; the */
+                                                /* main loop's: engine_drum), played at the next render's start */
+static struct { int32_t held, left; } crush;    /* CRUSH: the value held, the frames it is still held for */
+static struct { int32_t ic1, ic2, ic3, ic4, cs; } dflt;   /* the drums' filter: its state, its cutoff (glided, Q8) */
+#define DFLT_MAX 131071                         /* (its output kept where the bus's gain cannot overflow) */
+
+static void drum_hit(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR) a sound from frame at of this render */
+{
+    uint32_t d = sound >= DR_CHAT_S ? 2u : sound, t = seqs.dr_tune[d] <= 48u ? seqs.dr_tune[d] : 24u, dec = seqs.dr_dec[d] & 127u;
+    const dr_sound_t *sd = &DR_SOUND[sound & 3u];
+    if (!seqs.dr_lvl[d])
+        return;
+    drv[d].d = sd->d;
+    drv[d].n = sd->n;
+    drv[d].pos_q16 = 0;
+    drv[d].inc_q16 = (uint32_t)(((uint64_t)sd->inc_q16 * PR_SEMI_Q16[t]) >> 16);
+    drv[d].amp = (int32_t)((PR_CURVE_Q15[seqs.dr_lvl[d] & 127u] * PR_CURVE_Q15[vel & 127u]) >> 15);
+    drv[d].dk = dec >= 127u ? 0 : PR_ENV_EXP[dec * 100u / 127u];
+    drv[d].at = (int32_t)at;
+}
+
+static void drum_step(const pattern_t *p, uint32_t k, uint32_t bi)   /* step k's drums (block bi): an accent at full, */
+{                                               /* a hit at 0.7 (the hat's accent opens it) */
+    uint32_t d, h;
+    for (d = 0; d < DRUMS; d++)
+        if ((h = drum_at(p, d, k)) != 0)
+            drum_hit(d == 2u && h == 2u ? DR_OHAT_S : d, h == 2u ? 127u : 106u, bi * BLK);
+}
+
+static void drums_filter(int32_t *bus, const int32_t *fb, uint32_t n)   /* fb through the drums' filter, into bus */
+{
+    int32_t f[3], f2[3], k = eg.f_k < K_SELF ? K_SELF : eg.f_k, lp24 = eg.flt_type == FLT_LP24;
+    int32_t ic1 = dflt.ic1, ic2 = dflt.ic2, ic3 = dflt.ic3, ic4 = dflt.ic4, v1, v2, v3, s;
+    uint32_t i;
+    for (i = 0; i < n; i += BLK)                /* (the knob glides, as a voice's) */
+        dflt.cs = glide(dflt.cs, eg.f_cut << 8);
+    filter_coefs(dflt.cs, k, f, f2);
+    for (i = 0; i < n; i++) {
+        s = fb[i];
+        if (lp24) {                             /* LP 24: a flat (Butterworth) stage first */
+            v3 = s - ic4;
+            v1 = (int32_t)(((int64_t)f2[0] * ic3 + (int64_t)f2[1] * v3) >> 28);
+            v2 = ic4 + (int32_t)(((int64_t)f2[1] * ic3 + (int64_t)f2[2] * v3) >> 28);
+            ic3 = 2 * v1 - ic3;
+            ic4 = 2 * v2 - ic4;
+            s = v2;
+        }
+        v3 = s - ic2;                           /* the zero-delay-feedback SVF, as the voices' */
+        v1 = (int32_t)(((int64_t)f[0] * ic1 + (int64_t)f[1] * v3) >> 28);
+        v2 = ic2 + (int32_t)(((int64_t)f[1] * ic1 + (int64_t)f[2] * v3) >> 28);
+        ic1 = 2 * v1 - ic1;
+        ic2 = 2 * v2 - ic2;
+        bus[i] += v2 > DFLT_MAX ? DFLT_MAX : v2 < -DFLT_MAX ? -DFLT_MAX : v2;
+    }
+    if (ic1 > -4 && ic1 < 4 && ic2 > -4 && ic2 < 4 && ic3 > -4 && ic3 < 4 && ic4 > -4 && ic4 < 4)
+        ic1 = ic2 = ic3 = ic4 = 0;              /* (rung out: idle) */
+    dflt.ic1 = ic1; dflt.ic2 = ic2; dflt.ic3 = ic3; dflt.ic4 = ic4;
+}
+
+static int drums_render(int32_t *bus, uint32_t n)   /* the drums into bus (n frames, mono); 0: nothing played */
+{
+    static int32_t fb[MAXBLK * BLK];            /* what goes through the filter */
+    uint32_t d, i, any = 0, fz = 0, wet = dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4;   /* (its tail rings on) */
+    for (d = 0; d < 4u; d++)                    /* (MIDI, the keys: from the top of this render) */
+        if (dr_midi[d]) { drum_hit(d, dr_midi[d], 0); dr_midi[d] = 0; }
+    for (d = 0; d < DRUMS; d++) {
+        const int8_t *sm = drv[d].d;
+        uint32_t pos = drv[d].pos_q16, inc = drv[d].inc_q16, end = drv[d].n << 16;
+        int32_t amp = drv[d].amp, dk = drv[d].dk, fs = (int32_t)(seqs.dr_flt[d] & 127u) * 258, x;   /* (Q15) */
+        if (!sm) continue;
+        if (!any) memset(bus, 0, n * sizeof bus[0]);
+        if (fs && !fz) { memset(fb, 0, n * sizeof fb[0]); fz = 1; }
+        any = 1;
+        wet |= fs != 0;
+        i = drv[d].at > 0 ? (uint32_t)drv[d].at : 0u;
+        drv[d].at = -1;
+        for (; i < n; i++) {
+            if (pos >= end || amp < 8) { sm = 0; break; }
+            x = ((int32_t)sm[pos >> 16] * amp) >> 7;   /* (x 256 / 32768: Q15) */
+            if (fs) {                           /* (FILTER: that much through it, the rest dry) */
+                int32_t w = (x * fs) >> 15;
+                fb[i] += w;
+                x -= w;
+            }
+            bus[i] += x;
+            pos += inc;
+            if (dk && (i & (BLK - 1u)) == BLK - 1u)
+                amp -= (int32_t)(((int64_t)amp * dk) >> 16);
+        }
+        drv[d].d = sm;
+        drv[d].pos_q16 = pos;
+        drv[d].amp = amp;
+    }
+    if (wet) {
+        if (!any) memset(bus, 0, n * sizeof bus[0]);
+        if (!fz) memset(fb, 0, n * sizeof fb[0]);
+        drums_filter(bus, fb, n);
+        any = 1;
+    }
+    if (!any)
+        return 0;
+    {
+        int32_t drive = drive_of(seqs.dr_drive), c = seqs.dr_crush & 127u;
+        int32_t hold = 1 + c * 15 / 127, sh = 3 + c * 8 / 127, mask = ~((1 << sh) - 1);   /* (12 .. 4 bits of Q15) */
+        for (i = 0; i < n; i++) {
+            int32_t x = (bus[i] * DRUM_GAIN) >> 15;
+            if (drive)
+                x = saturate((x * drive) >> 12);
+            if (c) {
+                if (crush.left <= 0) {          /* (rounded: no offset) */
+                    crush.held = (x + (1 << (sh - 1))) & mask;
+                    crush.left = hold;
+                }
+                crush.left--;
+                x = crush.held;
+            }
+            bus[i] = x;
+        }
+    }
+    return 1;
+}
+
 static void seq_off(uint32_t bi)                /* every lane's note ends (block bi) */
 {
     uint32_t l;
@@ -957,6 +1231,7 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
         seq.hold[l] = v >= 0 && (tie_next || (st != SEQ_REST && p->slide[k]));
         seq.v[l] = v;
     }
+    drum_step(p, k, bi);                        /* the drums' lanes */
     seq.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.seq_gate) >> 23);
     seq.steps++;
     if (seq.n % (eg.seq_spb ? eg.seq_spb : 4u) == 0u)   /* a beat: the metronome (the bar's first, higher) */
@@ -1193,7 +1468,8 @@ static void engine_render(int32_t *out, uint32_t n)
             }
             int32_t a_to = env_step(&voice[v].amp, gate, eg.a_att, eg.a_dec, eg.a_sus, eg.a_rel) >> 9;
             uint32_t hold = gate || (eg.vca && voice[v].drone);   /* (a drone: its other envelopes held, as if down) */
-            int32_t a, da, l, acc[BLK];
+            int32_t a, da, l, acc[BLK], dir[BLK], *dst;   /* (into the filter; DIRECT: past it, to the amp) */
+            uint32_t direct = 0;
             lfo_mod_t m;
             /* the mod envelope first (it may move the LFO's rate and depth) */
             /* LFO 2 this block: x2 its value times its amount (Q15), pz2 that over a knob's range */
@@ -1256,7 +1532,7 @@ static void engine_render(int32_t *out, uint32_t n)
             a = voice[v].amp_q15;
             da = (a_to - a) >> BLK_SHIFT;
             for (i = 0; i < BLK; i++)
-                acc[i] = 0;
+                acc[i] = dir[i] = 0;
             for (o = 0; o < NOSC; o++) {
                 src_t t[NOP];
                 uint32_t p0 = voice[v].ph[o][0], p1 = voice[v].ph[o][1], p2 = voice[v].ph[o][2];
@@ -1289,6 +1565,8 @@ static void engine_render(int32_t *out, uint32_t n)
                 d2 = (e2_to - e2) >> BLK_SHIFT;
                 voice[v].mod_q15[o][0] = e1_to;
                 voice[v].mod_q15[o][1] = e2_to;
+                dst = eg.route[o] ? dir : acc;
+                direct |= eg.route[o] && lvl;
                 if (!lvl) {                     /* not heard: keep the phases going, skip the work */
                     voice[v].ph[o][0] = p0 + i0 * BLK;
                     voice[v].ph[o][1] = p1 + i1 * BLK;
@@ -1312,7 +1590,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 if (!e2 && !e2_to) {            /* mod 2 silent: two operators */
                     for (i = 0; i < BLK; i++, e1 += d1) {
                         int32_t y1 = (src_at(&t[1], p1) * e1) >> 15;
-                        acc[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
+                        dst[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
                         p0 += i0; p1 += i1;
                     }
                     p2 += i2 * BLK;
@@ -1320,13 +1598,19 @@ static void engine_render(int32_t *out, uint32_t n)
                     for (i = 0; i < BLK; i++, e1 += d1, e2 += d2) {
                         int32_t y2 = (src_at(&t[2], p2) * e2) >> 15;
                         int32_t y1 = (modulated(m2, &t[1], p1, y2, e2) * e1) >> 15;
-                        acc[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
+                        dst[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
                         p0 += i0; p1 += i1; p2 += i2;
                     }
                 }
                 voice[v].ph[o][0] = p0;
                 voice[v].ph[o][1] = p1;
                 voice[v].ph[o][2] = p2;
+            }
+            if (eg.n_lvl) {                     /* the noise (its clock follows the note: pitch, glide, bend) */
+                uint32_t ni = NOISE_RATED(eg.n_type) ? rate_moved(voice[v].n_inc, m.pitch16[0] + (voice[v].glide_q8 >> 8)) : 0u;
+                noise_block(&voice[v].ns, eg.route[2] ? dir : acc, eg.n_lvl, eg.n_type == NOISE_DIGI ? (uint32_t)(((uint64_t)ni * 93u) >> 16)
+                                                                               : (uint32_t)(((uint64_t)ni * 16u) >> 16));
+                direct |= eg.route[2];
             }
             {                                   /* drive, the filter, the high-pass, the amp: the voice into both channels */
                 int32_t fe = env_step(&voice[v].flt, hold, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
@@ -1493,6 +1777,10 @@ static void engine_render(int32_t *out, uint32_t n)
                         s -= lp;
                         s = s > 32767 ? 32767 : s < -32767 ? -32767 : s;
                     }
+                    if (direct) {               /* DIRECT: what went past the filter, back in */
+                        s += dir[i];
+                        s = s > 32767 ? 32767 : s < -32767 ? -32767 : s;
+                    }
                     s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
                     out[2u * (b + i)] += s;
                     out[2u * (b + i) + 1u] += s;
@@ -1520,7 +1808,16 @@ static void engine_render(int32_t *out, uint32_t n)
             if (voice[v].amp.st && voice[v].age >= best) { best = voice[v].age; newest = v; }
         lfo_rate16 = newest < NV ? voice[newest].rate16 : 0;
     }
-    fx_render(out, n, g2);                      /* the effects, over all the voices (LFO 2 on them) */
+    {                                           /* the drums: some into the effects, then all of it dry */
+        static int32_t bus[MAXBLK * BLK];
+        int dr = drums_render(bus, n <= MAXBLK * BLK ? n : MAXBLK * BLK);
+        fx_render(out, n, g2, dr ? bus : 0);    /* the effects, over all the voices (LFO 2 on them) */
+        if (dr)
+            for (i = 0; i < n && i < MAXBLK * BLK; i++) {
+                out[2u * i] += bus[i];
+                out[2u * i + 1u] += bus[i];
+            }
+    }
     click_render(out, n);                       /* the metronome, dry */
     engine_frames += n;
 }
@@ -1553,6 +1850,7 @@ static void voice_tune(uint32_t v)              /* the operators' phase steps fo
             voice[v].inc[o][k] = inc > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)inc;   /* at most Nyquist */
         }
     }
+    voice[v].n_inc = rate_moved(base, ((int32_t)(patch.noise_col & 127u) - 64) * 12);   /* DIGI, S&H: +-48 semitones */
 }
 
 static void engine_tables(uint32_t o, uint32_t k)   /* operator k of oscillator o: morph its two waves into RAM */
@@ -1686,6 +1984,12 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.seq_gate = 1638 + (int32_t)(seqs.gate & 127u) * (32768 - 1638) / 127;
     }
     fx_set(&patch);
+    for (k = 0; k < NSRC; k++)                  /* the routing; the noise */
+        eg.route[k] = patch.route[k] == ROUTE_DIRECT;
+    eg.n_type = patch.noise_type < NOISE_N ? patch.noise_type : NOISE_WHITE;
+    eg.n_g = 300 + (int32_t)((PR_CURVE_Q15[patch.noise_col & 127u] * (32767 - 300)) >> 15);   /* ~70 Hz .. open */
+    eg.n_thr = (2u + (uint32_t)PR_CURVE_Q15[patch.noise_col & 127u] * 2000u / 32767u) * 97391u;   /* 2 .. 2000 a second */
+    eg.n_lvl = PR_CURVE_Q15[patch.noise_lvl & 127u];
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
     eg.a_sus = (int32_t)((patch.amp_s & 127u) * (uint32_t)(ENV_FULL / 127));
@@ -1720,9 +2024,15 @@ static void engine_init(void)
     uint32_t o, k, v;
     fx_init();
     seqs_init();                                /* (patches.c then brings the saved ones) */
+    memset(drv, 0, sizeof drv);                 /* (no drum playing) */
+    memset((void *)dr_midi, 0, sizeof dr_midi);
+    memset(&dflt, 0, sizeof dflt);              /* (the drums' filter: still) */
     l2_ph = 0;                                  /* (LFO 2 from the top: the same every time) */
-    for (v = 0; v < NV; v++)
+    for (v = 0; v < NV; v++) {
         voice[v].itrig = voice[v].ioff = voice[v].islide = 0xFF;
+        voice[v].ns.rng = 0x9E3779B9u * (v + 1u);   /* (each voice its own noise) */
+        voice[v].ns.lfsr = 1;
+    }
     for (o = 0; o < NOSC; o++)                  /* force every table to be built */
         for (k = 0; k < NOP; k++)
             op_cur[o][k] = 0;
@@ -1761,6 +2071,10 @@ static int engine_quiet(void)                   /* nothing sounds, not even a re
 {
     uint32_t v;
     if ((eg.arp_on && held.n) || eg.seq_play)
+        return 0;
+    for (v = 0; v < DRUMS; v++)                 /* (nor a drum) */
+        if (drv[v].d) return 0;
+    if (dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4)   /* (nor the drums' filter, ringing) */
         return 0;
     for (v = 0; v < NV; v++)
         if (voice[v].gate || voice[v].trig || voice[v].itrig != 0xFFu || voice[v].amp.st)
@@ -1816,6 +2130,18 @@ static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16
 }
 
 static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */
+/* a drum, now (the DRUM page's keys, MIDI): sound DR_KICK_S .. DR_OHAT_S at velocity vel (1 .. 127) */
+static void engine_drum(uint32_t sound, uint32_t vel) { if (sound < 4u) dr_midi[sound] = (uint8_t)(vel ? vel : 1u); }
+static int engine_drum_note(uint32_t note)      /* a MIDI note's sound on channel 10 (General MIDI's), or -1 */
+{
+    switch (note) {
+    case 35: case 36: return DR_KICK_S;
+    case 37: case 38: case 39: case 40: return DR_SNARE_S;
+    case 42: case 44: return DR_CHAT_S;
+    case 46: return DR_OHAT_S;
+    default: return -1;
+    }
+}
 static void engine_seq_countin(void) { seq.want_ci = 1; }   /* the next PLAY: a bar's count-in first */
 static void engine_click(uint32_t mode, uint32_t lvl, uint32_t rec)   /* the metronome: OFF, ON, REC; its level; recording */
 {

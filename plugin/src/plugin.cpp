@@ -39,7 +39,7 @@ enum : clap_id { P_SYNC = 10000, P_SEQ, P_SOUND, P_FM1 };
 struct Extra { clap_id id; const char* name; double def; };
 const Extra EXTRAS[] = {{P_SYNC, "Arp & sequencer on DAW tempo", 1}, {P_SEQ, "Sequencer run", 0},
                         {P_SOUND, "Plugin sound", 1}, {P_FM1, "Play the FM-1 too", 0}};
-const std::vector<uint32_t> LIST_KINDS = {4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35};   // (ui.c's K_ kinds)
+const std::vector<uint32_t> LIST_KINDS = {4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58};   // (ui.c's K_ kinds)
 
 std::atomic<void*> g_owner{nullptr};            // the core is one per process: the first Prysm has it
 
@@ -127,8 +127,12 @@ struct Prysm {
         }
     }
 
-    void note(uint32_t key, uint32_t vel)
+    void note(uint32_t key, uint32_t vel, int ch = 0)   // (channel 10, index 9: the drums, General MIDI's notes)
     {
+        if (ch == 9 && prysm_drum(key, vel)) {
+            if (extra[3] && link) link->note(vel ? 0x99 : 0x89, (uint8_t)key, (uint8_t)vel);
+            return;
+        }
         prysm_note(key, vel);
         if (extra[3] && link) link->note(vel ? 0x90 : 0x80, (uint8_t)key, (uint8_t)vel);
     }
@@ -148,14 +152,15 @@ struct Prysm {
         case CLAP_EVENT_NOTE_ON: case CLAP_EVENT_NOTE_OFF: {
             auto e = (const clap_event_note_t*)h;
             if (e->key < 0 || e->key > 127) break;
-            note((uint32_t)e->key, h->type == CLAP_EVENT_NOTE_ON ? std::max(1, (int)std::lround(e->velocity * 127)) : 0);
+            note((uint32_t)e->key, h->type == CLAP_EVENT_NOTE_ON ? std::max(1, (int)std::lround(e->velocity * 127)) : 0, e->channel);
             break;
         }
         case CLAP_EVENT_MIDI: {
             auto e = (const clap_event_midi_t*)h;
             const uint8_t s = e->data[0] & 0xF0;
-            if (s == 0x90 && e->data[2]) note(e->data[1], e->data[2]);
-            else if (s == 0x80 || s == 0x90) note(e->data[1], 0);
+            const int ch = e->data[0] & 15;
+            if (s == 0x90 && e->data[2]) note(e->data[1], e->data[2], ch);
+            else if (s == 0x80 || s == 0x90) note(e->data[1], 0, ch);
             else if (s == 0xE0) { prysm_bend((uint32_t)e->data[1] | (uint32_t)e->data[2] << 7, 2); if (extra[3] && link) link->note(e->data[0], e->data[1], e->data[2]); }
             else if (s == 0xB0 && (e->data[1] == 123 || e->data[1] == 120)) prysm_all_off();
             break;

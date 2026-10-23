@@ -601,5 +601,92 @@ x = load("chord")
 pk = np.abs(x).max()
 check("chord headroom", pk < 0.999, f"peak {pk:.3f} of full scale")
 
+
+
+def octave_db(x, lo, t0=0.2, t1=0.9):         # the power in the octave from lo, dB
+    seg = x[int(t0 * FS):int(t1 * FS)]
+    p = np.abs(np.fft.rfft(seg * np.hanning(len(seg)))) ** 2
+    f = np.fft.rfftfreq(len(seg), 1 / FS)
+    return 10 * np.log10(p[(f >= lo) & (f < 2 * lo)].sum() + 1e-20)
+
+
+tilt = {}                                       # the noise: 4 octaves apart (250 Hz, 4 kHz), as each colour should be
+for name, want, tol in (("white", 12, 3), ("pink", 0, 3), ("brown", -12, 4)):
+    x = load("noise_" + name)
+    tilt[name] = octave_db(x, 4000) - octave_db(x, 250)
+    check(f"noise {name} colour", abs(tilt[name] - want) < tol, f"4 kHz vs 250 Hz octave {tilt[name]:+.1f} dB (want {want:+d})")
+ref = rms(load("noise_white"), 0.2, 0.9)
+lv = {t: 20 * np.log10(rms(load("noise_" + t), 0.2, 0.9) / ref) for t in ("pink", "brown", "digi", "sh")}
+check("noise levels", all(abs(v) < 2.5 for v in lv.values()), "vs WHITE: " + ", ".join(f"{t} {v:+.1f} dB" for t, v in lv.items()))
+dk = octave_db(load("noise_dark"), 4000) - octave_db(load("noise_white"), 4000)
+check("noise tone", dk < -15, f"COLOUR 30: the 4 kHz octave {dk:+.1f} dB under WHITE's")
+x = load("noise_digi")[int(0.2 * FS):int(0.9 * FS)]
+per = FS / 440.0
+ac = lambda lag: float(np.dot(x[:-2000], np.roll(x, -int(round(lag)))[:-2000]) / np.dot(x[:-2000], x[:-2000]))
+check("noise digi plays the note", ac(per) > 0.6 and ac(per / 2) < 0.6, f"autocorrelation a period of A4 on: {ac(per):.2f} (half: {ac(per / 2):.2f})")
+f, sdu = spectrum(load("noise_digi_up"))
+f0, sd0 = spectrum(load("noise_digi"))
+check("noise digi rate", level_db(f, sdu, 880, 4) > -25 and level_db(f, sdu, 440, 4) < level_db(f0, sd0, 440, 4) - 15,
+      f"RATE +12 st: 880 Hz {level_db(f, sdu, 880, 4):.1f} dB, 440 Hz {level_db(f, sdu, 440, 4):.1f} dB")
+f, ss = spectrum(load("noise_sh"))
+null, body = level_db(f, ss, 7040, 60), level_db(f, ss, 2000, 400)
+check("noise s&h step", null < body - 15, f"16 x A4 (7040 Hz) {null:.1f} dB, a null; 2 kHz {body:.1f} dB")
+x = load("noise_crackle")[int(0.2 * FS):int(0.9 * FS)]
+crest = np.abs(x).max() / np.sqrt(np.mean(x ** 2))
+clicks = int(np.sum((np.abs(x[1:]) > 0.05) & (np.abs(x[:-1]) <= 0.05)))
+check("noise crackle", crest > 6 and 50 < clicks < 2000, f"peak / RMS {crest:.1f}, {clicks} clicks in 0.7 s")
+
+for src in ("", "n"):                           # the routing: DIRECT past a nearly closed filter
+    a = octave_db(load(f"route_{src}filter"), 2000)
+    b = octave_db(load(f"route_{src}direct"), 2000)
+    check(f"route {'noise' if src else 'osc 1'} direct", b - a > 30, f"2 kHz octave {a:.1f} dB filtered, {b:.1f} dB DIRECT")
+
+
+def onsets(x, lo, hi, hop=220):                 # the times a band's energy jumps
+    e = []
+    for i in range(0, len(x) - 1024, hop):
+        p = np.abs(np.fft.rfft(x[i:i + 1024] * np.hanning(1024))) ** 2
+        fr = np.fft.rfftfreq(1024, 1 / FS)
+        e.append(p[(fr >= lo) & (fr < hi)].sum())
+    d = np.diff(np.array(e))
+    return [(i * hop + 512) / FS for i in range(1, len(d) - 1) if d[i] > 0.3 * d.max() and d[i] >= d[i - 1] and d[i] >= d[i + 1]]
+
+
+def near(ts, want, tol=0.03):
+    return all(any(abs(t - w) < tol for t in ts) for w in want)
+
+
+dr = load2("drums")
+x = dr[:, 0]
+k, sn, h = onsets(x, 30, 120), onsets(x, 1500, 5000), onsets(x, 8000, 11000)
+check("drums kick", near(k, [0, 0.5]) and not near(k, [0.25]), f"onsets {[round(t, 3) for t in k]} (0, 0.5)")
+check("drums snare", near(sn, [0.25, 0.75]), f"onsets {[round(t, 3) for t in sn][:6]} (0.25, 0.75)")
+check("drums hat", near(h, [i * 0.125 for i in range(1, 8)]), f"onsets {[round(t, 3) for t in h][:8]} (every 0.125)")
+pk = np.abs(dr).max()
+check("drums level", 0.15 < pk < 0.8 and np.abs(dr[:, 0] - dr[:, 1]).max() == 0, f"peak {pk:.3f}, the same both sides")
+oh = 10 ** ((octave_db(x, 6000, 0.42, 0.49) - octave_db(x, 6000, 0.17, 0.24)) / 20)   # (the hat's band, 45-115 ms
+check("drums open hat", oh > 3, f"45-115 ms after the accent: {oh:.1f} x the closed hat's ring")   # after step 4 / step 2)
+tl = rms(load("drums"), 1.5, 2.0), rms(load("drums_rev"), 1.5, 2.0)
+check("drums reverb send", tl[0] < 1e-4 and tl[1] > 0.005, f"RMS 0.5 s after the last hit: {tl[0]:.5f} dry, {tl[1]:.4f} sent")
+hc = octave_db(load("drums_crush"), 8000, 0, 1) - octave_db(load("drums_crush"), 1000, 0, 1)
+hp = octave_db(load("drums"), 8000, 0, 1) - octave_db(load("drums"), 1000, 0, 1)
+check("drums crush", np.abs(load("drums_crush")[int(1.5 * FS):]).max() < 0.002 and abs(hc - hp) > 3,
+      f"8k vs 1k octave {hc:+.1f} dB crushed, {hp:+.1f} dB plain; silent after (no offset)")
+km = onsets(load("drums_midi"), 30, 120)
+check("drums midi", near(km, [0, 22016 / FS]), f"kick onsets {[round(t, 3) for t in km]} (0, 0.499)")
+kt = load("drums_tune")
+f, s1 = spectrum(load("drums"), 0.0, 0.2)
+f2, s2 = spectrum(kt, 0.0, 0.2)
+c1, c2 = (f[f < 400] * s1[f < 400] ** 2).sum() / (s1[f < 400] ** 2).sum(), (f2[f2 < 400] * s2[f2 < 400] ** 2).sum() / (s2[f2 < 400] ** 2).sum()
+check("drums tune", c2 > 1.4 * c1, f"the kick's low centroid {c1:.0f} Hz -> {c2:.0f} Hz an octave up")
+d1, d2 = rms(load("drums"), 0.10, 0.12), rms(kt, 0.10, 0.12)
+check("drums decay", d2 < 0.5 * d1, f"100 ms in: {d2:.4f} with DECAY 40, {d1:.4f} as made")
+
+fl = load("drums_filter")
+hf = octave_db(fl, 8000, 0, 1) - octave_db(load("drums"), 8000, 0, 1)
+kf = octave_db(fl, 63, 0, 1) - octave_db(load("drums"), 63, 0, 1)
+check("drums filter", hf < -20 and abs(kf) < 0.5 and np.abs(fl[int(1.5 * FS):]).max() < 0.002,
+      f"the snare and hat through it: 8k octave {hf:+.1f} dB; the kick (not sent) {kf:+.2f} dB; silent after")
+
 print("all passed" if not fails else f"{len(fails)} failed: {', '.join(fails)}")
 sys.exit(1 if fails else 0)

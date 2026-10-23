@@ -3,11 +3,12 @@
  * (docs/PRYSM-DESIGN.md); this file is the app: notes, the controls, the screen. Below it (platform.c): updates,
  * the USB rescue, USB-MIDI, USB audio, keys, knobs, LEDs, the screen, a settings sector.
  *
- *   keys       play the engine, 4 voices; the notes go out over USB-MIDI too
+ *   keys       play the engine, 4 voices; the notes go out over USB-MIDI too (on the DRUM page: the drums' steps)
  *   OCT- OCT+  the octave (kept in flash)
  *   MASTER     the volume (platform.c)
  *   USB-MIDI   notes in (on the SETUP page's channel, or any) play the engine with their velocity; the keys' notes
- *              go out on its OUT channel; the MIDI clock can drive the arpeggiator (timed as it arrives: midi_rt)
+ *              go out on its OUT channel; the MIDI clock can drive the arpeggiator (timed as it arrives: midi_rt);
+ *              channel 10 plays the drums (General MIDI's notes: 36 kick, 38 snare, 42 closed hat, 46 open)
  *   pages      ALGORITHM / EDIT ENV LFO GLO FX: the page; SELECT: the row; KNOB1..4: its parameters (ui.c)
  *   HOME       the oscilloscope; SAVE: the patches; PLAY: the sequencer; REC: its step entry; ARP (on its page):
  *              the arpeggiator on / off
@@ -257,6 +258,13 @@ static void app_main(void)
         up = prev & ~keys;
         prev = keys;
         for (k = 0; k < 27u; k++) {             /* (a key stops the note it started: the octave may change meanwhile) */
+            if (down >> k & 1u && ui_drum_keys()) {   /* (the DRUM page: a step, a drum; nothing played) */
+                held[k] = 0xFF;
+                ui_drum_key(k);
+                continue;
+            }
+            if (up >> k & 1u && held[k] == 0xFFu)
+                continue;
             if (down >> k & 1u) {
                 held[k] = (uint8_t)(base + k);
                 if (ui_seq_key(held[k], 127)) engine_set(&edit);   /* (REC: into the pattern, and heard) */
@@ -289,6 +297,12 @@ static void app_main(void)
                 continue;
             }
             cap_midi(st, d1, d2);
+            if ((st & 0xF0u) == 0x90u && (st & 0x0Fu) == 9u && d2 && engine_drum_note(d1) >= 0) {
+                engine_drum((uint32_t)engine_drum_note(d1), d2);   /* (channel 10: the drums, whatever IN says) */
+                continue;
+            }
+            if ((st & 0xE0u) == 0x80u && (st & 0x0Fu) == 9u && engine_drum_note(d1) >= 0)
+                continue;                       /* (its note-off: nothing to stop) */
 #if DINGHY_USB_LOG
             if (st == 0x9Fu && d1 == 0 && d2) { usblog_dump_start(); continue; }   /* DEBUG: tools/usblog.py */
 #endif
@@ -310,6 +324,8 @@ static void app_main(void)
         for (k = 0; k < NV; k++)                /* the key LEDs: what sounds, on the keys of this octave */
             if (voice[k].gate && voice[k].note >= base && voice[k].note < base + 27u)
                 lit |= 1u << (voice[k].note - base);
+        if (ui_drum_keys())                     /* (the DRUM page: the lane's steps) */
+            lit = ui_drum_leds();
         for (k = 0; k < 27u; k++)
             fm1_led_key(KEY_LED(k), lit >> k & 1u);
         fm1_led_key(BTN_OCT_DOWN, gset.oct < 0);

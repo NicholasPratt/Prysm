@@ -3,7 +3,7 @@
 #   cmake -B build/plugin -S plugin -DCMAKE_BUILD_TYPE=Release && cmake --build build/plugin --config Release
 # -> build/plugin/Prysm.clap. The editor page comes from site/editor/ (emu/build.sh).
 cmake_minimum_required(VERSION 3.22)
-project(PrysmCLAP VERSION 1.1.0 LANGUAGES C CXX)
+project(PrysmCLAP VERSION 1.2.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)

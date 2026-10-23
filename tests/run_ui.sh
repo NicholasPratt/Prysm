@@ -1,6 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
-# Screenshots of every page and row (tests/ui/pages.txt) and of the PATCH screen (tests/ui/patches.txt)
+# Screenshots of every page and row (tests/ui/pages.txt), of the PATCH screen (tests/ui/patches.txt), of the noise
+# and the drums (tests/ui/drums.txt)
 # -> build/ui/*.png, and contact sheets build/ui/pages.png, build/ui/patches.png
 set -e
 cd "$(dirname "$0")/.."
@@ -16,10 +17,11 @@ build/ui/prysm build/ui/su tests/ui/setup.txt >/dev/null
 build/ui/prysm build/ui/pr tests/ui/presets.txt >/dev/null
 build/ui/prysm build/ui/sq tests/ui/seq.txt >/dev/null
 build/ui/prysm build/ui/en tests/ui/env.txt >/dev/null
+build/ui/prysm build/ui/dr tests/ui/drums.txt >/dev/null
 python3 - <<'PY'
 from pathlib import Path
 from PIL import Image
-for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp"), ("su", "setup"), ("pr", "presets"), ("sq", "seq"), ("en", "env")):
+for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp"), ("su", "setup"), ("pr", "presets"), ("sq", "seq"), ("en", "env"), ("dr", "drums")):
     shots = sorted(Path("build/ui").glob(prefix + "-*.ppm"), key=lambda p: int(p.stem.split("-")[1]))
     sheet = Image.new("RGB", (4 * 250, ((len(shots) + 3) // 4) * 250), (40, 40, 40))
     for i, p in enumerate(shots):

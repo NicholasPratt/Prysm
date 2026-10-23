@@ -67,7 +67,8 @@ static int ed_seq_set(uint32_t off, uint32_t v)
         else if (f >= __builtin_offsetof(pattern_t, slide) && f < __builtin_offsetof(pattern_t, vel)) hi = 1;
         else if (f >= __builtin_offsetof(pattern_t, vel) && f < __builtin_offsetof(pattern_t, xnote)) hi = 127;
         else if (f >= __builtin_offsetof(pattern_t, xnote) && f < __builtin_offsetof(pattern_t, xvel)) hi = 255;   /* (| TIE) */
-        else if (f >= __builtin_offsetof(pattern_t, xvel) && f < sizeof(pattern_t)) hi = 127;
+        else if (f >= __builtin_offsetof(pattern_t, xvel) && f < __builtin_offsetof(pattern_t, dhit)) hi = 127;
+        else if (f >= __builtin_offsetof(pattern_t, dhit) && f < sizeof(pattern_t)) hi = 255;   /* (the drums: bits) */
         else return 0;                          /* (padding) */
     } else if (off == __builtin_offsetof(seqs_t, div)) hi = DIV_N - 1u;
     else if (off == __builtin_offsetof(seqs_t, gate)) hi = 127;
@@ -75,7 +76,9 @@ static int ed_seq_set(uint32_t off, uint32_t v)
     else if (off == __builtin_offsetof(seqs_t, mode)) hi = 1;
     else if (off == __builtin_offsetof(seqs_t, song_len)) lo = 1, hi = SONG_N;
     else if (off >= __builtin_offsetof(seqs_t, song_pat) && off < __builtin_offsetof(seqs_t, song_rep)) hi = SEQ_PATS - 1u;
-    else if (off >= __builtin_offsetof(seqs_t, song_rep) && off < sizeof seqs) lo = 1, hi = 16;
+    else if (off >= __builtin_offsetof(seqs_t, song_rep) && off < __builtin_offsetof(seqs_t, dr_lvl)) lo = 1, hi = 16;
+    else if (off >= __builtin_offsetof(seqs_t, dr_tune) && off < __builtin_offsetof(seqs_t, dr_dec)) hi = 48;
+    else if (off >= __builtin_offsetof(seqs_t, dr_lvl) && off < sizeof(seqs_t)) hi = 127;   /* (the kit) */
     else
         return 0;                               /* (the version, padding, or past the end) */
     if (v < lo || v > hi)
@@ -85,7 +88,7 @@ static int ed_seq_set(uint32_t off, uint32_t v)
         seqs_dirty = 1;                         /* (saved by the app, when quiet) */
         if (off == __builtin_offsetof(seqs_t, div) || off == __builtin_offsetof(seqs_t, gate))
             engine_set(&edit);                  /* (the step's timing) */
-        if (page == PG_SEQ) dirty |= D_HDR | D_GFX | D_ROWS;
+        if (page == PG_SEQ || page == PG_DRUM) dirty |= D_HDR | D_GFX | D_ROWS;
     }
     return 1;
 }

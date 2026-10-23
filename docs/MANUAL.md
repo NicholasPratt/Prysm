@@ -1,14 +1,16 @@
 # Prysm manual
 
 Prysm is a 4-voice synthesizer firmware for the **M-VAVE FM-1**. Each voice has two oscillators, and each oscillator is a
-little modulation chain of three wavetable operators. After them come a resonant filter (12 or 24 dB low-pass, or a comb), a high-pass, an amp envelope, an
-LFO, two looping mod envelopes and stereo chorus, delay and reverb.
+little modulation chain of three wavetable operators, and a noise source (six kinds) beside them; each of the three
+goes through a resonant filter (12 or 24 dB low-pass, or a comb) or straight past it. Then a high-pass, an amp envelope, an
+LFO, two looping mod envelopes and stereo chorus, delay and reverb. Alongside it a lo-fi **drum machine** (kick, snare,
+hat) plays a lane of its own in every sequencer pattern.
 
 - [Installing](#installing)
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
-- [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [FILTER](#filter), [AMP](#amp), [LFO](#lfo), [LFO 2](#lfo-2),
-  [MIX](#mix), [ARP](#arp), [SEQ](#seq), [FX](#fx) (CHORUS, DELAY, REVERB), [SETUP](#setup)
+- [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [NOISE](#noise), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
+  [LFO 2](#lfo-2), [MIX](#mix), [ARP](#arp), [SEQ](#seq), [DRUM](#drum), [FX](#fx) (CHORUS, DELAY, REVERB), [SETUP](#setup)
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
@@ -27,7 +29,7 @@ restart. Do not unplug it while it writes.
 **From the command line** (a built package, see the README):
 
 ```sh
-python3 tools/fm1_install.py prysm-1.1.fwsc
+python3 tools/fm1_install.py prysm-1.2.fwsc
 ```
 
 **Coming from another firmware.** Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
@@ -83,13 +85,13 @@ cutoff).
 | **PRESETS** | the filter's cutoff, from any page (shown large for a moment) |
 | **SELECT** | the row (the tabs along the bottom) |
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
-| **EDIT** | OSC 1 (press again: OSC 2) |
+| **EDIT** | OSC 1 (press again: OSC 2, then NOISE) |
 | **ENV** | AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2) |
 | **SELECT** (the button) | FILTER |
 | **LFO** | LFO (press again: LFO 2) |
 | **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
-| **SEQ** | SEQ |
+| **SEQ** | SEQ (press again: DRUM) |
 | **PLAY** | the sequencer: run / stop (from any page; its LED shows it) |
 | **REC** | step entry on the SEQ page; while the sequencer plays, real-time recording (its LED shows it) |
 | **FX** | CHORUS (press again: DELAY, then REVERB) |
@@ -159,6 +161,26 @@ holds while the key is down, and falls over the release. A slow mod 1 attack on 
 you hold it.
 
 **MIX row.** The modulators' amounts (how much they change the next one) and the oscillator's own level.
+
+### NOISE
+
+A noise source in every voice, beside the two oscillators: it follows the amp envelope like them, and goes through the
+filter or past it (ROUTE). **EDIT** three times. The picture is the noise itself: its wave (a few milliseconds) above,
+its spectrum below (24 bands, 60 Hz .. 15 kHz, the loudest at the top), so you see its colour change as you turn.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| NOISE | TYPE | COLOUR (or RATE, DENSE) | LEVEL (0: off) | ROUTE: FILTER / DIRECT |
+
+- **WHITE**: flat hiss. **PINK**: softer (-3 dB an octave), wind and surf. **BROWN**: darker still (-6 dB an
+  octave), a rumble. For these three, **COLOUR** is a tone (127 open, down: darker).
+- **DIGI**: a game console's noise channel, a short-loop shift register: buzzy, metallic and **pitched to the key**
+  (play it like an oscillator). **RATE** moves it +-48 semitones from the note.
+- **S&H**: random values held for a step, the step 16 times the note's: a crunchy, bit-crushed hiss that follows the
+  keys. **RATE** as DIGI's.
+- **CRACKLE**: sparse clicks like an old record. **DENSE**: how many, about 2 .. 2000 a second.
+
+The noise's level is on the MIX page too (N.LVL), beside the oscillators'.
 
 ### FILTER
 
@@ -322,7 +344,13 @@ it is set, as far as the whole knob):
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | OSC | osc 1 level | osc 2 level | osc 2 semitones (+-24) | osc 2 fine (+-50 cents) |
+| ROUTE | osc 1: FILTER / DIRECT | osc 2: FILTER / DIRECT | the noise: FILTER / DIRECT | the noise's level |
 | GLIDE | glide time (0 = off) | mode: ALWAYS / LEGATO | | |
+
+**Routing.** Each source goes **through the filter** (its drive, the low-pass or the comb, the high-pass), or
+**DIRECT**: past it, straight to the amp (its envelope, VCA OPEN, the effects all still apply). Filter one
+oscillator and leave the other bright: a resonant sweep over a steady body, or a comb ringing on the noise while
+the oscillators stay clean. The picture shows each source's level and its route (DIR inverted).
 
 **Glide** (portamento) slides each new note from the pitch of the last one. **ALWAYS** slides every note;
 **LEGATO** only when another note is still held (play overlapping to slide, apart to jump). Arpeggiated notes glide
@@ -453,6 +481,47 @@ the STEP and CHORD rows, or CLEAR a row.
 - **On the MIDI clock** (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
   PLAY must be on.
 
+### DRUM
+
+A drum machine of three drums, **KICK**, **SNARE** and **HAT** (closed; an accent opens it), each a lane of steps in
+every pattern, under the notes: they play together, from the same steps, in the song too. **SEQ** twice. The sounds
+were made from scratch in the style of an 808 / 909, then stored as an old sampler would keep them, 8 bits at a low
+rate (11 kHz for the kick, 16 kHz the snare, 22 kHz the hats), and played back without smoothing: crunchy and lo-fi
+by design. The kit (levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, not part of a
+sound: change the sound, the beat goes on.
+
+The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, past the pattern's length
+dots; the drum you are editing named bright; a mark under the step playing. Below, that drum's sound as it will play
+(its length tuned, DECAY over it), or on the BUS row its settings.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| STEP | the drum: KICK / SNARE / HAT | the step (the cursor) | its HIT: --, HIT, ACCENT | CLEAR the drum's lane (turn twice) |
+| KICK, SNARE, HAT | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
+| BUS | DRIVE | CRUSH: fewer bits and a lower rate still | DELAY send | REVERB send |
+
+**On the DRUM page the keys are the drum machine's**, as on a TR (they play no notes here):
+
+- The **16 white keys** (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; again: none. Their
+  **LEDs** show the lane (an accent blinks; the step playing flips its LED as it passes).
+- **F#3, G#3, A#3** (the three lowest black keys) pick KICK, SNARE, HAT, and play it.
+- **C#4 / D#4**: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).
+
+- **Accents** play at full level, hits a little softer; the hat's accent is the **open hat**, and the next hat (open
+  or closed) cuts it off, as on an 808.
+- **The sends** feed the drums into the sound's **delay** and **reverb**: what comes back is that effect's MIX on its
+  page (a mixer's send and return), so with the effect's MIX at 0 nothing comes back. The rest of the drums stay dry.
+- **FILTER** sends a drum through a filter of the drums' own that follows the sound's **CUTOFF** and **RES** (and
+  its type: LP 24, or LP 12 for the others; no envelope, and it does not self-oscillate). 0: the drum dry, 127: all
+  of it filtered, between: a blend. Turn the cutoff and the hat and snare sweep with the synth while the kick stays
+  full, or the other way round.
+- **CRUSH** holds each sample for up to 16 frames and cuts it to as few as 4 bits: from a little grit to a broken
+  toy. **DRIVE** saturates the drums' bus before it.
+- **Copy, paste, clear** on the SEQ page's EDIT row take the drums with the notes. **INIT** clears them too and puts
+  the kit back as new.
+- **MIDI**: notes on **channel 10** play the drums (General MIDI's: 36 kick, 38 or 40 snare, 42 or 44 closed hat, 46
+  open hat), whatever the IN channel, with their velocity. So a DAW's drum track plays them.
+
 ### SETUP
 
 Settings for your setup rather than a sound: they are kept with the octave, not in patches. **GLO** twice.
@@ -515,8 +584,8 @@ Connected to a computer, the FM-1 shows up as **Prysm FM-1**:
 
 - a **2-in audio input** (16-bit stereo, 44.1 or 48 kHz): record Prysm straight into any DAW, no cable needed. It
   carries exactly what the speaker plays, effects included.
-- a **MIDI port**: notes in play Prysm (with their velocity, on the SETUP page's IN channel); the keys' notes come
-  out on its OUT channel; the MIDI clock can drive the arpeggiator.
+- a **MIDI port**: notes in play Prysm (with their velocity, on the SETUP page's IN channel); channel 10 plays the
+  drums; the keys' notes come out on its OUT channel; the MIDI clock can drive the arpeggiator.
 
 Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.
 

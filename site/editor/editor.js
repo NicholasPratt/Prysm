@@ -16,7 +16,7 @@ const PLUGIN = typeof window.prysm_hello === "function";
 const BTNS = [["OCT-", 0], ["OCT+", 1], ["EDIT", 6], ["ENV", 4], ["LFO", 5], ["GLO", 7], ["FX", 2],
               ["ARP", 10], ["SEQ", 11], ["SELECT", 3], ["HOME", 8], ["SAVE", 9], ["PLAY", 12], ["REC", 13]];
 const ENCS = [["SELECT", 0], ["ALGO", 1], ["KNOB1", 2], ["KNOB2", 3], ["KNOB3", 4], ["KNOB4", 5], ["PRESETS", 6]];
-const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35]);   // ui.c's K_ kinds shown as a list
+const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58]);   // ui.c's K_ kinds shown as a list
 const LFO_ONLY_NOT = new Set([13, 14]);         // LFORATE, LFOAMT: the mod envelope's own, not the LFOs'
 const KEYMAP = "awsedftgyhujkolp;'";            // C4 (key 7) up
 const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -84,6 +84,13 @@ function readParams() {
     if (!r) pg.rows.push(r = { name: row, params: [] });
     r.params.push(p);
   }
+  // each page's place on the FM-1 (by name: a page whose knobs are all elsewhere, or not the sound's, has no
+  // parameters), and the SEQ and DRUM tabs (the patterns' own: their bytes, not the sound's)
+  const names = [...Array(M._web_npages()).keys()].map((i) => M.UTF8ToString(M._web_page_name(i)));
+  pages.forEach((pg) => { pg.index = names.indexOf(pg.name); });
+  for (const n of ["SEQ", "DRUM"])
+    if (names.includes(n) && !pages.some((x) => x.name === n)) pages.push({ name: n, index: names.indexOf(n), rows: [] });
+  pages.sort((a, b) => a.index - b.index);
 }
 const fmt = (p, v) => M.UTF8ToString(M._web_fmt(p.i, v));
 
@@ -202,10 +209,11 @@ function showTab(n) {
     box.append(r.box);
   });
   if (pg.name === "SEQ") box.prepend(seqUI());
+  if (pg.name === "DRUM") box.prepend(drumUI());
   lastPatch = lastSeqs = null;                             // (draw every value afresh)
 }
 const rowIndex = (pg, r) => {                   // the row's place on the FM-1 (the SEQ page: only its SONG row has a knob of the sound)
-  if (pg.name === "SEQ") return ["STEP", "PATTERN", "EDIT", "SONG", "ENTRY"].indexOf(r.name);
+  if (pg.name === "SEQ") return ["STEP", "CHORD", "PATTERN", "EDIT", "CLICK", "SONG", "ENTRY"].indexOf(r.name);
   return pg.rows.indexOf(r);
 };
 
@@ -218,7 +226,8 @@ const seqSet = (off, v) => M._web_seq_set(off, v);
 function seqLayout() {
   const L = M.UTF8ToString(M._web_seq_layout()).split("|").map(Number);
   const k = ["pat", "patSize", "len", "note", "trig", "slide", "div", "gate", "cur", "mode", "songLen", "songPat", "songRep",
-             "size", "pats", "entries", "vel", "xnote", "xvel", "lanes"];
+             "size", "pats", "entries", "vel", "xnote", "xvel", "lanes", "dhit", "dacc", "drums", "drLvl", "drTune", "drDec",
+             "drDrive", "drCrush", "drDly", "drRev", "drFlt"];
   SQ = Object.fromEntries(k.map((n, i) => [n, L[i]]));
 }
 const patAt = (sq, p) => SQ.pat + (p % SQ.pats) * SQ.patSize;   // where pattern p starts
@@ -354,6 +363,81 @@ function refreshSeq(sq) {                       // the SEQ tab from the patterns
   });
 }
 
+// ---- the DRUM tab: the drums' lanes of the pattern edited (bits: dhit, dacc, 8 bytes a drum), and the kit
+let drEls = null;
+const DRUMS = ["KICK", "SNARE", "HAT"];
+const drumAt = (sq, a, d, k) => { const b = 1 << (k & 7), o = d * 8 + (k >> 3); return sq[a + SQ.dhit + o] & b ? (sq[a + SQ.dacc + o] & b ? 2 : 1) : 0; };
+function drumPut(a, d, k, v) {                  // step k of drum d (in the pattern at a): 0 none, 1 a hit, 2 an accent
+  const b = 1 << (k & 7), o = d * 8 + (k >> 3);
+  seqSet(a + SQ.dhit + o, v ? seqs()[a + SQ.dhit + o] | b : seqs()[a + SQ.dhit + o] & ~b);
+  seqSet(a + SQ.dacc + o, v === 2 ? seqs()[a + SQ.dacc + o] | b : seqs()[a + SQ.dacc + o] & ~b);
+}
+function drumUI() {
+  const box = el("div", { className: "prow" });
+  const E = drEls = { pats: [], cells: [], knobs: [] };
+  const bar = el("div", { className: "seqbar" });
+  for (let i = 0; i < SQ.pats; i++) {
+    const b = el("button", { textContent: "P" + (i + 1), title: "Edit pattern " + (i + 1) + "'s drums" });
+    b.onclick = () => seqSet(SQ.cur, i);
+    E.pats.push(b);
+    bar.append(b);
+  }
+  DRUMS.forEach((name, d) => {
+    const c = el("button", { textContent: "Clear " + name });
+    c.onclick = () => { const a = patAt(seqs(), seqs()[SQ.cur]); for (let j = 0; j < 8; j++) { seqSet(a + SQ.dhit + d * 8 + j, 0); seqSet(a + SQ.dacc + d * 8 + j, 0); } };
+    bar.append(c);
+  });
+  const grid = el("div");
+  for (let r = 0; r < 4; r++)                   // 4 blocks of 16 steps, a row a drum
+    DRUMS.forEach((name, d) => {
+      const row = el("div", { className: "seqrow" }, [el("span", { textContent: name[0], className: "rowno", title: name })]);
+      for (let c = 0; c < 16; c++) {
+        const k = r * 16 + c, cell = el("div", { className: "cell drum" });
+        cell.onclick = (ev) => { const a = patAt(seqs(), seqs()[SQ.cur]); drumPut(a, d, k, ev.shiftKey ? 0 : (drumAt(seqs(), a, d, k) + 1) % 3); };
+        E.cells.push({ cell, d, k });
+        row.append(cell);
+      }
+      row.append(el("span"));
+      if (d === 2 && r < 3) row.style.marginBottom = "10px";
+      grid.append(row);
+    });
+  const kit = el("div", { className: "prms" });   // the kit: a knob each, as the DRUM page's rows
+  const knob = (label, off, max, show) => {
+    const input = el("input", { type: "range", min: 0, max, step: 1 }), val = el("div", { className: "val" });
+    input.oninput = () => seqSet(off, +input.value);
+    E.knobs.push({ input, val, off, show });
+    kit.append(el("div", { className: "prm" }, [el("label", { textContent: label }), val, input]));
+  };
+  DRUMS.forEach((name, d) => {
+    knob(name + " LEVEL", SQ.drLvl + d, 127, (v) => v);
+    knob(name + " TUNE", SQ.drTune + d, 48, (v) => (v > 24 ? "+" : "") + (v - 24) + "st");
+    knob(name + " DECAY", SQ.drDec + d, 127, (v) => (v >= 127 ? "FULL" : v));
+    knob(name + " FILTER", SQ.drFlt + d, 127, (v) => v);
+  });
+  knob("DRIVE", SQ.drDrive, 127, (v) => v);
+  knob("CRUSH", SQ.drCrush, 127, (v) => v);
+  knob("DELAY SEND", SQ.drDly, 127, (v) => v);
+  knob("REVERB SEND", SQ.drRev, 127, (v) => v);
+  box.append(el("h3", { textContent: "DRUMS of the pattern edited: click a step for a hit, then an accent (the hat opens), then none; shift-click: none" }),
+             bar, grid, el("h3", { textContent: "KIT: for every pattern (FILTER: how much goes through the sound's filter, its CUTOFF and RES; the delay and reverb sends: the sound's effects, their MIX the return)" }), kit);
+  return box;
+}
+function refreshDrum(sq) {                      // the DRUM tab from the patterns
+  const E = drEls;
+  if (!E || !E.cells.length || !document.body.contains(E.cells[0].cell)) return;
+  const cur = sq[SQ.cur] % SQ.pats, a = patAt(sq, cur), len = sq[a + SQ.len] || 16, pl = M._web_seq_playing();
+  E.pats.forEach((b, i) => b.classList.toggle("on", i === cur));
+  for (const { cell, d, k } of E.cells) {
+    const h = drumAt(sq, a, d, k);
+    cell.className = "cell drum" + (h === 2 ? " acc" : h ? " note" : "") + (k >= len ? " past" : "") +
+                     (pl !== 0xFFFF && (pl >> 8) === cur && (pl & 255) === k ? " play" : "");
+  }
+  for (const x of E.knobs) {
+    if (document.activeElement !== x.input) x.input.value = sq[x.off];
+    x.val.textContent = x.show(sq[x.off]);
+  }
+}
+
 function refresh(pt) {                          // the controls and values of the shown tab, from the sound
   const pg = pages[tab];
   for (const r of pg.rows)
@@ -390,7 +474,7 @@ function frame() {
   const pt = patch();
   if (!lastPatch || pt.some((v, i) => v !== lastPatch[i])) { refresh(pt); lastPatch = pt.slice(); }
   const sq = seqs(), play = M._web_seq_playing() << 8 | M._web_seq_entry();
-  if (!lastSeqs || play !== lastPlay || sq.some((v, i) => v !== lastSeqs[i])) { refreshSeq(sq); lastSeqs = sq.slice(); lastPlay = play; }
+  if (!lastSeqs || play !== lastPlay || sq.some((v, i) => v !== lastSeqs[i])) { refreshSeq(sq); refreshDrum(sq); lastSeqs = sq.slice(); lastPlay = play; }
   if (M._web_store_gen() !== lastStore) { lastStore = M._web_store_gen(); keep(); }
   (PLUGIN ? plug : dev).sync(pt, sq);
   requestAnimationFrame(frame);

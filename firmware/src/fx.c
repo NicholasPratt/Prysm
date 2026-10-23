@@ -9,6 +9,9 @@
  *            the tail's wobble); shimmer: inside the tank, one side's feed is crossfaded with itself an octave up,
  *            so the tail climbs; the loop's gain stays the decay's (< 1): it can never run away
  *
+ * The drums (engine.c) have sends: their bus into the delay's and the reverb's input, beside the voices; what comes
+ * back is the effect's MIX, as a mixer's return.
+ *
  * Integers only: samples Q15 in int32, the lines int16 (written saturated), coefficients Q15. Each effect is
  * skipped while its mix is 0 (then the dry sound passes untouched). The lines are big: in the pool (ENGINE_POOL).
  * fx_set() (main loop) derives what fx_render() (the audio ISR) reads. */
@@ -158,11 +161,13 @@ static void fx_set(const patch_t *p)
     fxp.rev_depth = (int32_t)(p->rev_mdepth & 127u) * ((int32_t)EXC << 16) / 127;
 }
 
-/* ---- the audio ISR: out (L R, the voices) -> chorus, delay, reverb, in place */
-static void fx_render(int32_t *out, uint32_t n, const int32_t *g2)   /* g2: LFO 2, a value a block */
+/* ---- the audio ISR: out (L R, the voices) -> chorus, delay, reverb, in place; dr: the drums' bus (mono, or 0), sent
+ * into the delay and the reverb */
+static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t *dr)   /* g2: LFO 2, a value a block */
 {
     uint32_t i, dest = eg.l2_dest, dtime = fxp.dly_time;
     int32_t cmix = fxp.cho_mix, dmix = fxp.dly_mix, rmix = fxp.rev_mix, dfb = fxp.dly_fb, rdec = fxp.rev_decay;
+    int32_t dsend = dr ? PR_CURVE_Q15[seqs.dr_dly & 127u] : 0, rsend = dr ? PR_CURVE_Q15[seqs.dr_rev & 127u] : 0;
     if (!cmix && !dmix && !rmix && !(eg.l2_amt && (dest == DEST_CHORUS || dest == DEST_DELAY || dest == DEST_REVERB)))
         return;
     for (i = 0; i < n; i++) {
@@ -208,12 +213,15 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2)   /* g2: LFO 
                 fl = shift(&sh_dly[0], fl, fxp.dly_ratio);
                 fr = shift(&sh_dly[1], fr, fxp.dly_ratio);
             }
-            if (fxp.dly_ping) {                 /* ping-pong: in on the left, then across and back */
-                dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(((l + r) >> 1) + fr);
-                dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(fl);
-            } else {
-                dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(l + fl);
-                dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(r + fr);
+            {
+                int32_t ds = dsend ? (dr[i] * dsend) >> 15 : 0;   /* (the drums' send) */
+                if (fxp.dly_ping) {             /* ping-pong: in on the left, then across and back */
+                    dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(((l + r) >> 1) + ds + fr);
+                    dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(fl);
+                } else {
+                    dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(l + ds + fl);
+                    dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(r + ds + fr);
+                }
             }
             dly_w++;
             l += (tl * dmix) >> 15;
@@ -223,6 +231,8 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2)   /* g2: LFO 
             int32_t x, sl, sr, yl, yr, a, b2;
             uint32_t e0, e1;
             x = (l + r) >> 2;                   /* (half the mono sum: headroom in the tank) */
+            if (rsend)                          /* (the drums' send, as much of it) */
+                x += (dr[i] * rsend) >> 16;
             pre_buf[pre_w & (PRE_N - 1u)] = sat16(x);
             pre_w++;
             x = pre_buf[(pre_w - 1u - fxp.rev_pre) & (PRE_N - 1u)];

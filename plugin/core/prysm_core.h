@@ -23,6 +23,7 @@ void prysm_set(uint32_t off, uint32_t v);       /* patch byte off = v, as its kn
 int prysm_load(const uint8_t *p, uint32_t n, uint32_t version);   /* a whole sound (an older format: converted) */
 void prysm_note(uint32_t note, uint32_t vel);   /* vel 0: off; through the arpeggiator when it is on */
 void prysm_bend(uint32_t v14, uint32_t range);  /* 0 .. 16383, 8192 none; +- range semitones */
+int prysm_drum(uint32_t note, uint32_t vel);    /* channel 10's: a drum (General MIDI's notes), 1; else 0 (vel 0: off) */
 void prysm_all_off(void);
 void prysm_sync(int daw);                       /* the arp, sequencer and LFO 2 on the clock below (1) or their own */
 void prysm_clock(uint32_t st, uint32_t frame_ahead);   /* 0xF8 tick, 0xFA start, 0xFC stop: so many frames into the next render */

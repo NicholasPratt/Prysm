@@ -1,11 +1,13 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, FILTER, AMP, F.ENV, M.ENV 1, M.ENV 2, LFO, LFO 2, MIX, ARP,
- * SEQ, CHORUS, DELAY, REVERB, SETUP.
+/* Prysm's pages (docs/PRYSM-DESIGN.md): OSC 1, OSC 2, NOISE, FILTER, AMP, F.ENV, M.ENV 1, M.ENV 2, LFO, LFO 2, MIX,
+ * ARP, SEQ, DRUM, CHORUS, DELAY, REVERB, SETUP.
  *
- *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2, ENV = AMP / F.ENV / M.ENV 1 / M.ENV 2, LFO = LFO / LFO 2,
+ *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2 / NOISE, ENV = AMP / F.ENV / M.ENV 1 / M.ENV 2, LFO = LFO / LFO 2,
  *                    GLO = MIX / SETUP, ARP = ARP
- *                    (on the ARP page: the arp on / off), SEQ = SEQ, FX = CHORUS / DELAY / REVERB,
+ *                    (on the ARP page: the arp on / off), SEQ = SEQ / DRUM, FX = CHORUS / DELAY / REVERB,
  *                    the SELECT button = FILTER)
+ *   the keys         on the DRUM page, a drum machine's: the 16 white keys the steps (a press: a hit, an accent, none;
+ *                    their LEDs the lane), F# G# A# (the lowest) the drum, C# D# the 16 steps before / after
  *   PLAY             the sequencer: run / stop (anywhere; its LED shows it)
  *   REC              stopped: step entry on the SEQ page (keys held together: a chord), the cursor moving on;
  *                    playing: real-time recording, from any page (each key into the nearest step, held: tied);
@@ -58,7 +60,10 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_SINIT,
        K_MPIT, K_MFINE,
        K_SCHORD, K_SVEL,
-       K_CLICK, K_CLKLVL };   /* (the SEQ page's CLICK row: settings, gset) */   /* (K_SCHORD: off = the lane - 1) */   /* (the step kinds: the step under the cursor; K_MPIT, K_MFINE: off = the modulator, 0 / 1) */
+       K_CLICK, K_CLKLVL,
+       K_NTYPE, K_NCOL, K_ROUTE,                /* (the noise; the routing) */
+       K_DRUM, K_DCUR, K_DHIT, K_DCLR, K_DNUM, K_DSEMI, K_DDEC };   /* (the DRUM page: the lane, its cursor, the step's hit;
+                                                 * K_DNUM .. K_DDEC: the kit's bytes, off in seqs_t) */   /* (the SEQ page's CLICK row: settings, gset) */   /* (K_SCHORD: off = the lane - 1) */   /* (the step kinds: the step under the cursor; K_MPIT, K_MFINE: off = the modulator, 0 / 1) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -83,9 +88,11 @@ static uint8_t gset_dirty;                      /* changed: the app saves it (wh
 
 enum { LIT_C = 1, LIT_M1 = 2, LIT_M2 = 4, LIT_A1 = 8, LIT_A2 = 16, LIT_CURVE = 32, LIT_ENV = 64, LIT_ALL = 127,
        LIT_AR = 128,                            /* (OSC pages: the mods' AR shapes under their boxes, not the names) */
+       LIT_RT = 256,                            /* (the MIX page: the routes) */
        LIT_L2 = 512 };                          /* (the LFO page: LFO 2's picture) */
 #define OO(f) ((uint16_t)__builtin_offsetof(patch_t, osc[0].f))
 #define PO(f) ((uint16_t)__builtin_offsetof(patch_t, f))
+#define SO(f) ((uint16_t)__builtin_offsetof(seqs_t, f))
 #define NOPRM {0, 0, 0, K_NONE}
 
 static const row_t OSC_ROWS[] = {
@@ -102,6 +109,10 @@ static const row_t OSC_ROWS[] = {
              {"A2", OO(att[1]), 127, K_NUM}, {"R2", OO(rel[1]), 127, K_NUM}}, LIT_M1 | LIT_M2 | LIT_AR},
     {"MIX", {{"AMT1", OO(amt[0]), 127, K_NUM}, {"AMT2", OO(amt[1]), 127, K_NUM},
              {"LEVEL", OO(level), 127, K_NUM}, NOPRM}, LIT_A1 | LIT_A2 | LIT_C},
+};
+static const row_t NOISE_ROWS[] = {             /* (COLOUR: the tone, DIGI's and S&H's rate, CRACKLE's density) */
+    {"NOISE", {{"TYPE", PO(noise_type), NOISE_N - 1u, K_NTYPE}, {"COLOUR", PO(noise_col), 127, K_NCOL},
+               {"LEVEL", PO(noise_lvl), 127, K_NUM}, {"ROUTE", PO(route[2]), ROUTE_N - 1u, K_ROUTE}}, LIT_CURVE},
 };
 static const row_t FILTER_ROWS[] = {
     {"FILTER", {{"CUT", PO(cut), 127, K_NUM}, {"RES", PO(res), 127, K_NUM},
@@ -185,7 +196,21 @@ static const row_t REV_ROWS[] = {
 static const row_t MIX_ROWS[] = {
     {"OSC", {{"OSC1", PO(lvl1), 127, K_NUM}, {"OSC2", PO(lvl2), 127, K_NUM},
              {"SEMI", PO(semi2), 48, K_SEMI}, {"FINE", PO(fine2), 127, K_CENT}}, LIT_ALL},
+    {"ROUTE", {{"OSC1", PO(route[0]), ROUTE_N - 1u, K_ROUTE}, {"OSC2", PO(route[1]), ROUTE_N - 1u, K_ROUTE},
+               {"NOISE", PO(route[2]), ROUTE_N - 1u, K_ROUTE}, {"N.LVL", PO(noise_lvl), 127, K_NUM}}, LIT_RT},
     {"GLIDE", {{"TIME", PO(glide), 127, K_NUM}, {"MODE", PO(glide_mode), GLIDE_N - 1u, K_GLIDEM}, NOPRM, NOPRM}, LIT_ALL},
+};
+static const row_t DRUM_ROWS[] = {               /* (the drums' lanes of the pattern edited; the kit, for all of them) */
+    {"STEP", {{"DRUM", 0, DRUMS - 1u, K_DRUM}, {"STEP", 0, 63, K_DCUR}, {"HIT", 0, 2, K_DHIT},
+              {"CLEAR", 0, 1, K_DCLR}}, LIT_CURVE},
+    {"KICK", {{"LEVEL", SO(dr_lvl[0]), 127, K_DNUM}, {"TUNE", SO(dr_tune[0]), 48, K_DSEMI},
+              {"DECAY", SO(dr_dec[0]), 127, K_DDEC}, {"FILTER", SO(dr_flt[0]), 127, K_DNUM}}, LIT_C},
+    {"SNARE", {{"LEVEL", SO(dr_lvl[1]), 127, K_DNUM}, {"TUNE", SO(dr_tune[1]), 48, K_DSEMI},
+               {"DECAY", SO(dr_dec[1]), 127, K_DDEC}, {"FILTER", SO(dr_flt[1]), 127, K_DNUM}}, LIT_M1},
+    {"HAT", {{"LEVEL", SO(dr_lvl[2]), 127, K_DNUM}, {"TUNE", SO(dr_tune[2]), 48, K_DSEMI},
+             {"DECAY", SO(dr_dec[2]), 127, K_DDEC}, {"FILTER", SO(dr_flt[2]), 127, K_DNUM}}, LIT_M2},
+    {"BUS", {{"DRIVE", SO(dr_drive), 127, K_DNUM}, {"CRUSH", SO(dr_crush), 127, K_DNUM},
+             {"DELAY", SO(dr_dly), 127, K_DNUM}, {"REVERB", SO(dr_rev), 127, K_DNUM}}, LIT_ALL},
 };
 static const row_t ARP_ROWS[] = {
     {"ARP", {{"ARP", PO(arp_on), 1, K_ONOFF}, {"MODE", PO(arp_mode), ARP_N - 1u, K_ARPM},
@@ -194,16 +219,18 @@ static const row_t ARP_ROWS[] = {
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_FILTER, PG_AMP, PG_FENV, PG_MENV, PG_MENV2, PG_LFO, PG_LFO2, PG_MIX, PG_ARP, PG_SEQ, PG_CHO,
-       PG_DLY, PG_REV, PG_SETUP, PG_N };
+enum { PG_OSC1, PG_OSC2, PG_NOISE, PG_FILTER, PG_AMP, PG_FENV, PG_MENV, PG_MENV2, PG_LFO, PG_LFO2, PG_MIX, PG_ARP, PG_SEQ,
+       PG_DRUM, PG_CHO, PG_DLY, PG_REV, PG_SETUP, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
+    {"NOISE", NOISE_ROWS, NROWS(NOISE_ROWS), 0},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
     {"F.ENV", FENV_ROWS, NROWS(FENV_ROWS), 0}, {"M.ENV 1", MENV_ROWS, NROWS(MENV_ROWS), 0},
     {"M.ENV 2", MENV2_ROWS, NROWS(MENV2_ROWS), 0},
     {"LFO", LFO_ROWS, NROWS(LFO_ROWS), 0}, {"LFO 2", LFO2_ROWS, NROWS(LFO2_ROWS), 0},
     {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
-    {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0}, 
+    {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0},
+    {"DRUM", DRUM_ROWS, NROWS(DRUM_ROWS), 0},
     {"CHORUS", CHO_ROWS, NROWS(CHO_ROWS), 0}, {"DELAY", DLY_ROWS, NROWS(DLY_ROWS), 0},
     {"REVERB", REV_ROWS, NROWS(REV_ROWS), 0},
     {"SETUP", SETUP_ROWS, NROWS(SETUP_ROWS), G},
@@ -231,12 +258,16 @@ static uint8_t chord_ui[SEQ_LANES - 1u];        /* the CHORD row's knobs: lane l
 enum { SR_STEP, SR_CHORD, SR_PATTERN, SR_EDIT, SR_CLICK, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
 static uint32_t seq_arm, seq_arm_at;            /* a CLEAR ALL or INIT asked once: its kind, when (turn again to do it) */
 static pattern_t *seq_ed(void) { return &seqs.pat[seqs.cur % SEQ_PATS]; }   /* the pattern edited */
+static uint8_t dr_sel;                          /* the DRUM page: the lane (KICK, SNARE, HAT) */
+static uint8_t dr_cursor;                       /* its step (0..63): the grid shows the 16 it is in */
+static uint8_t dr_hit_ui;                       /* the HIT knob: the step's (0 none, 1 a hit, 2 an accent) */
+static uint8_t clip_drum[64][DRUMS];            /* (the clipboard: the drums of its steps) */
 static void rec_end(void);
 
 static int seq_kind(uint32_t k)                 /* a parameter of the sequencer's own (seqs), not of the sound */
 {
     return k == K_SNOTE || k == K_STRIG || k == K_SSLIDE || k == K_SLEN || (k >= K_SPAT && k <= K_SINIT) ||
-           k == K_SCHORD || k == K_SVEL;
+           k == K_SCHORD || k == K_SVEL || k == K_DHIT || k == K_DCLR || k == K_DNUM || k == K_DSEMI || k == K_DDEC;
 }
 
 /* the RATIO row's MOD1, MOD2 when that modulator is in MIX or RING: heard, so a pitch (semitones), not a ratio */
@@ -249,6 +280,13 @@ static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's p
 {
     const prm_t *a = prm_alt(pg, r, i);
     return a && edit.osc[PAGES[pg].osc - 1u].mode[i - 1u] != MODE_FM ? a : &PAGES[pg].rows[r].p[i];
+}
+
+static const char *prm_label(const prm_t *p)     /* its label (the noise's COLOUR: what it is for the type) */
+{
+    if (p->kind == K_NCOL)
+        return NOISE_RATED(edit.noise_type) ? "RATE" : edit.noise_type == NOISE_CRACKLE ? "DENSE" : p->label;
+    return p->label;
 }
 
 static uint8_t *pval(uint32_t pg, const prm_t *p)
@@ -279,6 +317,11 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
         chord_ui[l] = (uint8_t)(pt->xvel[seq_cursor % 64u][l] && !(x & SEQ_XTIE) ? (x & 127u) + 1u : 0u);
         return &chord_ui[l];
     }
+    case K_DRUM: return &dr_sel;
+    case K_DCUR: return &dr_cursor;
+    case K_DHIT: dr_hit_ui = (uint8_t)drum_at(seq_ed(), dr_sel, dr_cursor); return &dr_hit_ui;
+    case K_DCLR: ui_none = 0; return &ui_none;
+    case K_DNUM: case K_DSEMI: case K_DDEC: return (uint8_t *)&seqs + p->off;   /* (the kit) */
     case K_MPIT: return &edit.mpitch[PAGES[pg].osc == 2u][p->off & 1u];   /* (the OSC pages: their oscillator's) */
     case K_MFINE: return &edit.mfine[PAGES[pg].osc == 2u][p->off & 1u];
     default: break;
@@ -364,6 +407,20 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
         break;
     }
     case K_SVEL: if (*v) num(s, *v); else put(s, "AUTO"); break;   /* (AUTO: NOTE 100, ACCENT 127) */
+    case K_NTYPE: put(s, NOISE_NAME[*v < NOISE_N ? *v : 0u]); break;
+    case K_NCOL:                                /* (the tone; a rate from the note; a density) */
+        if (NOISE_RATED(edit.noise_type)) put(snum(s, ((int32_t)*v - 64) * 3 / 4), "st");
+        else if (edit.noise_type == NOISE_CRACKLE) num(s, 2u + (uint32_t)PR_CURVE_Q15[*v & 127u] * 2000u / 32767u);
+        else num(s, *v);
+        break;
+    case K_ROUTE: put(s, *v ? "DIRECT" : "FILTER"); break;
+    case K_DRUM: put(s, DRUM_NAME[*v % DRUMS]); break;
+    case K_DCUR: num(s, *v + 1u); break;
+    case K_DHIT: put(s, *v == 2u ? "ACCENT" : *v ? "HIT" : "--"); break;
+    case K_DCLR: put(s, "TURN"); break;
+    case K_DNUM: num(s, *v); break;
+    case K_DSEMI: put(snum(s, (int32_t)*v - 24), "st"); break;
+    case K_DDEC: if (*v >= 127u) put(s, "FULL"); else num(s, *v); break;
     case K_CLICK: put(s, *v == 1u ? "ON" : *v == 2u ? "REC" : "OFF"); break;
     case K_CLKLVL: num(s, *v); break;
     case K_STRIG: put(s, SEQ_TRIG_NAME[*v < SEQ_TRIGS ? *v : 0u]); break;
@@ -885,23 +942,152 @@ static void gfx_seq(uint32_t lit)
     (void)lit;
 }
 
-static void gfx_mix(void)
+static void gfx_mix(uint32_t lit)               /* the three sources' levels, each into the filter (F) or past it (D) */
 {
+    static const char *const NAME[NSRC] = {"OSC1", "OSC2", "NOISE"};
+    const uint8_t LVL[NSRC] = {edit.lvl1, edit.lvl2, edit.noise_lvl};
     char s[24], *e;
-    cv_text(4, 8, &FONT_S, "OSC1", C_MID);
-    cv_rect(48, 13, 186, 6, C_FILL);
-    cv_rect(48, 13, (int32_t)edit.lvl1 * 186 / 127, 6, C_BRIGHT);
-    cv_text(4, 36, &FONT_S, "OSC2", C_MID);
-    cv_rect(48, 41, 186, 6, C_FILL);
-    cv_rect(48, 41, (int32_t)edit.lvl2 * 186 / 127, 6, C_BRIGHT);
+    uint32_t k;
+    for (k = 0; k < NSRC; k++) {
+        int32_t y = 4 + (int32_t)k * 24, d = edit.route[k] == ROUTE_DIRECT;
+        uint16_t c = lit & LIT_RT ? C_BRIGHT : C_MID;   /* (the ROUTE row: the routes lit) */
+        cv_text(4, y, &FONT_S, NAME[k], LVL[k] ? C_MID : C_FAINT);
+        cv_rect(54, y + 5, 140, 6, C_FILL);
+        cv_rect(54, y + 5, (int32_t)LVL[k] * 140 / 127, 6, LVL[k] ? C_BRIGHT : C_FAINT);
+        if (d) cv_rect(200, y, 36, 16, c);      /* DIRECT: inverted, as it skips the filter */
+        else cv_frame(200, y, 36, 16, lit & LIT_RT ? C_BRIGHT : C_BOX);
+        cv_text(200 + (36 - text_w(&FONT_S, d ? "DIR" : "FILT")) / 2, y, &FONT_S, d ? "DIR" : "FILT", d ? C_BLACK : c);
+    }
     e = put(s, "OSC2 ");
     e = put(snum(e, (int32_t)edit.semi2 - 24), "st ");
     put(snum(e, ((int32_t)edit.fine2 - 64) * 50 / 63), "c");
-    cv_text(48, 64, &FONT_S, s, C_MID);
-    cv_rect(4, 90, 232, 1, C_BOX);
+    cv_text(54, 74, &FONT_S, s, C_MID);
+    cv_rect(4, 96, 232, 1, C_BOX);
     e = put(s, "GLIDE ");
     if (edit.glide) put(e, edit.glide_mode == GLIDE_LEGATO ? "LEGATO" : "ALWAYS"); else put(e, "OFF");
-    cv_text(4, 98, &FONT_S, s, edit.glide ? C_MID : C_FAINT);
+    cv_text(4, 102, &FONT_S, s, edit.glide ? C_MID : C_FAINT);
+}
+
+/* the noise: the engine's own (noise_block, as a voice plays it at C4), its wave (a few ms) above, its spectrum
+ * below: 24 bands, a third of an octave each, 60 Hz .. 15 kHz (a sliding DFT a band, over 2048 frames, windowed) */
+#define NZ_N 2048u
+static void gfx_noise(uint32_t lit)
+{
+    static int16_t buf[NZ_N];
+    static int32_t db[24], top;
+    static uint32_t made = 0xFFFFFFFFu;         /* (the type and colour buf and db were made for: the DFT takes a while) */
+    int32_t blk[BLK], i, py = 0;
+    uint32_t k, inc = 0, key = (uint32_t)eg.n_type << 8 | (edit.noise_col & 127u);
+    noise_t ns = {0x1234567u, 0, 0, 0, 0, 0, 0, 1};
+    uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
+    char t[24];
+    if (NOISE_RATED(eg.n_type)) {               /* (at C4, as voice_tune and the render have it) */
+        inc = rate_moved(INC_C9[0] >> 5, ((int32_t)(edit.noise_col & 127u) - 64) * 12);
+        inc = (uint32_t)(((uint64_t)inc * (eg.n_type == NOISE_DIGI ? 93u : 16u)) >> 16);
+    }
+    if (key != made) {
+        made = key;
+        for (k = 0; k < NZ_N; k += BLK) {
+            memset(blk, 0, sizeof blk);
+            noise_block(&ns, blk, 32767, inc);
+            for (i = 0; i < (int32_t)BLK; i++)
+                buf[k + (uint32_t)i] = (int16_t)(blk[i] > 32767 ? 32767 : blk[i] < -32767 ? -32767 : blk[i]);
+        }
+        top = 0;
+        for (k = 0; k < 24u; k++) {             /* the bands: their power, in dB */
+            uint32_t ph = 0, f = rate_moved(5843246u << (k / 3u), (int32_t)(k % 3u) * 64);   /* 60 Hz x 2^(k / 3) */
+            int64_t re = 0, im = 0;
+            uint64_t pw;
+            for (i = 0; i < (int32_t)NZ_N; i++, ph += f) {
+                int32_t w = i < (int32_t)NZ_N / 2 ? i : (int32_t)NZ_N - i, x = (buf[i] * w) >> 10;   /* (a triangle window) */
+                re += (int64_t)x * lfo_wave(LFO_SINE, ph + 0x40000000u, 0);
+                im += (int64_t)x * lfo_wave(LFO_SINE, ph, 0);
+            }
+            re >>= 20; im >>= 20;
+            pw = (uint64_t)(re * re + im * im) + 1u;
+            db[k] = lg2_q8(pw) * 3 / 256;       /* (10 log10: 3.01 dB a doubling) */
+            if (db[k] > top) top = db[k];
+        }
+    }
+    cv_text(4, 0, &FONT_S, NOISE_NAME[eg.n_type], C_FAINT);
+    put(t, edit.route[2] == ROUTE_DIRECT ? "-> DIRECT" : "-> FILTER");
+    cv_text(236 - text_w(&FONT_S, t), 0, &FONT_S, t, edit.noise_lvl ? C_MID : C_FAINT);
+    cv_hdots(4, 236, 36, 4);                    /* the wave: 230 frames (5 ms) */
+    for (i = 0; i < 230; i++) {
+        int32_t y = 36 - buf[i] * 18 / 32767;
+        if (i) { cv_under(4 + i - 1, py, 4 + i, y, 36); cv_line(4 + i - 1, py, 4 + i, y, c); }
+        py = y;
+    }
+    for (k = 0; k < 24u; k++) {                 /* the bars: the loudest at the top, 48 dB below it the floor */
+        int32_t h = (db[k] - top + 48) * 60 / 48, x = 4 + (int32_t)k * 10 - 1;
+        h = h < 1 ? 1 : h > 60 ? 60 : h;
+        cv_rect(x, G_H - 2 - h, 8, h, lit & LIT_CURVE ? C_MID : C_FAINT);
+        cv_rect(x, G_H - 2 - h, 8, 1, c);
+        if (k % 3u == 0u) cv_vdots(x - 1, G_H - 64, G_H - 2, 4);   /* (the octaves) */
+    }
+}
+
+/* the drums: the three lanes of the pattern edited, the 16 steps the cursor is in (a hit grey, an accent white, past
+ * the length a dot), the lane chosen marked, the cursor ringed, the step playing marked under them; below, the chosen
+ * drum's sound as it will play (its length tuned, DECAY over it), or the bus's settings */
+static uint32_t dr_drawn = 0xFFFFFFFFu;
+static void gfx_drum(uint32_t lit)
+{
+    const pattern_t *pt = seq_ed();
+    uint32_t len = pt->len >= 1u && pt->len <= 64u ? pt->len : 16u, base = dr_cursor / 16u * 16u, d, k;
+    uint32_t r = row[PG_DRUM], sel = r >= 1u && r <= DRUMS ? r - 1u : dr_sel;
+    char t[24], *e;
+    dr_drawn = seq.steps;
+    e = num(put(num(put(t, "STEPS "), base + 1u), "-"), base + 16u);
+    put(num(put(e, " OF "), len), "");
+    cv_text(44, 0, &FONT_S, t, C_FAINT);
+    for (d = 0; d < DRUMS; d++) {
+        int32_t y = 16 + (int32_t)d * 22;
+        uint32_t on = d == sel;
+        cv_text(2, y + 1, &FONT_S, DRUM_NAME[d], on ? C_BRIGHT : C_FAINT);
+        for (k = 0; k < 16u; k++) {
+            uint32_t st = base + k, h = drum_at(pt, d, st);
+            int32_t x = 44 + (int32_t)k * 12;
+            if (k == 4u || k == 8u || k == 12u) cv_vdots(x - 2, y, y + 18, 2);   /* (the beats) */
+            if (st >= len) { cv_rect(x + 4, y + 8, 2, 2, C_BOX); continue; }
+            if (h) cv_rect(x, y, 10, 18, h == 2u ? C_BRIGHT : C_MID);
+            else cv_frame(x, y, 10, 18, on ? C_MID : C_BOX);
+            if (on && st == dr_cursor && r == 0u) cv_frame(x - 2, y - 2, 14, 22, C_BRIGHT);
+            if (d == DRUMS - 1u && eg.seq_play && st == seq.playing && seq.playing_pat == seqs.cur % SEQ_PATS)
+                cv_rect(x, y + 21, 10, 2, C_BRIGHT);   /* (the step playing) */
+        }
+    }
+    cv_rect(0, 86, 240, 1, C_BOX);
+    if (r == DRUMS + 1u) {                      /* BUS: the settings, in words */
+        e = num(put(t, "DRIVE "), seqs.dr_drive);
+        num(put(e, "  CRUSH "), seqs.dr_crush);
+        cv_text(4, 92, &FONT_S, t, C_MID);
+        e = num(put(t, "SEND: DELAY "), seqs.dr_dly);
+        num(put(e, "  REVERB "), seqs.dr_rev);
+        cv_text(4, 108, &FONT_S, t, seqs.dr_dly || seqs.dr_rev ? C_MID : C_FAINT);
+        (void)lit;
+        return;
+    }
+    {                                           /* the sound: its shape (each column's peak), as long as it plays */
+        const dr_sound_t *sd = &DR_SOUND[sel];
+        uint32_t tn = seqs.dr_tune[sel] <= 48u ? seqs.dr_tune[sel] : 24u, inc = (uint32_t)(((uint64_t)sd->inc_q16 * PR_SEMI_Q16[tn]) >> 16);
+        uint32_t frames = (uint32_t)(((uint64_t)sd->n << 16) / inc), dec = seqs.dr_dec[sel] & 127u, x;
+        int32_t amp = 32767, dk = dec >= 127u ? 0 : PR_ENV_EXP[dec * 100u / 127u];
+        uint32_t per = 44100u / 2u / 236u;      /* (a column: 1/236 of half a second) */
+        for (x = 0; x < 236u; x++) {
+            uint32_t f0 = x * per, f, pk = 0;
+            if (f0 >= frames || amp < 8) break;
+            for (f = f0; f < f0 + per && f < frames; f++) {
+                int32_t v = sd->d[(uint32_t)(((uint64_t)f * inc) >> 16)];
+                v = (v < 0 ? -v : v) * amp >> 15;
+                if ((uint32_t)v > pk) pk = (uint32_t)v;
+                if (dk && (f & (BLK - 1u)) == BLK - 1u) amp -= (int32_t)(((int64_t)amp * dk) >> 16);
+            }
+            pk = pk * 15u / 127u;
+            cv_rect(2 + (int32_t)x, 106 - (int32_t)pk, 1, 2 * (int32_t)pk + 1, lit & (LIT_C | LIT_M1 | LIT_M2) ? C_MID : C_FAINT);
+        }
+        cv_text(236 - text_w(&FONT_S, DRUM_NAME[sel]), 88, &FONT_S, DRUM_NAME[sel], C_FAINT);
+    }
 }
 
 static char pop_name[16], pop_val[20];          /* the knob just turned (or PRESETS: the cutoff) */
@@ -947,7 +1133,9 @@ static void draw_gfx(void)
     case PG_ARP: gfx_arp(lit); break;
     case PG_SETUP: gfx_setup(); break;
     case PG_SEQ: gfx_seq(lit); break;
-    default: gfx_mix();
+    case PG_NOISE: gfx_noise(lit); break;
+    case PG_DRUM: gfx_drum(lit); break;
+    default: gfx_mix(lit);
     }
     if (fm1_ms < pop_until) {                   /* a knob turned: its name and value, large, in the top right corner */
         const felucca_font_t *f = text_w(&FONT_P, pop_val) <= 220 ? &FONT_P : &FONT_M;
@@ -977,8 +1165,8 @@ static void draw_hdr(void)
     uint32_t cpu = 0;
     cv_begin(240, 20, C_BLACK);
     x = cv_text(4, 1, &FONT_S, page < PG_N ? PAGES[page].name : "PATCH", C_BRIGHT);
-    if (page == PG_SEQ) {                       /* the pattern edited, or the song */
-        if (seqs.mode) x = cv_text(x + 6, 1, &FONT_S, "SONG", C_BRIGHT);
+    if (page == PG_SEQ || page == PG_DRUM) {    /* the pattern edited, or the song (DRUM: its pattern) */
+        if (seqs.mode && page == PG_SEQ) x = cv_text(x + 6, 1, &FONT_S, "SONG", C_BRIGHT);
         else { char t[4]; num(put(t, "P"), seqs.cur % SEQ_PATS + 1u); x = cv_text(x + 6, 1, &FONT_S, t, C_BRIGHT); }
     }
     if (page == PG_SEQ && seq_rec) {            /* REC: inverted */
@@ -1017,16 +1205,18 @@ static void draw_focus(void)                    /* the selected row: four labels
             continue;
         v = pval(page, p);
         fmt(s, p, v);
-        cv_text(x + (FOC_W - text_w(&FONT_S, p->label)) / 2, 0, &FONT_S, p->label, C_MID);
+        cv_text(x + (FOC_W - text_w(&FONT_S, prm_label(p))) / 2, 0, &FONT_S, prm_label(p), C_MID);
         if ((w = text_w(&FONT_M, s)) <= FOC_W - 4)
             cv_text(x + (FOC_W - w) / 2, 19, &FONT_M, s, C_BRIGHT);
         else                                    /* (too long for the large font: the small one) */
             cv_text(x + (FOC_W - text_w(&FONT_S, s)) / 2, 22, &FONT_S, s, C_BRIGHT);
-        if (p->kind == K_NUM || p->kind == K_POS || p->kind == K_BIP || p->kind == K_CENT) {
+        if (p->kind == K_NUM || p->kind == K_POS || p->kind == K_BIP || p->kind == K_CENT || p->kind == K_NCOL ||
+            p->kind == K_DNUM || p->kind == K_DDEC || p->kind == K_DSEMI) {
             int32_t bx = x + 6, bw = FOC_W - 12, by = 46;
             cv_rect(bx, by + 1, bw, 1, C_BOX);  /* the track */
-            if (p->kind == K_BIP || p->kind == K_CENT) {   /* bipolar: from the middle */
-                int32_t m = bx + bw / 2, d = ((int32_t)*v - 64) * (bw / 2) / 63;
+            if (p->kind == K_BIP || p->kind == K_CENT || p->kind == K_DSEMI ||
+                (p->kind == K_NCOL && NOISE_RATED(edit.noise_type))) {   /* bipolar: from the middle */
+                int32_t c = p->kind == K_DSEMI ? 24 : 64, m = bx + bw / 2, d = ((int32_t)*v - c) * (bw / 2) / (c - 1);
                 cv_rect(m, by - 1, 1, 5, C_FAINT);
                 cv_rect(d < 0 ? m + d : m, by, d < 0 ? -d : d + 1, 3, C_BRIGHT);
             } else
@@ -1144,7 +1334,7 @@ static void pa_say(const char *a, uint32_t slot)   /* the message line: a, then 
 static int seq_action(uint32_t kind)
 {
     pattern_t *pt = seq_ed();
-    uint32_t a = seq_row < 4u ? seq_row * 16u : 0u, n = seq_row < 4u ? 16u : 64u, k;
+    uint32_t a = seq_row < 4u ? seq_row * 16u : 0u, n = seq_row < 4u ? 16u : 64u, k, d;
     char msg[16], *e;
     if ((kind == K_SINIT || (kind == K_SCLEAR && seq_row >= 4u)) &&
         (seq_arm != kind || fm1_ms - seq_arm_at > 3000u)) {
@@ -1161,6 +1351,7 @@ static int seq_action(uint32_t kind)
             clip_vel[k] = pt->vel[a + k];
             memcpy(clip_xnote[k], pt->xnote[a + k], SEQ_LANES - 1u);
             memcpy(clip_xvel[k], pt->xvel[a + k], SEQ_LANES - 1u);
+            for (d = 0; d < DRUMS; d++) clip_drum[k][d] = (uint8_t)drum_at(pt, d, a + k);
         }
         clip_rows = seq_row < 4u ? 1u : 4u;
         clip_len = pt->len;
@@ -1174,6 +1365,7 @@ static int seq_action(uint32_t kind)
             pt->vel[a + k] = clip_vel[c];
             memcpy(pt->xnote[a + k], clip_xnote[c], SEQ_LANES - 1u);
             memcpy(pt->xvel[a + k], clip_xvel[c], SEQ_LANES - 1u);
+            for (d = 0; d < DRUMS; d++) drum_put(pt, d, a + k, clip_drum[c][d]);
         }
         if (clip_rows == 4u) pt->len = clip_len;
         pop("PASTED", msg);
@@ -1182,17 +1374,87 @@ static int seq_action(uint32_t kind)
             pt->trig[a + k] = SEQ_REST; pt->slide[a + k] = 0; pt->vel[a + k] = 0;
             memset(pt->xnote[a + k], 0, SEQ_LANES - 1u);
             memset(pt->xvel[a + k], 0, SEQ_LANES - 1u);
+            for (d = 0; d < DRUMS; d++) drum_put(pt, d, a + k, 0);
         }
         pop("CLEARED", msg);
     } else {                                    /* INIT: every pattern empty, the song P1 .. P4, PATTERN mode */
         seqs_init();
-        seq_cursor = song_cursor = 0;
+        seq_cursor = song_cursor = dr_cursor = 0;
         pop("INIT", "DONE");
     }
     (void)e;
     seqs_dirty = 1;
     dirty |= D_HDR | D_GFX | D_ROWS;
     return kind == K_SINIT;
+}
+
+static void drum_clear(void)                    /* the DRUM page's CLEAR: the lane chosen, every step none (asks first) */
+{
+    uint32_t k;
+    if (seq_arm != K_DCLR || fm1_ms - seq_arm_at > 3000u) {
+        seq_arm = K_DCLR;
+        seq_arm_at = fm1_ms;
+        pop("CLEAR LANE?", "AGAIN");
+        return;
+    }
+    seq_arm = 0;
+    for (k = 0; k < 64u; k++)
+        drum_put(seq_ed(), dr_sel, k, 0);
+    pop("CLEARED", DRUM_NAME[dr_sel]);
+    seqs_dirty = 1;
+    dirty |= D_GFX | D_ROWS;
+}
+
+/* ---- the DRUM page's keys (key k: 0 = F3 .. 26 = G5): the 16 white ones (F3 .. G5) the 16 steps the cursor is in,
+ * each press a hit, an accent, none in turn; F#3 G#3 A#3: KICK, SNARE, HAT (heard too); C#4 / D#4: the 16 before /
+ * after (round within the length) */
+static int ui_drum_keys(void) { return page == PG_DRUM; }   /* the keys are the drums' */
+static void ui_drum_key(uint32_t k)
+{
+    static const int8_t WHITE[27] = {0, -1, 1, -2, 2, -3, 3, 4, -4, 5, -5, 6, 7, -6, 8, -7, 9, -8, 10, 11, -9, 12, -10,
+                                     13, 14, -11, 15};   /* (a white key's step; a black key's -1 ..) */
+    const pattern_t *pt = seq_ed();
+    uint32_t len = pt->len >= 1u && pt->len <= 64u ? pt->len : 16u, base = dr_cursor / 16u * 16u;
+    int32_t w = k < 27u ? WHITE[k] : -99;
+    if (w >= 0) {                               /* a step: on, accented, off */
+        uint32_t st = base + (uint32_t)w, h;
+        char val[16];
+        if (st >= len) return;
+        h = (drum_at(pt, dr_sel, st) + 1u) % 3u;
+        drum_put(seq_ed(), dr_sel, st, h);
+        dr_cursor = (uint8_t)st;
+        if (h) engine_drum(dr_sel == 2u && h == 2u ? DR_OHAT_S : dr_sel, h == 2u ? 127u : 106u);
+        put(num(put(put(val, DRUM_NAME[dr_sel]), " "), st + 1u), "");
+        pop(val, h == 2u ? "ACCENT" : h ? "HIT" : "--");
+        seqs_dirty = 1;
+    } else if (w >= -3) {                       /* a drum */
+        dr_sel = (uint8_t)(-w - 1);
+        engine_drum(dr_sel, 106u);
+        pop("DRUM", DRUM_NAME[dr_sel]);
+    } else if (w == -4 || w == -5) {            /* the steps before, after */
+        uint32_t pages = (len + 15u) / 16u, pg = (dr_cursor / 16u + (w == -5 ? 1u : pages - 1u)) % pages;
+        char val[16];
+        dr_cursor = (uint8_t)(pg * 16u + dr_cursor % 16u);
+        if (dr_cursor >= len) dr_cursor = (uint8_t)(pg * 16u);
+        put(num(put(num(val, pg * 16u + 1u), "-"), pg * 16u + 16u), "");
+        pop("STEPS", val);
+    }
+    dirty |= D_HDR | D_GFX | D_ROWS;
+}
+
+static uint32_t ui_drum_leds(void)             /* the keys' LEDs on the DRUM page: the lane's 16 steps (an accent */
+{                                               /* blinks; the step playing the other way round); the drum's key */
+    static const uint8_t STEP_KEY[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
+    static const uint8_t DRUM_KEY[DRUMS] = {1, 3, 5};
+    const pattern_t *pt = seq_ed();
+    uint32_t len = pt->len >= 1u && pt->len <= 64u ? pt->len : 16u, base = dr_cursor / 16u * 16u, lit = 0, i;
+    uint32_t blink = (fm1_ms / 120u) & 1u, playing = eg.seq_play && seq.playing_pat == seqs.cur % SEQ_PATS;
+    for (i = 0; i < 16u && base + i < len; i++) {
+        uint32_t h = drum_at(pt, dr_sel, base + i), on = h == 2u ? blink : h != 0u;
+        if (playing && seq.playing == base + i) on = !on;
+        lit |= on << STEP_KEY[i];
+    }
+    return lit | 1u << DRUM_KEY[dr_sel % DRUMS];
 }
 
 static int pa_do(void)                          /* the SAVE button on the PATCH screen; 1 = the sound changed */
@@ -1440,7 +1702,8 @@ static int ui_input(uint32_t buttons)
         ui_page(PG_PATCH);
         return (int)changed;
     }
-    if (buttons & (1u << BTN_EDIT)) ui_page(page == PG_OSC1 ? PG_OSC2 : PG_OSC1);
+    if (buttons & (1u << BTN_EDIT))             /* EDIT: OSC 1, OSC 2, NOISE in turn */
+        ui_page(page == PG_OSC1 ? PG_OSC2 : page == PG_OSC2 ? PG_NOISE : PG_OSC1);
     if (buttons & (1u << BTN_FX))               /* FX: CHORUS, DELAY, REVERB in turn */
         ui_page(page == PG_CHO ? PG_DLY : page == PG_DLY ? PG_REV : PG_CHO);
     if (buttons & (1u << BTN_ENV))              /* ENV: AMP, F.ENV, M.ENV 1, M.ENV 2 in turn */
@@ -1455,13 +1718,15 @@ static int ui_input(uint32_t buttons)
         } else
             ui_page(PG_ARP);
     }
-    if (buttons & (1u << BTN_SEQ)) ui_page(PG_SEQ);
+    if (buttons & (1u << BTN_SEQ)) ui_page(page == PG_SEQ ? PG_DRUM : PG_SEQ);   /* SEQ: SEQ, DRUM */
     if (buttons & (1u << BTN_GLO)) ui_page(page == PG_MIX ? PG_SETUP : PG_MIX);
     if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0)
         ui_page((uint32_t)(((int32_t)page + d % (int32_t)PG_N + (int32_t)PG_N) % (int32_t)PG_N));
     if ((d = fm1_enc_take(ENC_SELECT)) != 0) {
         int32_t n = (int32_t)row[page] + d, max = PAGES[page].n - 1;
         row[page] = (uint32_t)(n < 0 ? 0 : n > max ? max : n);
+        if (page == PG_DRUM && row[page] >= 1u && row[page] <= DRUMS)
+            dr_sel = (uint8_t)(row[page] - 1u);  /* (a drum's row: its lane is the one the keys edit) */
         pop_until = 0;
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
@@ -1473,7 +1738,8 @@ static int ui_input(uint32_t buttons)
             continue;                           /* (on the MIDI clock the tempo is the clock's) */
         if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM ||
             p->kind == K_CLK || p->kind == K_STRIG || p->kind == K_SSLIDE || p->kind == K_SMODE ||
-            p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT) {
+            p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT ||
+            p->kind == K_NTYPE || p->kind == K_ROUTE || p->kind == K_DRUM || p->kind == K_DHIT || p->kind == K_DCLR) {
             /* one step per two detents: no flicker */
             slow[i] += d;
             if (slow[i] > -2 && slow[i] < 2) continue;
@@ -1485,6 +1751,10 @@ static int ui_input(uint32_t buttons)
         last_turn[i] = fm1_ms;
         if (p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT) {
             if (seq_action(p->kind)) changed = 1;   /* (a turn either way does it) */
+            continue;
+        }
+        if (p->kind == K_DCLR) {                /* the lane's steps, all none (asks first) */
+            drum_clear();
             continue;
         }
         v = pval(page, p);
@@ -1501,12 +1771,15 @@ static int ui_input(uint32_t buttons)
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         *v = (uint8_t)x;
-        if (p->kind != K_CURSOR) {              /* its name and value, large, for a moment */
+        if (p->kind != K_CURSOR && p->kind != K_DCUR) {   /* its name and value, large, for a moment */
             char val[16];
             fmt(val, p, v);
-            pop(p->label, val);
+            pop(prm_label(p), val);
         }
-        if (p->kind == K_CURSOR || p->kind == K_SROW || p->kind == K_SENTRY) {   /* a cursor: not the sound */
+        if (p->kind == K_DHIT)                  /* the step's hit: into the lane */
+            drum_put(seq_ed(), dr_sel, dr_cursor, (uint32_t)x);
+        if (p->kind == K_CURSOR || p->kind == K_SROW || p->kind == K_SENTRY || p->kind == K_DRUM || p->kind == K_DCUR) {
+            /* a cursor: not the sound */
             dirty |= D_GFX | D_ROWS;
             continue;
         }
@@ -1712,6 +1985,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
         dirty |= D_GFX;                         /* (the arp's picture follows the playing step) */
     if (page == PG_SEQ && seq_drawn != seq.steps)
         dirty |= D_GFX;                         /* (and the sequencer's) */
+    if (page == PG_DRUM && dr_drawn != seq.steps)
+        dirty |= D_GFX;                         /* (and the drums') */
     {
         static uint32_t bpm_drawn;
         if (gset.clock && (page == PG_ARP || page == PG_SETUP) && bpm_drawn != mc_bpm10 && fm1_ms - last_hdr < 5u) {

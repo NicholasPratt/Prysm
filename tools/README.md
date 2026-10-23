@@ -28,7 +28,7 @@ $PY tools/fm1_install.py build/prysm.fwsc
 ```
 
 It asks before it writes, then the FM-1 restarts into the new firmware. To install a release instead, give its
-file: `$PY tools/fm1_install.py prysm-1.1.fwsc`. To see what the connected FM-1 is running:
+file: `$PY tools/fm1_install.py prysm-1.2.fwsc`. To see what the connected FM-1 is running:
 `$PY tools/fm1_install.py --info`.
 
 If the FM-1 does not start after an update, hold **OCT-** while switching it on to get the rescue updater, then
@@ -126,8 +126,8 @@ playing. Everything else is the same.
 | --- | --- |
 | `tools/setup_macos.sh` | once: sets the Mac up to build Prysm (colima and docker, the JieLi toolchain, the AC79 SDK, the Python venv) |
 | `./build.sh` | builds `build/prysm.fwsc` (identity FM-1_980). colima must be running: `colima start`. |
-| `./build.sh --release 1.1` | a release build, `build/prysm-1.1.fwsc` |
-| `$PY tools/make_site.py build/prysm-1.1.fwsc 1.1` | rebuilds `site/`: the web installer and the manual for GitHub Pages |
+| `./build.sh --release 1.2` | a release build, `build/prysm-1.2.fwsc` |
+| `$PY tools/make_site.py build/prysm-1.2.fwsc 1.2` | rebuilds `site/`: the web installer and the manual for GitHub Pages |
 
 ## The other tools
 
@@ -135,6 +135,7 @@ playing. Everything else is the same.
 | --- | --- |
 | `build.py`, `fm1pkg_make.py`, `lz4blk.py`, `get_toolchain.sh` | used by `./build.sh`: the build, the update package, its compression, the JieLi toolchain download |
 | `gen_prysm_tables.py` | regenerates `firmware/gen/prysm_tables.h`: the wavetables and the engine's lookup tables (needs numpy) |
+| `gen_drums.py` | regenerates `firmware/gen/prysm_drums.h`: the drums (kick, snare, closed and open hat), modelled, then stored 8-bit at 11 .. 22 kHz (needs numpy; `--wav DIR` writes them as WAVs) |
 | `gen_prysm_font.py` | regenerates the screen's large fonts from Terminus BDF files: `gen_prysm_font.py ter-u22b.bdf M` (the values) and `gen_prysm_font.py ter-u32b.bdf P` (the pop-up) |
 | `gen_splash.py` | the old power-on picture, `assets/splash.jpg`. No longer shown: the power-on animation replaced it. |
 | `demo.py` | the demo video: `send` puts its 7 sounds in the FM-1's slots (0.8 or later), `film` scripts and films its scenes on the computer |
