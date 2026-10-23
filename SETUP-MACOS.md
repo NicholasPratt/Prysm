@@ -17,7 +17,7 @@ This installs and checks the following:
 | colima + docker (Homebrew): the JieLi toolchain is Linux-only and runs in a `linux/amd64` container | `colima start` after a reboot |
 | JieLi pi32v2 toolchain (clang 4.0.1) | `~/.jieli/toolchain` |
 | JieLi AC79 SDK v1.2.1 (three files of it are used) | `~/fw-AC79_AIoT_SDK` |
-| Python venv: Pillow, fonttools, mido, python-rtmidi | `.venv/` (git-ignored) |
+| Python venv: Pillow, fonttools, mido, python-rtmidi, numpy, markdown | `.venv/` (git-ignored) |
 
 ## The loop
 

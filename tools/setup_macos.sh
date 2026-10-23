@@ -15,6 +15,6 @@ SDK="${AC79_SDK:-$HOME/fw-AC79_AIoT_SDK}"
     https://gitee.com/Jieli-Tech/fw-AC79_AIoT_SDK.git "$SDK"
 
 [ -x .venv/bin/python3 ] || python3 -m venv .venv
-.venv/bin/pip install -q Pillow fonttools mido python-rtmidi
+.venv/bin/pip install -q Pillow fonttools mido python-rtmidi numpy markdown
 
 echo "setup: done. Before building: export PATH=\"$PWD/.venv/bin:\$PATH\" (and colima start after a reboot)"
