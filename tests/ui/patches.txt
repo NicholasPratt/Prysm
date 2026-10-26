@@ -18,7 +18,7 @@
 1400 enc 0 1
 1450 btn 9
 1500 shot
-1600 enc 0 1
+1600 enc 0 2
 1650 btn 9
 1700 shot
 1800 btn 9

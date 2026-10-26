@@ -159,6 +159,9 @@ typedef struct {
                                                 /* the note's (+-48 semitones); CRACKLE: how dense */
     uint8_t noise_lvl;                          /* its level: 0 = off */
     uint8_t route[NSRC];                        /* osc 1, osc 2, the noise: ROUTE_FILTER, or ROUTE_DIRECT (to the amp) */
+    /* (added in patch format 13: the keyboard split) */
+    uint8_t split;                              /* 0 = off; else a note: below it osc 1 alone plays, from it osc 2 alone */
+    uint8_t split_oct[2];                       /* each side's octave: 0..4 = -2 .. +2 (2: as played) */
 } patch_t;
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
@@ -196,7 +199,8 @@ typedef struct {
     uint8_t div, gate;                          /* the step (DIV_4 .. DIV_32) and its gate (0..127 = 5 .. 100 %) */
     uint8_t cur;                                /* the pattern edited, and played in PATTERN mode */
     uint8_t mode;                               /* 0: PATTERN (the pattern edited, over and over); 1: SONG */
-    uint8_t song_len, pad2[3];                  /* 1 .. SONG_N entries */
+    uint8_t song_len;                           /* 1 .. SONG_N entries */
+    uint8_t part_mute[2], pad2;                 /* the split's parts (part_of) muted: 1 (the store had 0 here before) */
     uint8_t song_pat[SONG_N], song_rep[SONG_N]; /* each entry: a pattern (0..3), played 1 .. 16 times */
     /* (SEQS_VERSION 3: the drums' kit, for every pattern) */
     uint8_t dr_lvl[DRUMS];                      /* each drum's level: 0 = silent */
@@ -281,6 +285,7 @@ static const patch_t PATCH_INIT = {
     .mpitch = {{24, 24}, {24, 24}}, .mfine = {{64, 64}, {64, 64}},
     .vca = 0,
     .noise_type = NOISE_WHITE, .noise_col = 100, .noise_lvl = 0, .route = {ROUTE_FILTER, ROUTE_FILTER, ROUTE_FILTER},
+    .split = 0, .split_oct = {2, 2},
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -391,6 +396,8 @@ static struct {
     int32_t lfo_sh, lfo_fade;                   /* the S&H value held; the fade-in (Q24) */
     int32_t rate16;                             /* the mod envelope's move of its LFO's rate, 1/16 semitones */
     uint8_t note;
+    uint8_t omask;                              /* the oscillators it plays (bit o): the split's side, or both */
+    int8_t shift;                               /* its side's octave, semitones (voice_tune) */
     volatile uint8_t vel;                       /* 1 .. 127 (main loop, before the gate) */
     uint32_t age;
     int32_t glide_q8;                           /* the pitch still to slide, 1/16 semitones Q8 (to 0) */
@@ -785,6 +792,11 @@ static int32_t menv_step(env_t *e, uint32_t gate, uint32_t k)   /* mod envelope 
 #define MAXBLK 32u                              /* blocks per render, at most (n <= 512) */
 #include "fx.c"                                 /* the effects: chorus, delay, reverb */
 
+static uint32_t part_of(uint32_t note)          /* the split's side a note is on: 0 below (osc 1), 1 from it (osc 2) */
+{
+    return patch.split && note >= patch.split;
+}
+
 static void voice_tune(uint32_t v);
 static void arp_clear(void);
 static void engine_all_off(void);
@@ -945,10 +957,22 @@ static struct {
     volatile seqpos_t now_at;                   /* the step playing (recording: where a key falls) */
     volatile uint32_t step_at, step_len;        /* when it started (engine_frames), its length (frames Q8) */
     volatile uint8_t rec_mute;                  /* lanes a key is recording into (the main loop's): they rest */
+    volatile uint8_t rec_part;                  /* (bit l: that key's part, part_of: only its notes rest) */
     uint32_t n;                                 /* steps since PLAY (the metronome's count) */
     volatile uint32_t ci;                       /* the count-in: its steps still to come (a bar's, from PLAY) */
     volatile uint8_t in_ci, want_ci;            /* counting in; PLAY with a count-in (the main loop's) */
 } seq = {.v = {-1, -1, -1, -1}, .count = -1, .wait = -1};
+/* another patch's sequencer, loaded while this one plays: it takes over where the next pattern would start, or with
+ * seq_at_bar on the next bar line (seq_step). seq_swap: 1 waiting (the main loop's), 2 taken over (the main loop then
+ * follows: seqs_poll, ui.c). The LIVE screen's changes wait for the bar line too: a pattern (seq_qpat, from its top,
+ * PATTERN mode), and seq_barq asks for seq_bar_hit when the bar line came (the main loop then brings the sound) */
+static seqs_t seqs_next ENGINE_POOL;
+static volatile uint8_t seq_swap, seq_at_bar, seq_barq, seq_bar_hit;
+/* the LIVE screen's mutes (not saved: all on at power-on): a bit each, LM_KICK .. LM_NOISE; a drum's new hits, an
+ * oscillator, the noise silenced at once */
+enum { LM_KICK, LM_SNARE, LM_HAT, LM_OSC1, LM_OSC2, LM_NOISE, LM_N };
+static volatile uint8_t live_mute;
+static volatile int8_t seq_qpat = -1;
 
 /* lane l of step k: SEQ_REST, SEQ_NOTE or SEQ_TIE (an accent: a NOTE at 127), its note and velocity */
 static uint32_t seq_lane(const pattern_t *p, uint32_t k, uint32_t l, uint32_t *note, uint32_t *vel)
@@ -1022,7 +1046,7 @@ static void drum_hit(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR) a
 {
     uint32_t d = sound >= DR_CHAT_S ? 2u : sound, t = seqs.dr_tune[d] <= 48u ? seqs.dr_tune[d] : 24u, dec = seqs.dr_dec[d] & 127u;
     const dr_sound_t *sd = &DR_SOUND[sound & 3u];
-    if (!seqs.dr_lvl[d])
+    if (!seqs.dr_lvl[d] || live_mute >> d & 1u)
         return;
     drv[d].d = sd->d;
     drv[d].n = sd->n;
@@ -1035,7 +1059,7 @@ static void drum_hit(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR) a
 
 static void drum_flam(uint32_t vel, uint32_t at)   /* (the ISR) a flam from frame at: the snare, then softer */
 {
-    if (!seqs.dr_lvl[1])
+    if (!seqs.dr_lvl[1] || live_mute >> LM_SNARE & 1u)
         return;
     drum_hit(DR_SNARE_S, FLAM_VEL, at);         /* (the second: the snare's voice set up, then moved to its own) */
     drv[DRUMS] = drv[1];
@@ -1207,8 +1231,30 @@ static void seq_tick(uint32_t bi, uint32_t len)  /* a step's time: a count-in's 
 
 static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
 {
-    const pattern_t *p = &seqs.pat[seq.at.pat % SEQ_PATS], *pn;
-    uint32_t k = seq.at.pos % 64u, kn, l, accent = p->trig[k] == SEQ_ACCENT;
+    const pattern_t *p, *pn;
+    uint32_t k, kn, l, accent, at_bar = seq.n % (4u * (eg.seq_spb ? eg.seq_spb : 4u)) == 0u;   /* (a bar: 4 beats) */
+    if (seq_swap == 1u && (seq_at_bar ? at_bar : seq.at.pos == 0u)) {   /* another patch's sequencer takes over, from
+                                                                          * its top */
+        memcpy(&seqs, &seqs_next, sizeof seqs);
+        seq.at.pos = seq.at.entry = seq.at.rep = 0;
+        seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
+        seq_at_bar = 0;
+        seq_swap = 2;
+    }
+    if (at_bar && seq_qpat >= 0) {              /* LIVE: a pattern, from its top (a song stops: PATTERN mode) */
+        seqs.mode = 0;
+        seqs.cur = (uint8_t)(seq_qpat % (int8_t)SEQ_PATS);
+        seq.at.pat = seqs.cur;
+        seq.at.pos = seq.at.entry = seq.at.rep = 0;
+        seq_qpat = -1;
+    }
+    if (at_bar && seq_barq) {
+        seq_barq = 0;
+        seq_bar_hit = 1;
+    }
+    p = &seqs.pat[seq.at.pat % SEQ_PATS];
+    k = seq.at.pos % 64u;
+    accent = p->trig[k] == SEQ_ACCENT;
     seq.playing = k;
     seq.playing_pat = seq.at.pat;
     seq.entry = seq.at.entry;
@@ -1221,7 +1267,10 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
     for (l = 0; l < SEQ_LANES; l++) {
         uint32_t note, vel, nn, nv, st = seq_lane(p, k, l, &note, &vel), tie_next = seq_lane(pn, kn, l, &nn, &nv) == SEQ_TIE;
         int32_t v = seq.v[l];
-        if (seq.rec_mute >> l & 1u)             /* (a key is recording into this lane: it plays itself) */
+        if (seq.rec_mute >> l & 1u && (!patch.split || part_of(note) == (seq.rec_part >> l & 1u)))
+            st = SEQ_REST, tie_next = 0;        /* (a key is recording into this lane: it plays itself; the other */
+                                                /*  part's notes in it play on) */
+        if (st != SEQ_REST && seqs.part_mute[part_of(note)])   /* (its part muted) */
             st = SEQ_REST, tie_next = 0;
         if (accent && st == SEQ_NOTE)
             vel = 127u;
@@ -1367,6 +1416,7 @@ static void arp_run(uint32_t nb)
                 seq.at.pos = seq.at.entry = seq.at.rep = 0;   /* (the sequencer: from its first step) */
                 seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
                 seq.count = -1; seq.wait = -1;
+                seq.n = 0;                      /* (its bars from here: the metronome, LIVE's changes) */
                 l2_restart = 1;
             } else if (st == 0xFBu) {           /* CONTINUE */
                 mc.running = 1;
@@ -1565,6 +1615,8 @@ static void engine_render(int32_t *out, uint32_t n)
                 if (eg.l2_dest == DEST_LVL1 + o)   /* LFO 2 on the MIX page's level */
                     lvl = (eg.lvl_osc[o] * PR_CURVE_Q15[knob_moved(eg.lvl_mix[o], pz2)]) >> 15;
                 int32_t e1_to, e2_to, e1, e2, d1, d2;
+                if (!(voice[v].omask >> o & 1u) || live_mute >> (LM_OSC1 + o) & 1u)
+                    lvl = 0;                    /* (the split: the other side's oscillator; LIVE: muted) */
                 if (m.mix)                      /* the LFO's MIX: one oscillator down as the other stays */
                     lvl = (lvl * (32767 - (o ? (m.mix < 0 ? -m.mix : 0) : (m.mix > 0 ? m.mix : 0)))) >> 15;
                 am1 = eg.m_amt[o][0] + m.amt[o];
@@ -1626,7 +1678,8 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].ph[o][1] = p1;
                 voice[v].ph[o][2] = p2;
             }
-            if (eg.n_lvl) {                     /* the noise (its clock follows the note: pitch, glide, bend) */
+            if (eg.n_lvl && !(live_mute >> LM_NOISE & 1u)) {   /* the noise (its clock follows the note: pitch, glide, */
+                                                /* bend) */
                 uint32_t ni = NOISE_RATED(eg.n_type) ? rate_moved(voice[v].n_inc, m.pitch16[0] + (voice[v].glide_q8 >> 8)) : 0u;
                 noise_block(&voice[v].ns, eg.route[2] ? dir : acc, eg.n_lvl, eg.n_type == NOISE_DIGI ? (uint32_t)(((uint64_t)ni * 93u) >> 16)
                                                                                : (uint32_t)(((uint64_t)ni * 16u) >> 16));
@@ -1663,7 +1716,7 @@ static void engine_render(int32_t *out, uint32_t n)
                     ic1 = 2048;                 /* (nothing in it yet: a nudge, as an analog filter's noise; it grows */
                                                 /*  from there to its level, down to the lowest cutoffs) */
                 voice[v].hp_gs = hg = glide(voice[v].hp_gs, hp_g);
-                c = cut_at(voice[v].note, fe, voice[v].f_cs + (m.cut << 8), f_env);
+                c = cut_at((uint32_t)(voice[v].note + voice[v].shift), fe, voice[v].f_cs + (m.cut << 8), f_env);
                 if (comb) {                     /* the comb: the cutoff (keytracked, the envelope, the mods) -> a delay */
                     int32_t p16 = eg.comb_p16 + ((c - voice[v].f_cs) >> 6)   /* (its own CUT scale: in tune) */
                                 + ((((voice[v].glide_q8 >> 8) + m.pitch16[0]) * eg.f_key) >> 8);
@@ -1853,9 +1906,15 @@ static uint32_t pitch_q16(uint32_t o)           /* the oscillator's tuning: fine
     return f;
 }
 
-static void voice_tune(uint32_t v)              /* the operators' phase steps for the voice's note */
-{
-    uint32_t base = INC_C9[voice[v].note % 12u] >> (10u - voice[v].note / 12u), o, k;
+static void voice_tune(uint32_t v)              /* the operators' phase steps for the voice's note (on its side of */
+{                                               /* the split: that oscillator alone, that side's octave) */
+    int32_t sd = (int32_t)part_of(voice[v].note), sh = patch.split ? ((int32_t)(patch.split_oct[sd] <= 4u ? patch.split_oct[sd] : 2u) - 2) * 12 : 0;
+    int32_t nt = (int32_t)voice[v].note + sh;
+    uint32_t base, o, k;
+    if (nt < 0 || nt > 127) { sh = 0; nt = voice[v].note; }   /* (off the end: as played) */
+    voice[v].shift = (int8_t)sh;
+    voice[v].omask = (uint8_t)(patch.split ? 1u << sd : 3u);
+    base = INC_C9[(uint32_t)nt % 12u] >> (10u - (uint32_t)nt / 12u);
     for (o = 0; o < NOSC; o++) {
         uint64_t f = ((uint64_t)base * pitch_q16(o)) >> 16;
         for (k = 0; k < NOP; k++) {
@@ -2169,7 +2228,11 @@ static void engine_click(uint32_t mode, uint32_t lvl, uint32_t rec)   /* the met
     clk_set.lvl = (uint8_t)lvl;
     clk_set.rec = (uint8_t)rec;
 }
-static void engine_seq_mute(uint32_t lanes) { seq.rec_mute = (uint8_t)lanes; }   /* lanes that rest (recording) */
+static void engine_seq_mute(uint32_t lanes, uint32_t parts)   /* lanes that rest (recording), each its key's part */
+{
+    seq.rec_part = (uint8_t)parts;
+    seq.rec_mute = (uint8_t)lanes;
+}
 
 /* the step a note played now falls on (recording): the one playing, or the next once past its middle; and its count
  * (seq.steps: the one playing is steps - 1). 0: the sequencer is not playing */

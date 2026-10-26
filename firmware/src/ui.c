@@ -15,8 +15,10 @@
  *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
- *   HOME             the oscilloscope (KNOB1: how many cycles); HOME again, ALGORITHM or a page button: back
- *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / INIT, KNOB1 = the slot, SAVE again = do it
+ *   HOME             the oscilloscope (KNOB1: how many cycles); ALGORITHM or a page button: back; HOME again: LIVE
+ *                    (the first 4 black keys a pattern, the first 8 white keys a patch, from the next bar line; KNOB1 ..
+ *                    KNOB4 the parameters chosen for them: SELECT a knob, PRESETS its parameter); HOME there: back
+ *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / SOUND / INIT, KNOB1 = the slot, SAVE again = do it
  *                    (twice over a used slot or unsaved changes); HOME or a page = back
  *
  * The screen, top to bottom: the header (the page and the row; the page number and the CPU), the page's graphic
@@ -62,13 +64,15 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_SCHORD, K_SVEL,
        K_CLICK, K_CLKLVL,
        K_NTYPE, K_NCOL, K_ROUTE,                /* (the noise; the routing) */
-       K_DRUM, K_DCUR, K_DHIT, K_DCLR, K_DNUM, K_DSEMI, K_DDEC };   /* (the DRUM page: the lane, its cursor, the step's hit;
+       K_DRUM, K_DCUR, K_DHIT, K_DCLR, K_DNUM, K_DSEMI, K_DDEC,
+       K_SPLIT, K_SPOCT, K_SLEARN,              /* (the split: its note, a side's octave; LEARN: the next key sets it) */
+       K_SMUTE, K_SPCLR };                      /* (the SEQ page's PARTS: a part muted (off in seqs_t), cleared (off: 1, 2)) */   /* (the DRUM page: the lane, its cursor, the step's hit;
                                                  * K_DNUM .. K_DDEC: the kit's bytes, off in seqs_t) */   /* (the SEQ page's CLICK row: settings, gset) */   /* (K_SCHORD: off = the lane - 1) */   /* (the step kinds: the step under the cursor; K_MPIT, K_MFINE: off = the modulator, 0 / 1) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
 
-/* the global settings (not the sound: the SETUP page, the octave, the slot), kept in the settings sector by the app.
+/* the global settings (not the sound: the SETUP page, the octave, the slots), kept in the settings sector by the app.
  * Fields go at the end: an older, shorter record still loads (prysm.c) */
 typedef struct {
     int8_t oct, slot;                           /* the octave (-2 .. 2), the last slot saved or loaded (-1: none) */
@@ -78,10 +82,17 @@ typedef struct {
     uint8_t bend;                               /* MIDI pitch bend's range: 0 .. 24 semitones */
     uint8_t click;                              /* the metronome: 0 OFF, 1 ON, 2 REC (only while recording) */
     uint8_t click_lvl;                          /* its level, 0 .. 127 */
+    int8_t seq_slot;                            /* whose sequencer plays: a slot, -1 the store's own (patches.c) */
+    uint8_t pad;
+    uint16_t knob[4];                           /* the LIVE screen's KNOB1 .. KNOB4: the byte of patch_t each turns */
 } gset_t;
 #define GSET_V1_SIZE 5u                         /* (before bend) */
 #define GSET_V2_SIZE 6u                         /* (before click) */
-static gset_t gset = {0, -1, 0, 0, 0, 2, 0, 80};
+#define GSET_V3_SIZE 8u                         /* (before seq_slot: the sound's slot's then) */
+#define GSET_V4_SIZE 9u                         /* (before the knobs: LV_KNOBS then) */
+#define LV_KNOBS {__builtin_offsetof(patch_t, cut), __builtin_offsetof(patch_t, res), __builtin_offsetof(patch_t, dly_mix), \
+                  __builtin_offsetof(patch_t, rev_mix)}
+static gset_t gset = {0, -1, 0, 0, 0, 2, 0, 80, -2, 0, LV_KNOBS};
 static uint8_t gset_dirty;                      /* changed: the app saves it (when quiet) */
 #define G 3u                                    /* (page_t.osc: the page edits gset) */
 #define GO(f) ((uint16_t)__builtin_offsetof(gset_t, f))
@@ -165,6 +176,8 @@ static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cu
                  {"DIV", 0, DIV_N - 1u, K_SDIV}, {"GATE", 0, 127, K_SGATE}}, LIT_ENV},
     {"EDIT", {{"ROW", 0, 4, K_SROW}, {"COPY", 0, 1, K_SCOPY},   /* (ROW 5: ALL, the whole pattern) */
               {"PASTE", 0, 1, K_SPASTE}, {"CLEAR", 0, 1, K_SCLEAR}}, LIT_CURVE},
+    {"PARTS", {{"MUTE1", SO(part_mute[0]), 1, K_SMUTE}, {"MUTE2", SO(part_mute[1]), 1, K_SMUTE},   /* (the split's: */
+               {"CLR1", 1, 1, K_SPCLR}, {"CLR2", 2, 1, K_SPCLR}}, LIT_CURVE},   /* the EDIT row's ROW of them) */
     {"CLICK", {{"CLICK", 0, 2, K_CLICK}, {"LEVEL", 0, 127, K_CLKLVL}, NOPRM, NOPRM}, LIT_CURVE},
     {"SONG", {{"MODE", 0, 1, K_SMODE}, {"LENGTH", 0, SONG_N, K_SONGLEN},
               {"BPM", PO(arp_bpm), 200, K_BPM}, {"INIT", 0, 1, K_SINIT}}, LIT_ALL},
@@ -199,6 +212,8 @@ static const row_t MIX_ROWS[] = {
     {"ROUTE", {{"OSC1", PO(route[0]), ROUTE_N - 1u, K_ROUTE}, {"OSC2", PO(route[1]), ROUTE_N - 1u, K_ROUTE},
                {"NOISE", PO(route[2]), ROUTE_N - 1u, K_ROUTE}, {"N.LVL", PO(noise_lvl), 127, K_NUM}}, LIT_RT},
     {"GLIDE", {{"TIME", PO(glide), 127, K_NUM}, {"MODE", PO(glide_mode), GLIDE_N - 1u, K_GLIDEM}, NOPRM, NOPRM}, LIT_ALL},
+    {"SPLIT", {{"KEY", PO(split), 127, K_SPLIT}, {"OCT1", PO(split_oct[0]), 4, K_SPOCT},   /* (below it OSC 1, from */
+               {"OCT2", PO(split_oct[1]), 4, K_SPOCT}, {"LEARN", 0, 1, K_SLEARN}}, LIT_ALL},   /* it OSC 2) */
 };
 static const row_t DRUM_ROWS[] = {               /* (the drums' lanes of the pattern edited; the kit, for all of them) */
     {"STEP", {{"DRUM", 0, DRUMS - 1u, K_DRUM}, {"STEP", 0, 63, K_DCUR}, {"HIT", 0, 3, K_DHIT},
@@ -251,11 +266,12 @@ static uint8_t seq_row;                         /* the EDIT row's row: 0..3, 4 =
 static uint8_t song_cursor;                     /* the ENTRY row's entry (0..15) */
 static uint8_t seqs_dirty;                      /* the patterns changed: the app saves them (when quiet) */
 static uint8_t ui_none;                         /* (an action's knob: no value of its own) */
+static uint8_t split_learn;                     /* the MIX page's LEARN: the next key sets the split (not played) */
 static uint8_t clip_rows, clip_len;             /* the clipboard: 0 empty, 1 a row of 16, 4 a whole pattern (its length) */
 static uint8_t clip_note[64], clip_trig[64], clip_slide[64], clip_vel[64];
 static uint8_t clip_xnote[64][SEQ_LANES - 1u], clip_xvel[64][SEQ_LANES - 1u];
 static uint8_t chord_ui[SEQ_LANES - 1u];        /* the CHORD row's knobs: lane l's note + 1 (0: none), from the step */
-enum { SR_STEP, SR_CHORD, SR_PATTERN, SR_EDIT, SR_CLICK, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
+enum { SR_STEP, SR_CHORD, SR_PATTERN, SR_EDIT, SR_PARTS, SR_CLICK, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
 static uint32_t seq_arm, seq_arm_at;            /* a CLEAR ALL or INIT asked once: its kind, when (turn again to do it) */
 static pattern_t *seq_ed(void) { return &seqs.pat[seqs.cur % SEQ_PATS]; }   /* the pattern edited */
 static uint8_t dr_sel;                          /* the DRUM page: the lane (KICK, SNARE, HAT) */
@@ -267,7 +283,8 @@ static void rec_end(void);
 static int seq_kind(uint32_t k)                 /* a parameter of the sequencer's own (seqs), not of the sound */
 {
     return k == K_SNOTE || k == K_STRIG || k == K_SSLIDE || k == K_SLEN || (k >= K_SPAT && k <= K_SINIT) ||
-           k == K_SCHORD || k == K_SVEL || k == K_DHIT || k == K_DCLR || k == K_DNUM || k == K_DSEMI || k == K_DDEC;
+           k == K_SCHORD || k == K_SVEL || k == K_DHIT || k == K_DCLR || k == K_DNUM || k == K_DSEMI || k == K_DDEC ||
+           k == K_SMUTE || k == K_SPCLR;
 }
 
 /* the RATIO row's MOD1, MOD2 when that modulator is in MIX or RING: heard, so a pitch (semitones), not a ratio */
@@ -321,7 +338,8 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_DCUR: return &dr_cursor;
     case K_DHIT: dr_hit_ui = (uint8_t)drum_at(seq_ed(), dr_sel, dr_cursor); return &dr_hit_ui;
     case K_DCLR: ui_none = 0; return &ui_none;
-    case K_DNUM: case K_DSEMI: case K_DDEC: return (uint8_t *)&seqs + p->off;   /* (the kit) */
+    case K_DNUM: case K_DSEMI: case K_DDEC: case K_SMUTE: return (uint8_t *)&seqs + p->off;   /* (the kit; the mutes) */
+    case K_SLEARN: case K_SPCLR: ui_none = 0; return &ui_none;
     case K_MPIT: return &edit.mpitch[PAGES[pg].osc == 2u][p->off & 1u];   /* (the OSC pages: their oscillator's) */
     case K_MFINE: return &edit.mfine[PAGES[pg].osc == 2u][p->off & 1u];
     default: break;
@@ -330,6 +348,55 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
         return (uint8_t *)&gset + p->off;
     base = PAGES[pg].osc ? (PAGES[pg].osc - 1u) * (uint32_t)sizeof edit.osc[0] : 0u;
     return (uint8_t *)&edit + p->off + base;
+}
+
+/* ---- the LIVE screen (HOME twice): the first 4 black keys a pattern, the first 8 white keys a patch (its sound and
+ * its sequencer), each from the next bar line while the sequencer plays (engine.c: seq_qpat, seq_swap, seq_bar_hit;
+ * at once while stopped); KNOB1 .. KNOB4 the parameters of the sound chosen for them (gset.knob: SELECT a knob, PRESETS
+ * its parameter, from every page's, each once) */
+#define PG_LIVE (PG_N + 2u)
+enum { LV_PLAY, LV_K1, LV_N = LV_K1 + 4 };
+static const char *const LV_NAME[LV_N] = {"PLAY", "K1", "K2", "K3", "K4"};
+static uint32_t lv_row;                         /* SELECT: PLAY, or the knob PRESETS chooses for */
+static int8_t lv_qslot = -1, lv_qpat = -1;      /* waiting for the bar line: a slot, a pattern (-1: none) */
+static uint8_t lv_has_seq;                      /* the slot waiting has a sequencer of its own (taken over with it) */
+static patch_t lv_next;                         /* its sound */
+static const prm_t NO_PRM = NOPRM;
+
+static int32_t prm_byte(uint32_t pg, const prm_t *p)   /* the byte of the sound it turns (in patch_t; -1: not the sound's) */
+{
+    const uint8_t *v;
+    if (p->kind == K_NONE || seq_kind(p->kind) || PAGES[pg].osc == G)
+        return -1;
+    v = pval(pg, p);
+    return v >= (const uint8_t *)&edit && v < (const uint8_t *)&edit + sizeof edit ? (int32_t)(v - (const uint8_t *)&edit) : -1;
+}
+/* the sound's parameters in page order, each once: the n-th (n >= 0), or the one turning byte off (off >= 0); its page,
+ * row and knob, and its place in the list (-1: none). Both -1: how many there are */
+static int32_t lv_walk(int32_t n, int32_t off, uint32_t *pg, uint32_t *r, uint32_t *k)
+{
+    uint8_t seen[(sizeof(patch_t) + 7u) / 8u];
+    uint32_t a, b, c;
+    int32_t i = 0;
+    memset(seen, 0, sizeof seen);
+    for (a = 0; a < PG_N; a++)
+        for (b = 0; b < PAGES[a].n; b++)
+            for (c = 0; c < 4u; c++) {
+                int32_t o = prm_byte(a, &PAGES[a].rows[b].p[c]);
+                if (o < 0 || seen[o >> 3] >> (o & 7) & 1u)
+                    continue;
+                seen[o >> 3] |= (uint8_t)(1u << (o & 7));
+                if (i == n || o == off) { *pg = a; *r = b; *k = c; return i; }
+                i++;
+            }
+    return n < 0 && off < 0 ? i : -1;
+}
+static const prm_t *knob_prm(uint32_t i, uint32_t *pg)   /* knob i's parameter and its page: the row's; LIVE: its own */
+{
+    uint32_t r, k;
+    if (page != PG_LIVE) { *pg = page; return prm_of(page, row[page], i); }
+    if (lv_walk(-1, gset.knob[i & 3u], pg, &r, &k) < 0) { *pg = PG_FILTER; return &NO_PRM; }
+    return prm_of(*pg, r, k);               /* (a RATIO as PIT when its modulator is in MIX or RING) */
 }
 
 /* ---- text */
@@ -343,6 +410,7 @@ static char *num(char *s, uint32_t v)
     *s = 0;
     return s;
 }
+static int name_eq(const char *a, const char *b) { while (*a && *a == *b) a++, b++; return *a == *b; }
 static char *snum(char *s, int32_t v)           /* signed, with its sign (0 without) */
 {
     if (v > 0) *s++ = '+';
@@ -380,6 +448,10 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_DMS: put(num(s, (441u + (uint32_t)*v * (DLY_N - 1100u) / 127u) * 1000u / 44100u), "ms"); break;
     case K_PMS: put(num(s, (1u + (uint32_t)*v * (PRE_N - 2u) / 127u) * 1000u / 44100u), "ms"); break;
     case K_SHIFT: put(snum(s, (int32_t)*v - 12), "st"); break;
+    case K_SPOCT: snum(s, (int32_t)*v - 2); break;
+    case K_SLEARN: put(s, split_learn ? "PRESS" : "TURN"); break;
+    case K_SMUTE: put(s, *v ? "MUTE" : "PLAY"); break;
+    case K_SPCLR: put(s, "TURN"); break;
     case K_ARPM: put(s, ARP_NAME[*v < ARP_N ? *v : 0u]); break;
     case K_DIV: put(s, DIV_NAME[*v < DIV_N ? *v : DIV_16]); break;
     case K_OCT: num(s, *v + 1u); break;
@@ -399,10 +471,11 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_CLK: put(s, *v ? "MIDI" : "INT"); break;
     case K_BEND: if (*v) put(num(put(s, "+-"), *v), "st"); else put(s, "OFF"); break;
     case K_CURSOR: num(s, *v + 1u); break;
-    case K_SNOTE: case K_SCHORD: {
+    case K_SNOTE: case K_SCHORD: case K_SPLIT: {
         static const char *const NM[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
         uint32_t n = p->kind == K_SCHORD ? *v - 1u : *v;
         if (p->kind == K_SCHORD && !*v) { put(s, "--"); break; }
+        if (p->kind == K_SPLIT && !*v) { put(s, "OFF"); break; }
         num(put(s, NM[n % 12u]), n / 12u ? n / 12u - 1u : 0u);
         break;
     }
@@ -935,7 +1008,7 @@ static void gfx_seq(uint32_t lit)
         if (eg.seq_play && k == seq.playing && seq.playing_pat == seqs.cur % SEQ_PATS)   /* the step playing */
             cv_rect(x, y + 24, 12, 2, C_BRIGHT);
     }
-    if (row[PG_SEQ] == SR_EDIT) {               /* EDIT: its row (or all of them) */
+    if (row[PG_SEQ] == SR_EDIT || row[PG_SEQ] == SR_PARTS) {   /* EDIT (PARTS: CLEAR's): its row (or all of them) */
         int32_t y0 = seq_row < 4u ? (int32_t)seq_row * 30 : 0, h = seq_row < 4u ? 30 : 120;
         cv_frame(0, y0, 240, h, C_BRIGHT);
     }
@@ -966,6 +1039,14 @@ static void gfx_mix(uint32_t lit)               /* the three sources' levels, ea
     e = put(s, "GLIDE ");
     if (edit.glide) put(e, edit.glide_mode == GLIDE_LEGATO ? "LEGATO" : "ALWAYS"); else put(e, "OFF");
     cv_text(4, 102, &FONT_S, s, edit.glide ? C_MID : C_FAINT);
+    {                                           /* the split: OSC 1 below the key, OSC 2 from it */
+        static const prm_t SP = {"KEY", 0, 127, K_SPLIT};
+        char nt[8];
+        fmt(nt, &SP, &edit.split);
+        if (edit.split) put(put(put(s, "OSC1 < "), nt), " < OSC2");
+        else put(put(s, "SPLIT "), nt);
+        cv_text(236 - text_w(&FONT_S, s), 102, &FONT_S, s, edit.split ? C_MID : C_FAINT);
+    }
 }
 
 /* the noise: the engine's own (noise_block, as a voice plays it at C4), its wave (a few ms) above, its spectrum
@@ -1103,6 +1184,7 @@ static void pop(const char *name, const char *val)
     dirty |= D_GFX;
 }
 
+static void draw_pop(void);
 static void draw_gfx(void)
 {
     uint32_t lit = PAGES[page].rows[row[page]].lit;
@@ -1139,6 +1221,12 @@ static void draw_gfx(void)
     case PG_DRUM: gfx_drum(lit); break;
     default: gfx_mix(lit);
     }
+    draw_pop();
+    cv_blit(0, G_Y);
+}
+
+static void draw_pop(void)                      /* (into the picture's canvas) */
+{
     if (fm1_ms < pop_until) {                   /* a knob turned: its name and value, large, in the top right corner */
         const felucca_font_t *f = text_w(&FONT_P, pop_val) <= 220 ? &FONT_P : &FONT_M;
         int32_t w = text_w(f, pop_val), nw = text_w(&FONT_S, pop_name), bw = (w > nw ? w : nw) + 16, x0, h = 24 + f->h;
@@ -1151,12 +1239,11 @@ static void draw_gfx(void)
         pop_drawn = 1;
     } else
         pop_drawn = 0;
-    cv_blit(0, G_Y);
 }
 
 #define PG_PATCH PG_N                           /* (the PATCH screen: not in ALGORITHM's round, only SAVE leads here) */
-enum { PA_SAVE, PA_LOAD, PA_INIT, PA_N };
-static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "INIT"};
+enum { PA_SAVE, PA_LOAD, PA_SOUND, PA_INIT, PA_N };   /* (LOAD: the sound and its sequencer; SOUND: the sound alone) */
+static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "SOUND", "INIT"};
 static uint32_t pa_row;
 
 /* ---- the header, the focus row, the tabs */
@@ -1166,7 +1253,7 @@ static void draw_hdr(void)
     int32_t x;
     uint32_t cpu = 0;
     cv_begin(240, 20, C_BLACK);
-    x = cv_text(4, 1, &FONT_S, page < PG_N ? PAGES[page].name : "PATCH", C_BRIGHT);
+    x = cv_text(4, 1, &FONT_S, page < PG_N ? PAGES[page].name : page == PG_LIVE ? "LIVE" : "PATCH", C_BRIGHT);
     if (page == PG_SEQ || page == PG_DRUM) {    /* the pattern edited, or the song (DRUM: its pattern) */
         if (seqs.mode && page == PG_SEQ) x = cv_text(x + 6, 1, &FONT_S, "SONG", C_BRIGHT);
         else { char t[4]; num(put(t, "P"), seqs.cur % SEQ_PATS + 1u); x = cv_text(x + 6, 1, &FONT_S, t, C_BRIGHT); }
@@ -1176,12 +1263,18 @@ static void draw_hdr(void)
         x = cv_text(x + 10, 1, &FONT_S, "REC", C_BLACK) + 4;
     }
     cv_line(x + 6, 5, x + 9, 9, C_FAINT); cv_line(x + 9, 9, x + 6, 13, C_FAINT);   /* > the row */
-    cv_text(x + 15, 1, &FONT_S, page < PG_N ? PAGES[page].rows[row[page]].name : PA_NAME[pa_row], C_MID);
+    cv_text(x + 15, 1, &FONT_S, page < PG_N ? PAGES[page].rows[row[page]].name : page == PG_LIVE ? LV_NAME[lv_row] :
+            PA_NAME[pa_row], C_MID);
     e = s;                                      /* the slot, and * for unsaved changes */
     if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
     else e = put(e, "-");
     if (modified()) e = put(e, "*");
     cv_text(176 - text_w(&FONT_S, s), 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
+    if (live_mute && page != PG_LIVE) {         /* (LIVE's mutes, on another page: M, inverted) */
+        x = 176 - text_w(&FONT_S, s) - 14;
+        cv_rect(x, 2, 11, 14, C_BRIGHT);
+        cv_text(x + 1, 1, &FONT_S, "M", C_BLACK);
+    }
     cv_batt(181, 5, fm1_batt(), 1);             /* the battery, before the CPU */
 #ifndef DINGHY_HOST
     cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak */
@@ -1196,16 +1289,18 @@ static void draw_hdr(void)
 
 static void draw_focus(void)                    /* the selected row: four labels, values (large), bars */
 {
-    uint32_t i;
+    uint32_t i, pg;
     cv_begin(240, FOC_H, C_BLACK);
     for (i = 0; i < 4u; i++) {
-        const prm_t *p = prm_of(page, row[page], i);
+        const prm_t *p = knob_prm(i, &pg);
         const uint8_t *v;
         char s[16];
         int32_t x = (int32_t)i * FOC_W, w;
+        if (page == PG_LIVE && lv_row == LV_K1 + i)
+            cv_frame(x + 1, 0, FOC_W - 2, FOC_H - 1, C_MID);   /* (the knob PRESETS chooses for) */
         if (p->kind == K_NONE)
             continue;
-        v = pval(page, p);
+        v = pval(pg, p);
         fmt(s, p, v);
         cv_text(x + (FOC_W - text_w(&FONT_S, prm_label(p))) / 2, 0, &FONT_S, prm_label(p), C_MID);
         if ((w = text_w(&FONT_M, s)) <= FOC_W - 4)
@@ -1308,10 +1403,11 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
     num(n, pa_slot + 1u);
     draw_hdr();
     cv_begin(240, FOC_H, C_BLACK);
-    e = pa_row == PA_SAVE ? put(s, "SAVE TO SLOT ") : pa_row == PA_LOAD ? put(s, "LOAD SLOT ") : put(s, "LOAD THE DEFAULT SOUND");
+    e = pa_row == PA_SAVE ? put(s, "SAVE TO SLOT ") : pa_row == PA_LOAD ? put(s, "LOAD SLOT ") :
+        pa_row == PA_SOUND ? put(s, "SOUND OF SLOT ") : put(s, "LOAD THE DEFAULT SOUND");
     if (pa_row != PA_INIT) {
         e = put(e, n);
-        if (pa_row == PA_LOAD && !bank.used[pa_slot]) put(e, " (EMPTY)");
+        if ((pa_row == PA_LOAD || pa_row == PA_SOUND) && !bank.used[pa_slot]) put(e, " (EMPTY)");
         if (pa_row == PA_SAVE && bank.used[pa_slot]) put(e, " (USED)");
     }
     cv_text((240 - text_w(&FONT_S, s)) / 2, 0, &FONT_S, s, C_MID);
@@ -1390,6 +1486,40 @@ static int seq_action(uint32_t kind)
     return kind == K_SINIT;
 }
 
+static void part_clear(uint32_t part)           /* PARTS' CLR1, CLR2: that part's notes (part_of: its side of the split; */
+{                                               /* no split: all of them are part 1's) in the EDIT row's ROW, or ALL */
+    pattern_t *pt = seq_ed();
+    uint32_t a = seq_row < 4u ? seq_row * 16u : 0u, n = seq_row < 4u ? 16u : 64u, k, l, nn, nv, sd = part - 1u, gone = 0;
+    char msg[16];
+    if (sd && !edit.split) { pop("CLR2", "SPLIT OFF"); return; }
+    for (k = a; k < a + n; k++)
+        for (l = 0; l < SEQ_LANES; l++) {       /* (the drums stay; the other part's notes too) */
+            if (seq_lane(pt, k, l, &nn, &nv) == SEQ_REST || (edit.split && part_of(nn) != sd))
+                continue;
+            if (!l) { pt->trig[k] = SEQ_REST; pt->slide[k] = 0; pt->vel[k] = 0; }
+            else { pt->xnote[k][l - 1u] = 0; pt->xvel[k][l - 1u] = 0; }
+            gone++;
+        }
+    num(put(msg, "PART "), part);
+    pop(gone ? "CLEARED" : "NOTHING IN", msg);
+    seqs_dirty = 1;
+    dirty |= D_GFX | D_ROWS;
+}
+
+static int ui_split_key(uint32_t note)          /* a key down: with LEARN, it sets the split (1: taken, not played) */
+{
+    char t[8];
+    static const prm_t SP = {"KEY", 0, 127, K_SPLIT};
+    if (!split_learn || note > 127u)
+        return 0;
+    split_learn = 0;
+    edit.split = (uint8_t)note;
+    fmt(t, &SP, &edit.split);
+    pop("SPLIT", t);
+    dirty |= D_HDR | D_GFX | D_ROWS;
+    return 1;
+}
+
 static void drum_clear(void)                    /* the DRUM page's CLEAR: the lane chosen, every step none (asks first) */
 {
     uint32_t k;
@@ -1460,24 +1590,271 @@ static uint32_t ui_drum_leds(void)             /* the keys' LEDs on the DRUM pag
     return lit | 1u << DRUM_KEY[dr_sel % DRUMS];
 }
 
+/* ---- each slot's sequencer (patches.c): LOAD brings it in, at once, or while one plays where its next pattern
+ * would start (engine.c, seq_swap); seqs_poll follows. While one waits, the one playing is not saved (seqs holds the
+ * old one: changes to it then are let go) */
+static void seqs_take(void)                     /* the one waiting: now */
+{
+    if (seq_swap == 1u) {
+        seq_swap = 0;
+        memcpy(&seqs, &seqs_next, sizeof seqs);
+        seq_swap = 2;
+    }
+}
+static void seqs_switch(uint32_t slot)          /* LOAD: slot's sequencer (the one playing is not saved first: its
+                                                 * changes not yet saved, when quiet, are let go; no flash write here) */
+{
+    seqs_dirty = 0;
+    seq_swap = 0;
+    seq_at_bar = 0;
+    lv_qslot = -1;                              /* (a patch LIVE had waiting: this one instead) */
+    seq_owner = (int32_t)slot;
+    if (seqs_fetch(slot) != 0) {                /* none of its own yet: it takes the one playing */
+        seqs_dirty = 1;
+        return;
+    }
+    if (eg.seq_play) seq_swap = 1;
+    else { seq_swap = 1; seqs_take(); }
+}
+static void seqs_poll(void)                     /* the main loop's: a sequencer taken over (a stop: now) */
+{
+    if (seq_swap == 1u && !eg.seq_play)
+        seqs_take();
+    if (seq_swap == 2u) {
+        seq_swap = 0;
+        seq_cursor = 0;
+        engine_set(&edit);                      /* (its step and gate) */
+        dirty |= D_ALL;
+    }
+}
+
+/* ---- the LIVE screen: what waits for the bar line, its picture, its keys */
+static int live_poll(void)                      /* the main loop's: the bar line came (or a stop): the patch waiting */
+{                                               /* comes in, its sound now; 1 = the sound changed */
+    int changed = 0;
+    if (!seq_bar_hit && !((lv_qslot >= 0 || lv_qpat >= 0) && !eg.seq_play))
+        return 0;
+    if (!eg.seq_play) {                         /* stopped: at once (the engine's part too) */
+        seqs_take();
+        if (lv_qpat >= 0) { seqs.mode = 0; seqs.cur = (uint8_t)(lv_qpat % (int8_t)SEQ_PATS); }
+        seq_qpat = -1;
+        seq_barq = 0;
+    }
+    seq_bar_hit = 0;
+    if (lv_qslot >= 0) {
+        edit = clean = lv_next;                 /* (unsaved changes to the sound playing: let go, as on a program change) */
+        cur_slot = lv_qslot;
+        seq_owner = lv_qslot;
+        slot_moved = 1;
+        seqs_dirty = lv_has_seq ? 0u : 1u;      /* (no sequencer of its own: the one playing becomes its) */
+        lv_qslot = -1;
+        seq_at_bar = 0;
+        changed = 1;
+    }
+    if (lv_qpat >= 0) {
+        lv_qpat = -1;
+        seqs_dirty = 1;                         /* (the pattern chosen, PATTERN mode: saved with the sequencer) */
+    }
+    dirty |= D_ALL;
+    return changed;
+}
+
+static const uint8_t LM_KEY[LM_N] = {13, 15, 17, 20, 22, 25};   /* the mutes' keys: F#4 G#4 A#4, C#5 D#5, F#5 */
+static const char *const LM_NAME[LM_N] = {"KICK", "SNARE", "HATS", "OSC 1", "OSC 2", "NOISE"};
+static int live_keys(uint32_t k)                /* the keys the LIVE screen takes (not played) */
+{
+    uint32_t i;
+    for (i = 0; i < LM_N; i++)
+        if (k == LM_KEY[i]) return 1;
+    return k < 13u && k != 10u;                 /* (the lowest octave but D#4) */
+}
+
+static void live_key(uint32_t k)                /* a key the LIVE screen takes */
+{
+    static const int8_t KEY[13] = {0, -1, 1, -2, 2, -3, 3, 4, -4, 5, 0x7F, 6, 7};   /* a patch 0..7; a pattern -1..-4 */
+    char t[16];
+    int32_t w = k < 13u ? KEY[k] : 0x7F;
+    uint32_t i;
+    for (i = 0; i < LM_N; i++)
+        if (k == LM_KEY[i]) {                   /* a mute, on / off */
+            live_mute ^= (uint8_t)(1u << i);
+            pop(LM_NAME[i], live_mute >> i & 1u ? "MUTE" : "ON");
+            dirty |= D_HDR | D_GFX;
+            return;
+        }
+    if (w == 0x7F)
+        return;
+    if (seq_bar_hit && live_poll())
+        engine_set(&edit);                      /* (the last bar's change first) */
+    if (w >= 0) {                               /* a patch: its sound and its sequencer */
+        uint32_t s = (uint32_t)w;
+        num(put(t, "SLOT "), s + 1u);
+        if (!bank.used[s]) { pop(t, "EMPTY"); return; }
+        if (lv_qslot == w) {                    /* pressed again: it stays as it is */
+            lv_qslot = -1;
+            seq_swap = 0;
+            seq_at_bar = 0;
+            pop(t, "CANCEL");
+            return;
+        }
+        if ((int32_t)s == cur_slot && (int32_t)s == seq_owner && lv_qslot < 0 && !modified())
+            return;                             /* (it plays already) */
+        patch_get(s, &lv_next);
+        seq_swap = 0;
+        lv_has_seq = seqs_fetch(s) == 0;
+        lv_qslot = (int8_t)s;
+        if (lv_has_seq) { seq_at_bar = 1; seq_swap = 1; }
+        seq_barq = 1;
+    } else {                                    /* a pattern, from its top */
+        uint32_t q = (uint32_t)(-w - 1);
+        num(put(t, "P"), q + 1u);
+        if (lv_qpat == (int8_t)q) {
+            lv_qpat = -1;
+            seq_qpat = -1;
+            pop(t, "CANCEL");
+            return;
+        }
+        if (!seqs.mode && seqs.cur == q && lv_qpat < 0)
+            return;
+        lv_qpat = (int8_t)q;
+        seq_qpat = (int8_t)q;
+        seq_barq = 1;
+    }
+    if (!eg.seq_play && live_poll())
+        engine_set(&edit);
+    dirty |= D_ALL;
+}
+
+static uint32_t live_leds(void)                 /* the lowest octave's LEDs: the pattern and the patch playing; what */
+{                                               /* waits, blinking */
+    static const uint8_t PAT_KEY[SEQ_PATS] = {1, 3, 5, 8}, SLOT_KEY[PATCH_SLOTS] = {0, 2, 4, 6, 7, 9, 11, 12};
+    uint32_t i, lit = 0, blink = (fm1_ms / 120u) & 1u, cur = seqs.mode ? (eg.seq_play ? seq.playing_pat : seqs.song_pat[0])
+                                                                     : seqs.cur;
+    lit |= (lv_qpat >= 0 ? blink : 1u) << PAT_KEY[(lv_qpat >= 0 ? (uint32_t)lv_qpat : cur) % SEQ_PATS];
+    if (lv_qpat >= 0 && !blink) lit |= 1u << PAT_KEY[cur % SEQ_PATS];
+    if (cur_slot >= 0) lit |= 1u << SLOT_KEY[cur_slot];
+    if (lv_qslot >= 0) lit = (lit & ~(1u << SLOT_KEY[lv_qslot])) | blink << SLOT_KEY[lv_qslot];
+    for (i = 0; i < LM_N; i++)                  /* the mutes' keys: lit while on, flashing while muted */
+        lit |= (live_mute >> i & 1u ? blink : 1u) << LM_KEY[i];
+    return lit;
+}
+static uint32_t live_led_keys(void)             /* (the LEDs live_leds sets) */
+{
+    uint32_t i, m = 0x1FFFu & ~(1u << 10);
+    for (i = 0; i < LM_N; i++) m |= 1u << LM_KEY[i];
+    return m;
+}
+
+static uint32_t lv_drawn = ~0u, lv_blink;
+static void live_draw_gfx(void)                 /* the patterns, the patches, the bar, a hint, the knobs' pages */
+{
+    uint32_t i, blink = (fm1_ms / 120u) & 1u, pg, r, k, spb = eg.seq_spb ? eg.seq_spb : 4u;
+    uint32_t cur = seqs.mode ? (eg.seq_play ? seq.playing_pat : seqs.song_pat[0]) : seqs.cur;
+    char t[40], *e;
+    lv_drawn = seq.steps;
+    lv_blink = blink;
+    cv_begin(240, G_H, C_BLACK);
+    cv_text(4, 0, &FONT_S, "PATTERN", C_FAINT);
+    cv_text(236 - text_w(&FONT_S, seqs.mode ? "SONG" : "PATT"), 0, &FONT_S, seqs.mode ? "SONG" : "PATT", C_MID);
+    for (i = 0; i < SEQ_PATS; i++) {            /* the one playing filled; the one waiting framed, blinking */
+        int32_t x = 4 + (int32_t)i * 59;
+        num(put(t, "P"), i + 1u);
+        if (i == cur % SEQ_PATS) cv_rect(x, 16, 55, 22, C_BRIGHT);
+        else cv_frame(x, 16, 55, 22, C_BOX);
+        if (lv_qpat == (int8_t)i && blink) { cv_frame(x - 1, 15, 57, 24, C_BRIGHT); cv_frame(x, 16, 55, 22, C_BRIGHT); }
+        cv_text(x + (55 - text_w(&FONT_S, t)) / 2, 19, &FONT_S, t, i == cur % SEQ_PATS ? C_BLACK : C_MID);
+    }
+    cv_text(4, 40, &FONT_S, "PATCH", C_FAINT);
+    for (i = 0; i < LM_N; i++) {                /* the mutes: on filled, muted dim */
+        static const char *const SH[LM_N] = {"BD", "SD", "HH", "O1", "O2", "NZ"};
+        int32_t x = 84 + (int32_t)i * 26, on = !(live_mute >> i & 1u);
+        if (on) cv_rect(x, 40, 22, 14, C_MID);
+        else cv_frame(x, 40, 22, 14, C_SEL);
+        cv_text(x + 3, 39, &FONT_S, SH[i], on ? C_BLACK : C_FAINT);
+    }
+    for (i = 0; i < PATCH_SLOTS; i++) {
+        int32_t x = 4 + (int32_t)i * 29, on = (int32_t)i == cur_slot;
+        num(t, i + 1u);
+        if (on) cv_rect(x, 56, 26, 22, C_BRIGHT);
+        else cv_frame(x, 56, 26, 22, bank.used[i] ? C_BOX : C_SEL);
+        if (lv_qslot == (int8_t)i && blink) { cv_frame(x - 1, 55, 28, 24, C_BRIGHT); cv_frame(x, 56, 26, 22, C_BRIGHT); }
+        cv_text(x + (26 - text_w(&FONT_S, t)) / 2, 59, &FONT_S, t, on ? C_BLACK : bank.used[i] ? C_MID : C_FAINT);
+    }
+    for (i = 0; i < 4u; i++) {                  /* the bar: its beats, the one playing lit */
+        uint32_t beat = (seq.n ? seq.n - 1u : 0u) % (4u * spb) / spb;
+        cv_rect(4 + (int32_t)i * 59, 81, 55, 3, eg.seq_play && i == beat ? C_BRIGHT : C_BOX);
+    }
+    {                                           /* how to choose the knobs' parameters */
+        const char *h = lv_row >= LV_K1 ? "PRESETS: ITS PARAMETER" : "SELECT: CHOOSE A KNOB";
+        cv_text((240 - text_w(&FONT_S, h)) / 2, 87, &FONT_S, h, C_FAINT);
+    }
+    if (lv_row >= LV_K1) {                      /* the knob PRESETS chooses for: what it turns, in full */
+        const prm_t *p;
+        k = lv_row - LV_K1;
+        if (lv_walk(-1, gset.knob[k], &pg, &r, &i) >= 0) {
+            p = &PAGES[pg].rows[r].p[i];
+            e = put(num(put(t, "K"), k + 1u), ": ");
+            e = put(put(e, PAGES[pg].name), " ");
+            if (!name_eq(PAGES[pg].rows[r].name, PAGES[pg].name)) e = put(put(e, PAGES[pg].rows[r].name), " ");
+            put(e, p->label);
+            cv_text((240 - text_w(&FONT_S, t)) / 2, 106, &FONT_S, t, C_BRIGHT);
+        }
+    } else
+        for (i = 0; i < 4u; i++)                /* each knob's page, over its cell */
+            if (lv_walk(-1, gset.knob[i], &pg, &r, &k) >= 0)
+                cv_text((int32_t)i * FOC_W + (FOC_W - text_w(&FONT_S, PAGES[pg].name)) / 2, 106, &FONT_S, PAGES[pg].name,
+                        C_FAINT);
+    draw_pop();
+    cv_blit(0, G_Y);
+}
+
+static int live_input(uint32_t buttons)         /* SELECT: PLAY or a knob; PRESETS (on a knob): its parameter */
+{
+    int32_t d;
+    (void)buttons;
+    if ((d = fm1_enc_take(ENC_SELECT)) != 0) {
+        int32_t n = (int32_t)lv_row + d;
+        lv_row = (uint32_t)(n < 0 ? 0 : n >= LV_N ? LV_N - 1 : n);
+        dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
+    }
+    if (lv_row >= LV_K1 && (d = fm1_enc_take(ENC_PRESETS)) != 0) {
+        static uint32_t last;
+        uint32_t pg, r, k, kn = lv_row - LV_K1;
+        int32_t n = lv_walk(-1, -1, &pg, &r, &k), at = lv_walk(-1, gset.knob[kn], &pg, &r, &k);
+        at += fm1_ms - last < 60u ? d * 3 : d;  /* (fast: x 3) */
+        last = fm1_ms;
+        at = at < 0 ? 0 : at >= n ? n - 1 : at;
+        lv_walk(at, -1, &pg, &r, &k);
+        gset.knob[kn] = (uint16_t)prm_byte(pg, &PAGES[pg].rows[r].p[k]);
+        gset_dirty = 1;
+        dirty |= D_GFX | D_ROWS;
+    }
+    return 0;
+}
+
 static int pa_do(void)                          /* the SAVE button on the PATCH screen; 1 = the sound changed */
 {
     patch_t p;
-    if (pa_row == PA_SAVE) {
-        if (bank.used[pa_slot] && (int32_t)pa_slot != cur_slot && !pa_armed) {
-            pa_armed = 1;
-            pa_say("SLOT USED: SAVE AGAIN", 0);
+    if (pa_row == PA_SAVE) {                    /* the sound and the sequencer playing, into the slot */
+        if (bank.used[pa_slot] && ((int32_t)pa_slot != cur_slot || (int32_t)pa_slot != seq_owner) && !pa_armed) {
+            pa_armed = 1;                       /* (another slot's; or its sound came alone: its sequencer would go) */
+            pa_say((int32_t)pa_slot != cur_slot ? "SLOT USED: SAVE AGAIN" : "REPLACES ITS SEQ: SAVE AGAIN", 0);
             return 0;
         }
         pa_armed = 0;
+        seqs_take();                            /* (only this slot is written: the slot the sequencer came from keeps
+                                                 * what it last saved) */
         if (patch_save(pa_slot, &edit) != 0) { pa_say("SAVE FAILED", 0); return 0; }
         clean = edit;
         cur_slot = (int32_t)pa_slot;
         slot_moved = 1;
+        if (seqstore_save(pa_slot, &seqs, sizeof seqs) != 0) { pa_say("SEQ NOT SAVED", 0); return 0; }
+        seq_owner = (int32_t)pa_slot;
+        seqs_dirty = 0;
         pa_say("SAVED TO ", pa_slot + 1u);
         return 0;
     }
-    if (pa_row == PA_LOAD && patch_get(pa_slot, &p) != 0) {
+    if ((pa_row == PA_LOAD || pa_row == PA_SOUND) && patch_get(pa_slot, &p) != 0) {
         put(num(put(pa_msgbuf, "SLOT "), pa_slot + 1u), " IS EMPTY");
         pa_msg = pa_msgbuf;
         return 0;
@@ -1491,7 +1868,12 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
     if (pa_row == PA_LOAD) {
         edit = p;
         cur_slot = (int32_t)pa_slot;
+        seqs_switch(pa_slot);
         pa_say("LOADED ", pa_slot + 1u);
+    } else if (pa_row == PA_SOUND) {            /* (the sequencer plays on: try sounds over it) */
+        edit = p;
+        cur_slot = (int32_t)pa_slot;
+        pa_say("SOUND LOADED FROM ", pa_slot + 1u);
     } else {
         edit = PATCH_INIT;
         cur_slot = -1;
@@ -1617,12 +1999,12 @@ static void sc_text(void)                       /* the header: the note, the cyc
     e = put(s, "L WHITE   R GREY   x");
     num(e, sc_gain);
     draw_text_box(0, SC_Y + SC_H + 12u, 240, &FONT_S, s, C_FAINT, 1);
-    draw_text_box(0, 222, 240, &FONT_S, "KNOB1: CYCLES   HOME: BACK", C_FAINT, 1);
+    draw_text_box(0, 222, 240, &FONT_S, "KNOB1: CYCLES   HOME: LIVE", C_FAINT, 1);
 }
 
 static void ui_page(uint32_t pg)
 {
-    if (pg > PG_SCOPE) return;
+    if (pg > PG_LIVE) return;
     if (pg != page) lcd_fill(0, G_Y, 240, 240 - G_Y, C_BLACK);   /* (row counts differ: clear what was below) */
     if (pg == PG_SCOPE && page != PG_SCOPE)    /* in: from where HOME was pressed */
         sc_back = page == PG_PATCH ? pa_back : page;
@@ -1663,6 +2045,8 @@ static int ui_input(uint32_t buttons)
         dirty |= D_ALL;
         return (int)changed;
     }
+    if (page == PG_LIVE)                        /* (SELECT, and PRESETS when it chooses a knob's parameter) */
+        live_input(buttons);
     if (page != PG_PATCH && (d = fm1_enc_take(ENC_PRESETS)) != 0) {   /* PRESETS: the cutoff, from any page */
         static uint32_t last_cut;
         int32_t x = (int32_t)edit.cut + (fm1_ms - last_cut < 60u ? d * 3 : d);   /* (fast: x 3) */
@@ -1687,11 +2071,14 @@ static int ui_input(uint32_t buttons)
         }
         for (i = 1; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
         (void)fm1_enc_take(ENC_SELECT);
-        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
+        if (buttons & (1u << BTN_HOME)) { ui_page(PG_LIVE); return (int)changed; }   /* HOME again: LIVE */
+        if (fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
         if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return (int)changed; }
         if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
                          1u << BTN_SEQ)))
             return (int)changed;                /* (else a page button: on to that page, below) */
+    } else if (page == PG_LIVE) {               /* LIVE: HOME or ALGORITHM back to where HOME was first pressed */
+        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
     } else if (buttons & (1u << BTN_HOME) && page != PG_PATCH) {
         ui_page(PG_SCOPE);
         return (int)changed;
@@ -1725,7 +2112,7 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_GLO)) ui_page(page == PG_MIX ? PG_SETUP : PG_MIX);
     if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0)
         ui_page((uint32_t)(((int32_t)page + d % (int32_t)PG_N + (int32_t)PG_N) % (int32_t)PG_N));
-    if ((d = fm1_enc_take(ENC_SELECT)) != 0) {
+    if (page != PG_LIVE && (d = fm1_enc_take(ENC_SELECT)) != 0) {
         int32_t n = (int32_t)row[page] + d, max = PAGES[page].n - 1;
         row[page] = (uint32_t)(n < 0 ? 0 : n > max ? max : n);
         if (page == PG_DRUM && row[page] >= 1u && row[page] <= DRUMS)
@@ -1734,7 +2121,8 @@ static int ui_input(uint32_t buttons)
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
     for (i = 0; i < 4u; i++) {
-        const prm_t *p = prm_of(page, row[page], i);
+        uint32_t pg;
+        const prm_t *p = knob_prm(i, &pg);     /* (LIVE: the knob's own; pg its page) */
         uint8_t *v;
         int32_t x;
         if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE || (p->kind == K_BPM && gset.clock))
@@ -1742,7 +2130,8 @@ static int ui_input(uint32_t buttons)
         if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM ||
             p->kind == K_CLK || p->kind == K_STRIG || p->kind == K_SSLIDE || p->kind == K_SMODE ||
             p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT ||
-            p->kind == K_NTYPE || p->kind == K_ROUTE || p->kind == K_DRUM || p->kind == K_DHIT || p->kind == K_DCLR) {
+            p->kind == K_NTYPE || p->kind == K_ROUTE || p->kind == K_DRUM || p->kind == K_DHIT || p->kind == K_DCLR ||
+            p->kind == K_SLEARN || p->kind == K_SMUTE || p->kind == K_SPCLR || p->kind == K_SPOCT) {
             /* one step per two detents: no flicker */
             slow[i] += d;
             if (slow[i] > -2 && slow[i] < 2) continue;
@@ -1760,7 +2149,17 @@ static int ui_input(uint32_t buttons)
             drum_clear();
             continue;
         }
-        v = pval(page, p);
+        if (p->kind == K_SLEARN) {              /* the next key sets the split (a turn back: not) */
+            split_learn = d > 0;
+            pop("SPLIT", split_learn ? "PRESS A KEY" : "AS IT WAS");
+            dirty |= D_ROWS;
+            continue;
+        }
+        if (p->kind == K_SPCLR) {               /* a part's notes, in the EDIT row's ROW (or ALL) */
+            part_clear(p->off);
+            continue;
+        }
+        v = pval(pg, p);
         x = (int32_t)*v + d;
         {
             int32_t mn = p->kind == K_SLEN || p->kind == K_SONGLEN || p->kind == K_SEREP ? 1 : 0;
@@ -1806,7 +2205,7 @@ static int ui_input(uint32_t buttons)
             dirty |= D_GFX | D_ROWS;
             continue;
         }
-        if (PAGES[page].osc == G) {             /* a setting, not the sound: saved; the clock to the engine */
+        if (PAGES[pg].osc == G) {               /* a setting, not the sound: saved; the clock to the engine */
             gset_dirty = 1;
             engine_sync(gset.clock);
             dirty |= D_GFX | D_ROWS;
@@ -1827,6 +2226,7 @@ static int ui_input(uint32_t buttons)
 #define REC_N 8u
 static struct { uint8_t note, lane, vel, on; seqpos_t at; uint32_t ord; } rec[REC_N];   /* the keys recording */
 static uint8_t rec_lanes;                       /* the lanes they record into (the engine rests them) */
+static uint8_t rec_parts;                       /* (bit l: that lane's key's part: only its notes rest) */
 static uint8_t entry_n;                         /* step entry: the chord's keys still down, */
 static uint32_t entry_down[4];                  /* which (a bit a note) */
 
@@ -1872,7 +2272,8 @@ static int rec_down(uint32_t note, uint32_t vel)   /* 1: recorded */
     rec[i].at = at;
     rec[i].ord = ord;
     rec_lanes |= (uint8_t)(1u << pick);
-    engine_seq_mute(rec_lanes);
+    rec_parts = (uint8_t)((rec_parts & ~(1u << pick)) | part_of(note) << pick);
+    engine_seq_mute(rec_lanes, rec_parts);
     seqs_dirty = 1;
     return 1;
 }
@@ -1894,7 +2295,7 @@ static void rec_up(uint32_t i)                  /* key i let go: tied over the s
     }
     rec[i].on = 0;
     rec_lanes &= (uint8_t)~(1u << rec[i].lane);
-    engine_seq_mute(rec_lanes);
+    engine_seq_mute(rec_lanes, rec_parts);
     seqs_dirty = 1;
     dirty |= D_GFX;
 }
@@ -1954,7 +2355,8 @@ static void ui_seq_key_up(uint32_t note)        /* a key or MIDI note up */
     }
 }
 
-static void ui_init(int32_t slot)                /* the sound in that slot (the last one used), else the default */
+static void ui_init(int32_t slot, int32_t sslot)   /* the sound in that slot (the last one used), else the default;
+                                                    * the sequencer of sslot */
 {
     patches_load();
     edit = PATCH_INIT;
@@ -1963,6 +2365,19 @@ static void ui_init(int32_t slot)                /* the sound in that slot (the 
     if (seqs_fresh && cur_slot >= 0) {          /* (a bank from before the patterns: its sound's pattern is pattern 1) */
         seqs_from_slot((uint32_t)cur_slot);
         seqs_dirty = 1;
+    }
+    seqs_keep();
+    seqs_migrate();                             /* (from before 1.3: each used slot gets a copy) */
+    {                                           /* the LIVE knobs: each a parameter of the sound (else as at first) */
+        static const uint16_t KN[4] = LV_KNOBS;
+        uint32_t i, pg, r, k;
+        for (i = 0; i < 4u; i++)
+            if (lv_walk(-1, gset.knob[i], &pg, &r, &k) < 0) gset.knob[i] = KN[i];
+    }
+    if (sslot >= 0 && sslot < (int32_t)PATCH_SLOTS && bank.used[sslot]) {
+        seq_owner = sslot;
+        if (seqs_fetch((uint32_t)sslot) == 0) memcpy(&seqs, &seqs_next, sizeof seqs);
+        else seqs_dirty = 1;                    /* (none of its own: it takes this one) */
     }
     clean = edit;
     engine_set(&edit);
@@ -1992,6 +2407,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
         dirty |= D_GFX;                         /* (and the sequencer's) */
     if (page == PG_DRUM && dr_drawn != seq.steps)
         dirty |= D_GFX;                         /* (and the drums') */
+    if (page == PG_LIVE && (lv_drawn != seq.steps || ((lv_qslot >= 0 || lv_qpat >= 0) && lv_blink != ((fm1_ms / 120u) & 1u))))
+        dirty |= D_GFX;                         /* (LIVE: the bar's beat; what waits, blinking) */
     {
         static uint32_t bpm_drawn;
         if (gset.clock && (page == PG_ARP || page == PG_SETUP) && bpm_drawn != mc_bpm10 && fm1_ms - last_hdr < 5u) {
@@ -2004,6 +2421,14 @@ static void ui_draw(void)                       /* from the main loop: what chan
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;
+    if (page == PG_LIVE) {
+        if (dirty & D_HDR) draw_hdr();
+        if (dirty & D_GFX) live_draw_gfx();
+        if (dirty & (D_LEG | D_ROWS)) draw_focus();
+        if (dirty & D_LEG) tabs(LV_NAME, LV_N, lv_row);
+        dirty = 0;
+        return;
+    }
     if (page == PG_PATCH) {
         if (dirty & D_GFX) pa_draw_gfx();
         if (dirty & (D_ROWS | D_LEG)) pa_draw_text();   /* (not on the header's twice-a-second CPU refresh) */

@@ -1,0 +1,36 @@
+# the LIVE screen (tests/run_ui.sh): save the default to 1 and 2, HOME twice; a pattern while stopped (at once);
+# PLAY, then patch 1 and pattern 3 wait for the bar line (120 BPM: a bar is 2 s); a knob's parameter chosen, turned;
+# the kick and OSC 1 muted (F#4, C#5), then another page (its header: M)
+100 btn 9
+200 btn 9
+300 enc 2 1
+350 btn 9
+450 btn 8
+500 btn 8
+600 btn 8
+700 shot
+800 keys 0x8
+850 keys 0
+900 shot
+1000 btn 12
+1100 keys 0x1
+1150 keys 0
+1200 keys 0x20
+1250 keys 0
+1300 shot
+1420 shot
+3200 shot
+3300 enc 0 2
+3400 enc 6 5
+3500 shot
+3600 enc 3 10
+3700 shot
+3750 enc 0 -2
+3760 keys 0x2000
+3770 keys 0
+3780 keys 0x100000
+3790 keys 0
+3800 shot
+3850 btn 8
+3900 shot
+4000 end

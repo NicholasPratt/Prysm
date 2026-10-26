@@ -301,51 +301,69 @@ static void smk_trim_read(void)
 /* ---- the store (Prysm): up to STORE_MAX bytes (the patches), in two sectors written in turn, each
  * [magic][length][sequence][crc32] then the bytes. A save goes to the sector not holding the newest copy, so a cut
  * save (the power gone mid-erase) loses that save only, never what was there. Save when nothing plays (an erase
- * drops the sound for ~50 ms). */
+ * drops the sound for ~50 ms). Each patch slot's sequencer is kept the same way, in the first two sectors of
+ * store.h's slot of that number (seqstore_load / seqstore_save) */
 #define PRYSM_MAGIC 0x53595250u                 /* "PRYS" */
+#define PSEQ_MAGIC 0x51455350u                  /* "PSEQ": a slot's sequencer */
 #define STORE_MAX (0x1000u - 16u)
-static uint32_t store_seq, store_at;            /* the newest copy: its sequence and sector (0: none yet) */
-static int store_valid(uint32_t at, uint32_t n, uint32_t *seq)   /* the sector holds n good bytes: 1 */
+#define SEQSTORE_N 8u                           /* (one for each patch slot: patches.c) */
+_Static_assert(BOARD_SMK37 || SEQSTORE_N <= NSLOT, "a slot of store.h for each patch slot's sequencer");
+typedef struct { uint32_t a, magic, seq, at; } ab_t;   /* sectors a and a + 4 KiB; the newest copy: its sequence and
+                                                           sector (0: none yet) */
+static ab_t store_ab = {STORE_A, PRYSM_MAGIC, 0, 0};
+static ab_t seq_ab[SEQSTORE_N];
+static int ab_valid(uint32_t at, uint32_t magic, uint32_t n, uint32_t *seq)   /* the sector holds n good bytes: 1 */
 {
     static uint8_t buf[STORE_MAX];
     uint32_t h[4];
-    if (st_read(at, h, sizeof h) || h[0] != PRYSM_MAGIC || h[1] != n || n > STORE_MAX)
+    if (st_read(at, h, sizeof h) || h[0] != magic || h[1] != n || n > STORE_MAX)
         return 0;
     if (st_read(at + sizeof h, buf, n) || crc32(buf, n) != h[3])
         return 0;
     *seq = h[2];
     return 1;
 }
-static int store_load(void *p, uint32_t n)      /* 0: loaded the newest good copy; else p is untouched */
+static int ab_load(ab_t *s, void *p, uint32_t n)   /* 0: loaded the newest good copy; else p is untouched */
 {
-    uint32_t sa = 0, sb = 0, a, b;
+    uint32_t sa = 0, sb = 0, a, b, B = s->a + 0x1000u;
     if (!flash_ok || n > STORE_MAX)
         return -1;
-    a = (uint32_t)store_valid(STORE_A, n, &sa);
-    b = (uint32_t)store_valid(STORE_B, n, &sb);
+    a = (uint32_t)ab_valid(s->a, s->magic, n, &sa);
+    b = (uint32_t)ab_valid(B, s->magic, n, &sb);
     if (!a && !b)
         return -1;
-    store_at = a && (!b || (int32_t)(sa - sb) > 0) ? STORE_A : STORE_B;
-    store_seq = store_at == STORE_A ? sa : sb;
-    return st_read(store_at + 16u, p, n) ? -1 : 0;
+    s->at = a && (!b || (int32_t)(sa - sb) > 0) ? s->a : B;
+    s->seq = s->at == s->a ? sa : sb;
+    return st_read(s->at + 16u, p, n) ? -1 : 0;
 }
-static int store_save(const void *p, uint32_t n)   /* p in RAM; 0 = saved */
+static int ab_save(ab_t *s, const void *p, uint32_t n)   /* p in RAM; 0 = saved */
 {
-    uint32_t at = store_at == STORE_A ? STORE_B : STORE_A, h[4] = {PRYSM_MAGIC, n, store_seq + 1u, 0}, took;
+    uint32_t at = s->at == s->a ? s->a + 0x1000u : s->a, h[4] = {s->magic, n, s->seq + 1u, 0}, took;
     int rc;
     if (!flash_ok || n > STORE_MAX)
         return -1;
     h[3] = crc32(p, n);
+    fm1_wdt_feed();                             /* (~50 ms an erase) */
     if ((rc = fl_erase4k(at, &took)) != 0)
         return rc;
     if ((rc = fl_write(at + sizeof h, p, n)) != 0)
         return rc;
     if ((rc = fl_write(at, (const uint8_t *)h, sizeof h)) != 0)   /* the header last: a cut save stays invalid */
         return rc;
-    store_at = at;
-    store_seq = h[2];
+    s->at = at;
+    s->seq = h[2];
     return 0;
 }
+static int store_load(void *p, uint32_t n) { return ab_load(&store_ab, p, n); }
+static int store_save(const void *p, uint32_t n) { return ab_save(&store_ab, p, n); }
+static ab_t *seq_area(uint32_t i)
+{
+    ab_t *s = &seq_ab[i];
+    if (!s->a) { s->a = SLOTS_AT + i * SLOT_SECT * 0x1000u; s->magic = PSEQ_MAGIC; }
+    return s;
+}
+static int seqstore_load(uint32_t i, void *p, uint32_t n) { return i < SEQSTORE_N ? ab_load(seq_area(i), p, n) : -1; }
+static int seqstore_save(uint32_t i, const void *p, uint32_t n) { return i < SEQSTORE_N ? ab_save(seq_area(i), p, n) : -1; }
 
 /* ---- MIDI: USB and the TRS jack share one ring of 4-byte USB-MIDI packets (USB cable 0, the jack cable 1) */
 static int midi_get(uint8_t *st, uint8_t *d1, uint8_t *d2)   /* 1 (USB) or 2 (TRS): a message; 0: none */

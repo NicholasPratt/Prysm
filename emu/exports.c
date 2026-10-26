@@ -61,6 +61,9 @@ WEB void web_store_set_len(uint32_t n) { host_store2_n = n <= STORE_MAX ? n : 0u
 WEB uint8_t *web_settings(void) { return host_store; }
 WEB uint32_t web_settings_size(void) { return sizeof host_store; }
 WEB uint32_t web_store_gen(void) { return store_gen; }
+WEB uint8_t *web_seqstore(uint32_t i) { return host_seqs[i % SEQSTORE_N]; }   /* each slot's sequencer */
+WEB uint32_t web_seqstore_len(uint32_t i) { return i < SEQSTORE_N ? host_seqs_n[i] : 0u; }
+WEB void web_seqstore_set_len(uint32_t i, uint32_t n) { if (i < SEQSTORE_N) host_seqs_n[i] = n <= STORE_MAX ? n : 0u; }
 
 #include "params.c"                             /* the parameters (shared with the plugin) */
 WEB uint32_t web_nparams(void) { return prm_n(); }

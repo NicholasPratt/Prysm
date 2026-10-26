@@ -96,6 +96,23 @@ static int store_save(const void *p, uint32_t n)
     store_gen++;
     return 0;
 }
+#define SEQSTORE_N 8u                              /* each patch slot's sequencer (platform.c): here, in RAM */
+static uint8_t host_seqs[SEQSTORE_N][STORE_MAX];
+static uint32_t host_seqs_n[SEQSTORE_N];
+static int seqstore_load(uint32_t i, void *p, uint32_t n)
+{
+    if (i >= SEQSTORE_N || !host_seqs_n[i] || n != host_seqs_n[i]) return -1;
+    memcpy(p, host_seqs[i], n);
+    return 0;
+}
+static int seqstore_save(uint32_t i, const void *p, uint32_t n)
+{
+    if (i >= SEQSTORE_N || n > STORE_MAX) return -1;
+    memcpy(host_seqs[i], p, n);
+    host_seqs_n[i] = n;
+    store_gen++;
+    return 0;
+}
 
 static uint8_t mq[64][3];
 static uint32_t mq_w, mq_r;

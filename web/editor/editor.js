@@ -59,12 +59,20 @@ function restore() {                            // the patches and the settings,
     const s = localStorage.getItem("prysm.store"), g = localStorage.getItem("prysm.settings");
     if (s) { const b = unb64(s); M.HEAPU8.set(b, M._web_store()); M._web_store_set_len(b.length); }
     if (g) M.HEAPU8.set(unb64(g).subarray(0, M._web_settings_size()), M._web_settings());
+    for (let i = 0; i < 8; i++) {               // each slot's sequencer
+      const q = localStorage.getItem("prysm.seq" + i);
+      if (q) { const b = unb64(q); M.HEAPU8.set(b, M._web_seqstore(i)); M._web_seqstore_set_len(i, b.length); }
+    }
   } catch (e) { /* (no storage: a fresh FM-1) */ }
 }
 function keep() {
   try {
     const n = M._web_store_len();
     if (n) localStorage.setItem("prysm.store", b64(M.HEAPU8.subarray(M._web_store(), M._web_store() + n)));
+    for (let i = 0; i < 8; i++) {
+      const q = M._web_seqstore_len(i);
+      if (q) localStorage.setItem("prysm.seq" + i, b64(M.HEAPU8.subarray(M._web_seqstore(i), M._web_seqstore(i) + q)));
+    }
     localStorage.setItem("prysm.settings", b64(M.HEAPU8.subarray(M._web_settings(), M._web_settings() + M._web_settings_size())));
   } catch (e) { /* (no storage) */ }
 }

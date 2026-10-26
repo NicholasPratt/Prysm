@@ -224,8 +224,10 @@ static void app_main(void)
     uint32_t prev = 0, k, t_change = 0, dirty = 0;
     uint8_t held[27] = {0};                     /* the note each key plays */
     uint32_t bend = 8192;                       /* the last MIDI pitch bend (the range may change under it) */
-    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; an older, shorter record (before CLICK, before */
-        settings_load(&gset, GSET_V2_SIZE) != 0 &&  /* BEND; the octave, the slot) */
+    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; else an older, shorter record: before the LIVE */
+        settings_load(&gset, GSET_V4_SIZE) != 0 &&  /* knobs, before the sequencer's slot, before CLICK, before BEND; */
+        settings_load(&gset, GSET_V3_SIZE) != 0 &&  /* the octave and the slot */
+        settings_load(&gset, GSET_V2_SIZE) != 0 &&
         settings_load(&gset, GSET_V1_SIZE) != 0)
         settings_load(&gset, 2);
     if (gset.click > 2u) gset.click = 0;
@@ -235,6 +237,7 @@ static void app_main(void)
     if (gset.midi_in > 16u) gset.midi_in = 0;
     if (gset.midi_out > 15u) gset.midi_out = 0;
     if (gset.clock > 1u) gset.clock = 0;
+    if (gset.seq_slot < -1 || gset.seq_slot >= (int8_t)PATCH_SLOTS) gset.seq_slot = gset.slot;   /* (before 1.3: the sound's) */
     engine_init();
     engine_sync(gset.clock);
     engine_click(gset.click, gset.click_lvl, 0);
@@ -242,7 +245,7 @@ static void app_main(void)
     midi_rt_hook = midi_rt;                     /* the MIDI clock, timed as it arrives */
 #endif
     splash();
-    ui_init(gset.slot);                          /* the sound of the slot last saved or loaded */
+    ui_init(gset.slot, gset.seq_slot);          /* the sound of the slot last saved or loaded, the sequencer too */
 #ifdef DINGHY_HOST
     cap_restore();                              /* (tools/capture.py render: where the take started) */
 #endif
@@ -263,8 +266,18 @@ static void app_main(void)
                 ui_drum_key(k);
                 continue;
             }
+            if (down >> k & 1u && page == PG_LIVE && live_keys(k)) {   /* (LIVE: a pattern, a patch, a mute) */
+                held[k] = 0xFF;
+                live_key(k);
+                continue;
+            }
             if (up >> k & 1u && held[k] == 0xFFu)
                 continue;
+            if (down >> k & 1u && ui_split_key(base + k)) {   /* (the MIX page's LEARN: the split there) */
+                held[k] = 0xFF;
+                engine_set(&edit);
+                continue;
+            }
             if (down >> k & 1u) {
                 held[k] = (uint8_t)(base + k);
                 if (ui_seq_key(held[k], 127)) engine_set(&edit);   /* (REC: into the pattern, and heard) */
@@ -287,6 +300,7 @@ static void app_main(void)
         if (slot_moved) {                       /* a patch saved or loaded: remember its slot */
             slot_moved = 0;
             gset.slot = (int8_t)cur_slot;
+            gset.seq_slot = (int8_t)seq_owner;
             dirty = 1;
             t_change = fm1_ms;
         }
@@ -308,6 +322,7 @@ static void app_main(void)
 #endif
             if (st < 0xF0u && gset.midi_in && (st & 0x0Fu) != gset.midi_in - 1u)
                 continue;                       /* (another channel than the SETUP page's) */
+            if ((st & 0xF0u) == 0x90u && d2 && ui_split_key(d1)) { engine_set(&edit); continue; }   /* (LEARN) */
             if ((st & 0xF0u) == 0x90u && d2) {
                 if (ui_seq_key(d1, d2)) engine_set(&edit);
                 play(d1, d2);
@@ -326,6 +341,8 @@ static void app_main(void)
                 lit |= 1u << (voice[k].note - base);
         if (ui_drum_keys())                     /* (the DRUM page: the lane's steps) */
             lit = ui_drum_leds();
+        else if (page == PG_LIVE)               /* (LIVE: the lowest octave's, the pattern and the patch) */
+            lit = (lit & ~live_led_keys()) | live_leds();
         for (k = 0; k < 27u; k++)
             fm1_led_key(KEY_LED(k), lit >> k & 1u);
         fm1_led_key(BTN_OCT_DOWN, gset.oct < 0);
@@ -349,10 +366,13 @@ static void app_main(void)
         {                                       /* the patterns and the song: 3 s after the last change, when silent */
             static uint32_t seqs_at;            /* (the flash write would cut a note for ~50 ms) */
             if (seqs_dirty == 1u) { seqs_dirty = 2; seqs_at = fm1_ms; }
-            if (seqs_dirty == 2u && engine_quiet() && fm1_ms - seqs_at > 3000u) {
+            if (seqs_dirty == 2u && engine_quiet() && fm1_ms - seqs_at > 3000u && seq_swap != 1u) {
                 seqs_dirty = 0;
-                store_write();
+                seqs_write();                   /* (to whose it is: a slot's, or the store's own) */
             }
+            if (live_poll())                    /* (LIVE: the bar line came, the patch waiting with it) */
+                engine_set(&edit);
+            seqs_poll();
         }
     }
 }

@@ -17,9 +17,10 @@
  *      the modulators' pitch and fine (menv2_a .. mfine). LFO 2's destinations past format 9's DEST_N move up 2
  *      (M1PITCH, M2PITCH before them); a modulator in MIX or RING takes its RATIO's pitch (up to +24 semitones)
  *  11  + the VCA's bias (vca: 0, closed, as before); LFO 2's destinations past M2PITCH move up 1 (LFOSHAPE)
- *  12  + the noise and the routing (noise_type .. route: no noise, everything through the filter, as before) */
+ *  12  + the noise and the routing (noise_type .. route: no noise, everything through the filter, as before)
+ *  13  + the keyboard split (split, split_oct: off, as before) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 12u
+#define PATCH_VERSION 13u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
@@ -31,6 +32,7 @@
 #define PATCH_V9_SIZE 306u                      /* format 9's: all of it */
 #define PATCH_V10_SIZE 125u                     /* format 10's: everything before vca */
 #define PATCH_V11_SIZE 126u                     /* format 11's: everything before noise_type */
+#define PATCH_V12_SIZE 132u                     /* format 12's: everything before split */
 #define PATCH_OLD_MAX PATCH_V9_SIZE
 #define PATCH_SEQ_AT PATCH_V6_SIZE              /* formats 7 .. 9: the pattern (seq_len, div, gate, pad, note[64], */
 #define PATCH_SEQ_N (PATCH_V7_SIZE - PATCH_V6_SIZE)   /* trig[64], slide[64]) here, the rest after it */
@@ -44,13 +46,14 @@ _Static_assert(__builtin_offsetof(patch_t, lfo2_wave) + PATCH_SEQ_N == PATCH_V8_
 _Static_assert(__builtin_offsetof(patch_t, menv2_a) + PATCH_SEQ_N == PATCH_V9_SIZE, "format 9 is, but the pattern");
 _Static_assert(__builtin_offsetof(patch_t, vca) == PATCH_V10_SIZE, "format 10 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, noise_type) == PATCH_V11_SIZE, "format 11 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, split) == PATCH_V12_SIZE, "format 12 is a prefix of patch_t");
 
 /* patch p from n bytes of format version (a patch file, the plugin's state, a slot): 0 = done */
 static int patch_from(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version)
 {
     static const uint16_t SIZE[PATCH_VERSION] = {0, PATCH_V1_SIZE, PATCH_V2_SIZE, PATCH_V3_SIZE, PATCH_V4_SIZE,
                                                  PATCH_V5_SIZE, PATCH_V6_SIZE, PATCH_V7_SIZE, PATCH_V8_SIZE,
-                                                 PATCH_V9_SIZE, PATCH_V10_SIZE, PATCH_V11_SIZE};
+                                                 PATCH_V9_SIZE, PATCH_V10_SIZE, PATCH_V11_SIZE, PATCH_V12_SIZE};
     /* RATIO -> PITCH (0..48, 24 = in tune) and FINE: 0.5 .. 4 as near as they go, 5 and up as far: +24 */
     static const uint8_t R_SEMI[PR_RATIOS] = {12, 24, 31, 36, 43, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48};
     static const uint8_t R_FINE[PR_RATIOS] = {64, 64, 66, 64, 66, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64};
@@ -106,17 +109,47 @@ _Static_assert(4u + SEQ_PATS * SEQS_V1_PAT + SEQS_TAIL == SEQS_V1_SIZE && 4u + S
                "the old versions' sizes");
 #define BANK_SIZE(psize) (4u + PATCH_SLOTS + PATCH_SLOTS * (psize))
 #define STORE_NOW (sizeof bank + sizeof seqs)
-#define STORE_OLD (BANK_SIZE(PATCH_V11_SIZE) + SEQS_V2_SIZE)   /* the biggest older store */
+#define STORE_OLD (BANK_SIZE(PATCH_V12_SIZE) + sizeof(seqs_t))   /* the biggest older store */
 _Static_assert(BANK_SIZE(sizeof(patch_t)) == sizeof bank, "the bank has no padding");
 static uint8_t store_buf[STORE_NOW > STORE_OLD ? STORE_NOW : STORE_OLD];
 static uint8_t seqs_fresh;                      /* the patterns did not come from the store */
 static uint32_t old_size;                       /* the bank was converted from patches of this size, with no patterns */
 
-static int store_write(void)                    /* the bank and the patterns, together; 0 = saved */
+/* Each slot has a sequencer of its own (seqs_t: the patterns, the song, the drum kit), kept apart from the bank
+ * (seqstore_load / seqstore_save, platform.c). seqs is the one playing; seq_owner says whose: a slot, or -1, the store's
+ * own (beside the bank: the one sequencer there was before 1.3, and the one playing until a slot's is loaded). The
+ * store's own stays in store_buf after boot (seqs_keep), so a save of the bank keeps it whoever's is playing */
+_Static_assert(PATCH_SLOTS == SEQSTORE_N, "a sequencer for each slot");
+static int32_t seq_owner = -1;
+
+static int store_write(void)                    /* the bank and the store's own sequencer; 0 = saved */
 {
     memcpy(store_buf, &bank, sizeof bank);
-    memcpy(store_buf + sizeof bank, &seqs, sizeof seqs);
+    if (seq_owner < 0)
+        memcpy(store_buf + sizeof bank, &seqs, sizeof seqs);
     return store_save(store_buf, STORE_NOW);
+}
+static void seqs_keep(void)                     /* (boot: seqs is the store's own, as loaded and converted) */
+{
+    memcpy(store_buf + sizeof bank, &seqs, sizeof seqs);
+}
+static int seqs_write(void)                     /* the sequencer playing, to its owner; 0 = saved */
+{
+    return seq_owner >= 0 ? seqstore_save((uint32_t)seq_owner, &seqs, sizeof seqs) : store_write();
+}
+static int seqs_fetch(uint32_t slot)            /* slot's own sequencer into seqs_next (engine.c); 0 = it has one */
+{
+    return seqstore_load(slot, &seqs_next, sizeof seqs_next) == 0 && seqs_next.version == SEQS_VERSION ? 0 : -1;
+}
+static void seqs_migrate(void)                  /* (boot) no slot has a sequencer yet: each used one gets the one there is */
+{
+    uint32_t s;
+    for (s = 0; s < PATCH_SLOTS; s++)
+        if (seqs_fetch(s) == 0)
+            return;                             /* (done before) */
+    for (s = 0; s < PATCH_SLOTS; s++)
+        if (bank.used[s])
+            seqstore_save(s, &seqs, sizeof seqs);
 }
 
 static void seqs_from_old(const uint8_t *q)     /* (formats 7 .. 9: a sound's single pattern, its bytes) -> pattern 1 */
@@ -193,6 +226,7 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     seqs_fresh = 0;
     old_size = 0;
     if (store_try(PATCH_VERSION, sizeof(patch_t), SEQS_VERSION, sizeof seqs) == 0 ||
+        store_try(12u, PATCH_V12_SIZE, SEQS_VERSION, sizeof seqs) == 0 ||   /* (1.2, 1.3) */
         store_try(11u, PATCH_V11_SIZE, 2u, SEQS_V2_SIZE) == 0 ||   /* (1.0, 1.1) */
         store_try(10u, PATCH_V10_SIZE, 2u, SEQS_V2_SIZE) == 0 ||   /* (0.9) */
         store_try(10u, PATCH_V10_SIZE, 1u, SEQS_V1_SIZE) == 0 ||

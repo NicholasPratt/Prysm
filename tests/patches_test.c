@@ -14,6 +14,11 @@ static uint8_t store[4096];                     /* a fake store (platform.c's st
 static uint32_t store_n;
 static int store_load(void *p, uint32_t n) { if (n != store_n) return -1; memcpy(p, store, n); return 0; }
 static int store_save(const void *p, uint32_t n) { memcpy(store, p, n); store_n = n; return 0; }
+#define SEQSTORE_N 8u                              /* (each slot's sequencer: platform.c's seqstore_load / seqstore_save) */
+static uint8_t seqstore[SEQSTORE_N][4096];
+static uint32_t seqstore_n[SEQSTORE_N];
+static int seqstore_load(uint32_t i, void *p, uint32_t n) { if (i >= SEQSTORE_N || n != seqstore_n[i]) return -1; memcpy(p, seqstore[i], n); return 0; }
+static int seqstore_save(uint32_t i, const void *p, uint32_t n) { if (i >= SEQSTORE_N) return -1; memcpy(seqstore[i], p, n); seqstore_n[i] = n; return 0; }
 #include "../firmware/src/patches.c"
 
 static int fails;
