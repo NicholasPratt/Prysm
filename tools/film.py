@@ -22,22 +22,25 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 # ---- the firmware's knobs and default sound
 
-PAGES = {"OSC1": "OSC 1", "OSC2": "OSC 2", "FILTER": "FILTER", "AMP": "AMP", "FENV": "F.ENV", "MENV": "M.ENV 1",
+PAGES = {"OSC1": "OSC 1", "OSC2": "OSC 2", "NOISE": "NOISE", "FILTER": "FILTER", "AMP": "AMP", "FENV": "F.ENV", "MENV": "M.ENV 1",
          "MENV2": "M.ENV 2", "LFO": "LFO", "LFO2": "LFO 2",
-         "MIX": "MIX", "ARP": "ARP", "SEQ": "SEQ", "CHO": "CHORUS", "DLY": "DELAY", "REV": "REVERB",
+         "MIX": "MIX", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "DRUM", "CHO": "CHORUS", "DLY": "DELAY", "REV": "REVERB",
          "SETUP": "SETUP", "PATCH": "PATCH", "SCOPE": "SCOPE"}   # (ui.c's order: PG_OSC1 .. PG_SETUP, PG_PATCH, PG_SCOPE)
 PG = {p: i for i, p in enumerate(PAGES)}
 ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"],
+        "NOISE": ["NOISE"],
         "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL", "VCA"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
         "MENV2": ["ENV", "DEST"], "LFO": ["LFO", "DEST"],
-        "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "GLIDE"], "ARP": ["ARP", "TIME"], "SEQ": ["STEP", "CHORD", "PATTERN", "EDIT", "CLICK", "SONG", "ENTRY"],
+        "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "ROUTE", "GLIDE"], "ARP": ["ARP", "TIME"],
+        "SEQ": ["STEP", "CHORD", "PATTERN", "EDIT", "CLICK", "SONG", "ENTRY"], "DRUM": ["STEP", "KICK", "SNARE", "HAT", "BUS"],
         "CHO": ["CHORUS"], "DLY": ["DELAY", "D.MOD"], "REV": ["REVERB", "R.MOD"], "SETUP": ["MIDI"],
         "PATCH": ["SAVE", "LOAD", "INIT"], "SCOPE": []}
 BTN = {"FX": 2, "SELECT": 3, "ENV": 4, "LFO": 5, "EDIT": 6, "GLO": 7, "HOME": 8, "SAVE": 9, "ARP": 10, "SEQ": 11,
        "PLAY": 12, "REC": 13}
 ENC_SELECT, ENC_KNOB1, ENC_PRESETS = 0, 2, 6
 TURN_MS = 70                                    # between knob events: slower than the UI's fast turn (60 ms: x 3)
-STEPPED = {7, 9, 11, 16, 22, 25, 28, 29}        # ui.c's kinds that move a step per two detents (modes, waves, on / off)
+STEPPED = {7, 9, 11, 16, 22, 25, 28, 29, 56, 58}   # ui.c's kinds that move a step per two detents (modes, waves, on / off,
+                                                #  the noise's TYPE, the routes)
 SKIP_DEST = {13, 14}                            # (LFORATE, LFOAMT: the mod envelope's own; the LFOs' knobs skip them)
 
 _info = None
@@ -165,13 +168,13 @@ class Scene:
             else:
                 if p != "SCOPE": self.back = p
                 self.page = "PATCH"
-        elif b == "EDIT": self.page = "OSC2" if p == "OSC1" else "OSC1"
+        elif b == "EDIT": self.page = {"OSC1": "OSC2", "OSC2": "NOISE"}.get(p, "OSC1")
         elif b == "FX": self.page = {"CHO": "DLY", "DLY": "REV"}.get(p, "CHO")
         elif b == "ENV": self.page = {"AMP": "FENV", "FENV": "MENV", "MENV": "MENV2"}.get(p, "AMP")
         elif b == "SELECT": self.page = "FILTER"
         elif b == "LFO": self.page = "LFO2" if p == "LFO" else "LFO"
         elif b == "GLO": self.page = "SETUP" if p == "MIX" else "MIX"
-        elif b == "SEQ": self.page = "SEQ"
+        elif b == "SEQ": self.page = "DRUM" if p == "SEQ" else "SEQ"
         elif b == "REC": self.page, self.rec = "SEQ", not self.rec
         elif b == "PLAY": self.playing = not self.playing
         elif b == "ARP":
@@ -181,9 +184,9 @@ class Scene:
         return self.wait(gap)
 
     def go(self, page):                         # to a page by its button, as a player would
-        way = {"OSC1": "EDIT", "OSC2": "EDIT", "FILTER": "SELECT", "AMP": "ENV", "FENV": "ENV", "MENV": "ENV",
+        way = {"OSC1": "EDIT", "OSC2": "EDIT", "NOISE": "EDIT", "FILTER": "SELECT", "AMP": "ENV", "FENV": "ENV", "MENV": "ENV",
                "MENV2": "ENV", "LFO": "LFO", "LFO2": "LFO",
-               "MIX": "GLO", "SETUP": "GLO", "ARP": "ARP", "SEQ": "SEQ", "CHO": "FX", "DLY": "FX", "REV": "FX",
+               "MIX": "GLO", "SETUP": "GLO", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "SEQ", "CHO": "FX", "DLY": "FX", "REV": "FX",
                "SCOPE": "HOME", "PATCH": "SAVE"}[page]
         for _ in range(5):
             if self.page == page: return self
@@ -249,6 +252,14 @@ class Scene:
             self.pa_slot = n - 1
             self._how(f"turn KNOB 1 to slot {n}")
             self.wait(600)
+        return self
+
+    def key(self, *keys, hold=120, gap=250, label="play keys"):   # the FM-1's own keys (0 = F3 .. 26 = G5), one
+        for k in keys:                          #  after another: on the DRUM page, the steps and the drums
+            self.ev.append((self.t, f"keys 0x{1 << k:x}"))
+            self.ev.append((self.t + hold, "keys 0"))
+            self.t += gap
+        self._how(label)
         return self
 
     def on(self, *notes, vel=127):

@@ -97,7 +97,8 @@ def scenes():
               "An envelope can move the cutoff on every note: up fast, then back down. Each note gets a bright "
               "\"pluck\" at its start. ENV sets how far it moves.")
     s.play([45, 45, 57, 45, 48, 45, 60, 45] * 5, dur=140, gap=300, at=s.t)
-    s.turn("cut", 50, 1500).row("ENV").turn(2, 50, 1500).turn(3, 0, 1500).row("FILTER").turn(3, 120, 2500).wait(3000)
+    s.turn("cut", 50, 1500).go("FENV").turn(2, 50, 1500).turn(3, 0, 1500)   # (0.9: the filter's ADSR on F.ENV)
+    s.go("FILTER").row("FILTER").turn(3, 120, 2500).wait(3000)
     s.caption("Steeper",
               "TYPE picks the filter. LP 24 cuts more steeply than LP 12: darker and smoother. (The comb types ring "
               "like strings; the manual has more.)")
