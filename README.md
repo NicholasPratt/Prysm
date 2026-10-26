@@ -39,8 +39,10 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Velocity** | from MIDI, to level, cutoff and modulation (the FM-1's keys play at full velocity) |
 | **Glide** | portamento, always or legato |
 | **Arpeggiator** | UP, DOWN, UPDN, RAND, ORDER; 1/4 .. 1/32 with triplets; 1 .. 4 octaves; gate (to tied), swing, latch; 40 .. 240 BPM or the MIDI clock (START / STOP / CONTINUE); sample-accurate |
-| **Sequencer** | polyphonic: chords of up to 4 notes a step; 4 patterns of up to 64 steps, 303-style: notes, rests, accents, slides (legato glide), ties; a song of up to 16 entries, each a pattern played 1 .. 16 times; row copy / paste; step entry from the keys (chords: keys held together) or real-time recording (quantized to the step, velocity, held notes tied, overdub); a metronome (always, or only while recording) and a bar's count-in; its own or the MIDI clock |
+| **Sequencer** | polyphonic: chords of up to 4 notes a step; 4 patterns of up to 64 steps, 303-style: notes, rests, accents, slides (legato glide), ties; a song of up to 16 entries, each a pattern played 1 .. 16 times; row copy / paste; step entry from the keys (chords: keys held together) or real-time recording (quantized to the step, velocity, held notes tied, overdub); a metronome (always, or only while recording) and a bar's count-in; its own or the MIDI clock; each patch slot has its own (patterns, song, kit); with the split on, two parts (one each side, by pitch) to mute or clear apart |
 | **Drums** | kick, snare, hat (an accent opens it): 8-bit samples at 11 .. 22 kHz, made from scratch, played back unsmoothed; a lane in each of the 4 patterns, entered on the keys as on a TR (white keys the steps, their LEDs the lane), accents; level, tune (+-24 st), decay and a send through the sound's filter each; the bus: drive, crush (bits and rate), sends into the delay and the reverb; MIDI channel 10 (General MIDI notes) |
+| **Split** | per patch: OSC 1 below a key, OSC 2 from it, an octave each side (a bass under a lead), the 4 voices shared; the key set with a knob or LEARN |
+| **LIVE** | HOME twice: patterns (the black keys) and patches (the white keys) change on the next bar line; mutes for the kick, snare, hats, each oscillator and the noise; four knobs, each any parameter you choose |
 | **Oscilloscope** | on HOME: left and right, locked to the newest note, auto-zoom |
 | **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on |
 | **Editor** | [in the browser](https://nicholaspratt.github.io/Prysm/editor/): the firmware itself running in the page (screen, knobs, keys, sound), every parameter, patch files; in sync with a connected FM-1 both ways |
@@ -64,20 +66,21 @@ envelopes, the LFO, the effects chain.
 | AMP | ENV | ENV, VEL, VCA |
 | F.ENV, M.ENV 1, M.ENV 2 | ENV (2, 3, 4 times) | ENV; the mod envelopes: ENV, DEST |
 | LFO | LFO (twice: LFO 2) | LFO, DEST; LFO 2: LFO, DEST |
-| MIX | GLO | OSC, ROUTE, GLIDE |
+| MIX | GLO | OSC, ROUTE, GLIDE, SPLIT |
 | SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK, pitch BEND range |
 | ARP | ARP (again: on / off) | ARP, TIME |
-| SEQ | SEQ (PLAY: run; REC: step entry, or recording while it plays) | STEP, CHORD, PATTERN, EDIT, CLICK, SONG, ENTRY |
+| SEQ | SEQ (PLAY: run; REC: step entry, or recording while it plays) | STEP, CHORD, PATTERN, EDIT, PARTS, CLICK, SONG, ENTRY |
 | DRUM | SEQ (twice; the keys: the steps) | STEP, KICK, SNARE, HAT, BUS |
 | CHORUS / DELAY / REVERB | FX (1, 2, 3 times) | CHORUS; DELAY, D.MOD; REVERB, R.MOD |
 | PATCH | SAVE | SAVE, LOAD, INIT over 8 slots |
 | SCOPE | HOME | the output, live (KNOB1: cycles) |
+| LIVE | HOME (twice; the keys: patterns, patches, mutes) | PLAY, K1 .. K4 (the knobs' parameters) |
 
 ## Installing from the command line
 
 ```sh
 pip3 install mido python-rtmidi
-python3 tools/fm1_install.py prysm-1.2.fwsc       # asks before it writes; restarts into Prysm
+python3 tools/fm1_install.py prysm-1.3.fwsc       # asks before it writes; restarts into Prysm
 python3 tools/fm1_install.py --info               # what the connected FM-1 runs
 ```
 
@@ -146,9 +149,9 @@ The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](S
 tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchain, the AC79 SDK, a Python venv
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
-./build.sh --release 1.2             # build/prysm-1.2.fwsc (identity FM-1_989, as every release from 0.9 on; "1.2" on the splash)
-tools/make_site.py build/prysm-1.2.fwsc 1.2   # site/: the web installer and the manual (GitHub Pages)
-APP_VER=1.2 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
+./build.sh --release 1.3             # build/prysm-1.3.fwsc (identity FM-1_989, as every release from 0.9 on; "1.3" on the splash)
+tools/make_site.py build/prysm-1.3.fwsc 1.3   # site/: the web installer and the manual (GitHub Pages)
+APP_VER=1.3 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
 ```
 
 ### Tests (on the computer, no FM-1 needed)

@@ -14,7 +14,7 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.2</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.3</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators, and a noise source (six kinds) beside them; each of the three
 goes through a resonant filter (12 or 24 dB low-pass, or a comb) or straight past it. Then a high-pass, an amp envelope, an
@@ -39,7 +39,7 @@ hat) plays a lane of its own in every sequencer pattern.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.2.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.3.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -72,8 +72,8 @@ community firmware; Prysm answers its updater like the others.</p>
 <td>the volume</td>
 </tr>
 <tr>
-<td><strong>USB-MIDI in</strong></td>
-<td>notes play Prysm with their velocity (see AMP's VEL row), on any channel or the one set on SETUP</td>
+<td><strong>MIDI in</strong></td>
+<td>over USB or the FM-1's TRS MIDI IN jack, alike: notes play Prysm with their velocity (see AMP's VEL row), on any channel or the one set on SETUP; the MIDI clock and START / STOP from either</td>
 </tr>
 </tbody>
 </table>
@@ -160,7 +160,7 @@ cutoff).</p>
 </tr>
 <tr>
 <td><strong>HOME</strong></td>
-<td>the oscilloscope</td>
+<td>the oscilloscope (press again: LIVE)</td>
 </tr>
 <tr>
 <td><strong>SAVE</strong></td>
@@ -733,6 +733,13 @@ it is set, as far as the whole knob):</p>
 <td></td>
 <td></td>
 </tr>
+<tr>
+<td>SPLIT</td>
+<td>the split key (OFF, or a note)</td>
+<td>the low side's octave (-2 .. +2)</td>
+<td>the high side's octave</td>
+<td>LEARN</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Routing.</strong> Each source goes <strong>through the filter</strong> (its drive, the low-pass or the comb, the high-pass), or
@@ -742,6 +749,14 @@ the oscillators stay clean. The picture shows each source's level and its route 
 <p><strong>Glide</strong> (portamento) slides each new note from the pitch of the last one. <strong>ALWAYS</strong> slides every note;
 <strong>LEGATO</strong> only when another note is still held (play overlapping to slide, apart to jump). Arpeggiated notes glide
 too: with a tied gate and LEGATO, an acid line.</p>
+<p><strong>Split</strong> the keyboard: below the split key only <strong>OSC 1</strong> plays, from it upward only <strong>OSC 2</strong>, so the two
+oscillators become two sounds side by side (a bass under a lead). Set the key with KNOB1, or turn <strong>LEARN</strong> and
+press the key you want (it is not played; a MIDI keyboard's note works too). OCT1 and OCT2 move each side up or down
+by octaves (a bass played in the middle of the keys, sounding low). The four voices are shared: any mix of the two
+sides, four notes at a time. The filter, the envelopes, the LFOs and the effects are the same for both; the noise
+plays on both sides. The sequencer, the arpeggiator and MIDI follow the split too, by each note's pitch. It is saved
+with the patch, the key and both octaves, so each patch has its own split (or none) and loading a patch brings its
+split with it; a change waits for SAVE like any other. The picture shows it under the levels (OSC1 &lt; C4 &lt; OSC2).</p>
 <h3 id="arp">ARP</h3>
 <p>The arpeggiator plays the notes you hold, one at a time, in time. <strong>ARP</strong> (pressed again on the ARP page) or the ARP
 cell turns it on or off (its LED lights). While it is on, the keys and MIDI notes go to it instead of straight to
@@ -863,8 +878,9 @@ and the page's own effect lit.</p>
 <p>A polyphonic step sequencer, 303-style: notes and <strong>chords</strong> of up to four notes, rests, <strong>accents</strong>, <strong>slides</strong> and
 <strong>ties</strong>, in <strong>4 patterns</strong> of up to 64 steps, and a <strong>song</strong> that plays the patterns in an order you choose, each so
 many times. Enter steps one at a time, or <strong>record in real time</strong> as it plays. It plays alongside the keys (and
-the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock. The patterns and the song
-are not part of a sound: they stay when you load another, so you can try sounds on the same song.</p>
+the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock. Each patch slot has a
+sequencer of its own (the patterns, the song, the drum kit): LOAD brings it in with the sound. To try other sounds
+over the same song, load them with SOUND instead (see <a href="#patches">Patches</a>).</p>
 <p>The picture is the pattern being edited: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white
 one an accent; a little bar joins a sliding step to the next; a tie is a bar carrying the note before it on; past the
 length, dots. A chord's other notes are notches across the top of its square (a short notch: one of them tied on). The cursor is ringed (doubled while recording); a mark under a square shows the step playing. The
@@ -908,6 +924,13 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 <td>COPY</td>
 <td>PASTE</td>
 <td>CLEAR</td>
+</tr>
+<tr>
+<td>PARTS</td>
+<td>MUTE1: part 1 PLAY / MUTE</td>
+<td>MUTE2: part 2</td>
+<td>CLR1: clear part 1</td>
+<td>CLR2: clear part 2</td>
 </tr>
 <tr>
 <td>CLICK</td>
@@ -969,13 +992,21 @@ the STEP and CHORD rows, or CLEAR a row.</p>
   pattern on the PATTERN row) and turn <strong>PASTE</strong>. With the row on <strong>ALL</strong>, COPY and PASTE take the whole pattern,
   its length included; a single row pasted into ALL fills all four rows. <strong>CLEAR</strong> empties the row (with ALL, the
   whole pattern: turn it again within 3 seconds to confirm).</li>
+<li><strong>Two parts</strong> (PARTS row), with the <a href="#mix">split</a> on: the notes below the split key are <strong>part 1</strong> (they play
+  OSC 1), from it upward <strong>part 2</strong> (OSC 2). Record a bass line on the low keys, then on the next passes a lead on
+  the high keys: each pass overdubs, and while you hold a key only its own part's notes rest, so the other part keeps
+  playing under you. <strong>MUTE1</strong> and <strong>MUTE2</strong> silence a part (saved with the sequencer); <strong>CLR1</strong> and <strong>CLR2</strong> clear
+  a part's notes in the EDIT row's row (or ALL), leaving the other part and the drums. A step holds up to four notes
+  across both parts. Which part a note is in follows the split: move the split key and notes change sides. With the
+  split off, every note is part 1's.</li>
 <li><strong>The song</strong> (SONG and ENTRY rows): set MODE to SONG, its LENGTH to the number of entries, then for each entry its
   pattern and how many times it plays. PLAY then plays the entries in turn and starts again after the last.</li>
 <li><strong>INIT</strong> (SONG row) starts over: all four patterns empty, the song P1, P2, P3, P4 once each, PATT mode. It asks
   first: turn it again within 3 seconds.</li>
-<li><strong>Saving</strong>: the patterns and the song save themselves a few seconds after a change, once nothing is playing (the
-  flash write would cut a note short). They come back at power-on. From an older Prysm, the pattern of the sound
-  that comes back at power-on becomes pattern 1.</li>
+<li><strong>Saving</strong>: the patterns and the song save themselves into the slot whose sequencer it is, a few seconds after a
+  change, once nothing is playing (the flash write would cut a note short). They come back at power-on. From Prysm
+  1.2 and older (one sequencer for all), every used slot starts with a copy of it; from 0.8 and older, the pattern
+  of the sound that comes back at power-on becomes pattern 1.</li>
 <li><strong>On the MIDI clock</strong> (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
   PLAY must be on.</li>
 </ul>
@@ -984,11 +1015,11 @@ the STEP and CHORD rows, or CLEAR a row.</p>
 every pattern, under the notes: they play together, from the same steps, in the song too. <strong>SEQ</strong> twice. The sounds
 were made from scratch in the style of an 808 / 909, then stored as an old sampler would keep them, 8 bits at a low
 rate (11 kHz for the kick, 16 kHz the snare, 22 kHz the hats), and played back without smoothing: crunchy and lo-fi
-by design. The kit (levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, not part of a
-sound: change the sound, the beat goes on.</p>
-<p>The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, past the pattern's length
-dots; the drum you are editing named bright; a mark under the step playing. Below, that drum's sound as it will play
-(its length tuned, DECAY over it), or on the BUS row its settings.</p>
+by design. The kit (levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, part of the
+slot's sequencer: LOAD brings it in, SOUND leaves the beat going.</p>
+<p>The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, past
+the pattern's length dots; the drum you are editing named bright; a mark under the step playing. Below, that drum's
+sound as it will play (its length tuned, DECAY over it), or on the BUS row its settings.</p>
 <table>
 <thead>
 <tr>
@@ -1004,7 +1035,7 @@ dots; the drum you are editing named bright; a mark under the step playing. Belo
 <td>STEP</td>
 <td>the drum: KICK / SNARE / HAT</td>
 <td>the step (the cursor)</td>
-<td>its HIT: --, HIT, ACCENT</td>
+<td>its HIT: --, HIT, ACCENT (the snare: FLAM too)</td>
 <td>CLEAR the drum's lane (turn twice)</td>
 </tr>
 <tr>
@@ -1025,8 +1056,9 @@ dots; the drum you are editing named bright; a mark under the step playing. Belo
 </table>
 <p><strong>On the DRUM page the keys are the drum machine's</strong>, as on a TR (they play no notes here):</p>
 <ul>
-<li>The <strong>16 white keys</strong> (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; again: none. Their
-  <strong>LEDs</strong> show the lane (an accent blinks; the step playing flips its LED as it passes).</li>
+<li>The <strong>16 white keys</strong> (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; (the snare) again: a
+  flam; again: none. Their <strong>LEDs</strong> show the lane (an accent blinks, a flam faster; the step playing flips its LED as
+  it passes).</li>
 <li><strong>F#3, G#3, A#3</strong> (the three lowest black keys) pick KICK, SNARE, HAT, and play it.</li>
 <li>
 <p><strong>C#4 / D#4</strong>: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).</p>
@@ -1035,6 +1067,7 @@ dots; the drum you are editing named bright; a mark under the step playing. Belo
 <p><strong>Accents</strong> play at full level, hits a little softer; the hat's accent is the <strong>open hat</strong>, and the next hat (open
   or closed) cuts it off, as on an 808.</p>
 </li>
+<li><strong>A flam</strong> (the snare's) is two snares: a hit, then ~20 ms later a softer one, the first ringing on under it.</li>
 <li><strong>The sends</strong> feed the drums into the sound's <strong>delay</strong> and <strong>reverb</strong>: what comes back is that effect's MIX on its
   page (a mixer's send and return), so with the effect's MIX at 0 nothing comes back. The rest of the drums stay dry.</li>
 <li><strong>FILTER</strong> sends a drum through a filter of the drums' own that follows the sound's <strong>CUTOFF</strong> and <strong>RES</strong> (and
@@ -1081,7 +1114,7 @@ dots; the drum you are editing named bright; a mark under the step playing. Belo
 <p>Press <strong>SAVE</strong> for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
 osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
 them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
-tabs SAVE, LOAD, INIT.</p>
+tabs SAVE, LOAD, SOUND, INIT.</p>
 <table>
 <thead>
 <tr>
@@ -1092,7 +1125,7 @@ tabs SAVE, LOAD, INIT.</p>
 <tbody>
 <tr>
 <td><strong>SELECT</strong></td>
-<td>SAVE, LOAD or INIT</td>
+<td>SAVE, LOAD, SOUND or INIT</td>
 </tr>
 <tr>
 <td><strong>KNOB1</strong></td>
@@ -1109,11 +1142,20 @@ tabs SAVE, LOAD, INIT.</p>
 </tbody>
 </table>
 <ul>
-<li><strong>SAVE</strong> writes the current sound to the slot. Over a slot holding another sound it asks first: press SAVE again.</li>
-<li><strong>LOAD</strong> brings the slot's sound back. <strong>INIT</strong> loads the default sound. If you have unsaved changes, both ask
+<li><strong>SAVE</strong> writes the current sound and the sequencer playing (with any changes not yet saved) to the slot, and only
+  to it: saved to another slot, the slot the sequencer came from keeps what it last saved. Over a slot holding another sound it asks
+  first: press SAVE again. It asks too when the slot's sound came in by SOUND (REPLACES ITS SEQ): its own sequencer
+  would make way for the one playing.</li>
+<li><strong>LOAD</strong> brings the slot's sound back, and its sequencer. While the sequencer plays, the new one takes over where
+  the next pattern would start (the sound changes at once), from the top of its pattern or song; stopped, at once.
+  A slot whose sound came in from the editor alone has no sequencer yet: LOAD keeps the one playing, and it becomes
+  that slot's. LOAD does not save the sequencer it replaces: pattern changes it has not saved yet (they save a few
+  seconds after a change, once nothing plays) are let go.</li>
+<li><strong>SOUND</strong> brings the slot's sound back alone: the sequencer plays on, still saving into the slot it came from.</li>
+<li><strong>INIT</strong> loads the default sound (the sequencer plays on). If you have unsaved changes, LOAD, SOUND and INIT ask
   first: press SAVE again.</li>
 <li>The header shows the current slot on every page, with <strong>*</strong> when there are unsaved changes.</li>
-<li>When the FM-1 is switched on, the slot last saved or loaded comes back.</li>
+<li>When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.</li>
 <li>Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.</li>
 <li>Patches are kept in two flash sectors written in turn: if the power goes during a save, only that save is lost.</li>
 <li>Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them). From
@@ -1128,9 +1170,88 @@ down): <strong>left in white, right in grey</strong> (the chorus and a ping-pong
 <li>It locks onto the <strong>newest note</strong>: the trace shows that many of its cycles, starting on a rising zero, so the
   wave stands still whatever you play. <strong>KNOB1</strong> sets how many cycles (1 .. 8; it starts at 2).</li>
 <li>It <strong>zooms by itself</strong> (x1 .. x8, shown under the trace), so a single quiet note fills the screen too.</li>
-<li><strong>HOME</strong> again, ALGORITHM, SAVE or a page button go back.</li>
+<li><strong>HOME</strong> again opens the <a href="#the-live-screen">LIVE screen</a>. ALGORITHM, SAVE or a page button go back.</li>
 </ul>
 <p>The scope costs no sound processing while it is not shown.</p>
+<hr />
+<h2 id="the-live-screen">The LIVE screen</h2>
+<p>For playing live: change patterns and patches in time, with four knobs of your choosing. Press <strong>HOME</strong> twice (the
+scope, then LIVE).</p>
+<pre><code>LIVE &gt; PLAY                      2
+PATTERN                       PATT
+[ P1 ][#P2#][ P3 ][ P4 ]          the pattern playing filled, the one waiting framed, blinking
+PATCH  BD SD HH O1 O2 NZ           the mutes: filled while on, dim while muted
+[1][#2#][3][4][5][6][7][8]        the same for the patches (empty slots dim)
+====  ----  ----  ----            the bar: its four beats, the one playing lit
+   SELECT: CHOOSE A KNOB          a hint (on K1 .. K4: PRESETS: ITS PARAMETER)
+FILTER FILTER DELAY REVERB         each knob's page
+ CUT    RES    MIX    MIX          KNOB1 .. KNOB4
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>The first 4 black keys</strong> (F#3 G#3 A#3 C#4)</td>
+<td>a pattern, P1 .. P4</td>
+</tr>
+<tr>
+<td><strong>The first 8 white keys</strong> (F3 .. F4)</td>
+<td>a patch, slot 1 .. 8: its sound and its sequencer</td>
+</tr>
+<tr>
+<td><strong>F#4, G#4, A#4</strong></td>
+<td>mute the kick, the snare, the hats (press again: on)</td>
+</tr>
+<tr>
+<td><strong>C#5, D#5</strong></td>
+<td>mute OSC 1, OSC 2</td>
+</tr>
+<tr>
+<td><strong>F#5</strong></td>
+<td>mute the noise</td>
+</tr>
+<tr>
+<td><strong>KNOB1 .. KNOB4</strong></td>
+<td>the parameters chosen for them</td>
+</tr>
+<tr>
+<td><strong>SELECT</strong></td>
+<td>PLAY, or K1 .. K4: the knob PRESETS chooses for</td>
+</tr>
+<tr>
+<td><strong>PRESETS</strong></td>
+<td>on K1 .. K4: that knob's parameter (any of the sound's, page by page); on PLAY: the cutoff, as everywhere</td>
+</tr>
+<tr>
+<td><strong>HOME</strong> or ALGORITHM</td>
+<td>back to where you first pressed HOME</td>
+</tr>
+<tr>
+<td><strong>SAVE</strong>, a page button</td>
+<td>the PATCH screen, that page</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>While the sequencer plays, a change <strong>waits for the next bar line</strong> (4 beats) and blinks until then; it starts
+  from the top of its pattern. Stopped, it happens at once. Press a waiting key again to cancel it.</li>
+<li>A <strong>pattern</strong> key in SONG mode drops the sequencer to PATTERN mode, playing that pattern.</li>
+<li>A <strong>patch</strong> key brings the slot's sound and its sequencer in together on the bar line (the new sound follows
+  within a few milliseconds). Unsaved changes to the sound playing are let go, as on a synth's program change; the
+  pattern chosen is kept with the sequencer.</li>
+<li><strong>The mutes</strong> act at once and on everything: the sequencer, the keys, MIDI. A muted drum's new hits are silent; a
+  muted oscillator or the noise goes quiet in every voice. Their keys are lit while on and flash while muted; on
+  other pages the header shows an inverted <strong>M</strong> while anything is muted. They are not saved: at power-on all are on.
+  (They are apart from the SEQ page's MUTE1 and MUTE2, which mute a part of the sequencer and are saved with it.)</li>
+<li>The other keys play as usual: D#4 and the white keys from G4 up.</li>
+<li>Which parameter each knob turns is a setting, kept for every patch and after power-off. At first: the cutoff,
+  the resonance, the delay's mix and the reverb's mix. Turning a knob changes the sound (the header's <strong>*</strong> shows it).</li>
+</ul>
 <hr />
 <h2 id="usb-audio-and-midi">USB: audio and MIDI</h2>
 <p>Connected to a computer, the FM-1 shows up as <strong>Prysm FM-1</strong>:</p>
