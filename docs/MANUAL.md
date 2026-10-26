@@ -53,7 +53,7 @@ When the FM-1 starts, rainbow static collapses into the word PRYSM (press any ke
 | **Keys** | play; 4 voices. The key LEDs show what sounds. The notes also go out over USB-MIDI. |
 | **OCT- / OCT+** | the keyboard's octave (-2 .. +2; remembered when the FM-1 is switched off) |
 | **MASTER** | the volume |
-| **USB-MIDI in** | notes play Prysm with their velocity (see AMP's VEL row), on any channel or the one set on SETUP |
+| **MIDI in** | over USB or the FM-1's TRS MIDI IN jack, alike: notes play Prysm with their velocity (see AMP's VEL row), on any channel or the one set on SETUP; the MIDI clock and START / STOP from either |
 
 When a fifth note comes, the voice that is quietest (or, if all are held, the oldest) gives way.
 

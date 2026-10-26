@@ -44,7 +44,7 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Oscilloscope** | on HOME: left and right, locked to the newest note, auto-zoom |
 | **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on |
 | **Editor** | [in the browser](https://nicholaspratt.github.io/Prysm/editor/): the firmware itself running in the page (screen, knobs, keys, sound), every parameter, patch files; in sync with a connected FM-1 both ways |
-| **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out, with channel select and clock |
+| **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out, with channel select and clock; MIDI in and clock on the TRS jack too |
 
 Everything runs in fixed point on the FM-1's JieLi AC791N (no FPU); the header shows how much of the audio budget
 the sound takes.
