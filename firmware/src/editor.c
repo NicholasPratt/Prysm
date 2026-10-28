@@ -68,7 +68,10 @@ static int ed_seq_set(uint32_t off, uint32_t v)
         else if (f >= __builtin_offsetof(pattern_t, vel) && f < __builtin_offsetof(pattern_t, xnote)) hi = 127;
         else if (f >= __builtin_offsetof(pattern_t, xnote) && f < __builtin_offsetof(pattern_t, xvel)) hi = 255;   /* (| TIE) */
         else if (f >= __builtin_offsetof(pattern_t, xvel) && f < __builtin_offsetof(pattern_t, dhit)) hi = 127;
-        else if (f >= __builtin_offsetof(pattern_t, dhit) && f < sizeof(pattern_t)) hi = 255;   /* (the drums: bits) */
+        else if (f >= __builtin_offsetof(pattern_t, dhit) && f < __builtin_offsetof(pattern_t, lk_dest)) hi = 255;   /* (the */
+                                                /* drums: bits; the ratchets: nibbles) */
+        else if (f >= __builtin_offsetof(pattern_t, lk_dest) && f < __builtin_offsetof(pattern_t, pad5)) hi = LK_N - 1u;
+        else if (f >= __builtin_offsetof(pattern_t, lk) && f < sizeof(pattern_t)) hi = 128;   /* (0: none, else + 1) */
         else return 0;                          /* (padding) */
     } else if (off == __builtin_offsetof(seqs_t, div)) hi = DIV_N - 1u;
     else if (off == __builtin_offsetof(seqs_t, gate)) hi = 127;
@@ -78,7 +81,8 @@ static int ed_seq_set(uint32_t off, uint32_t v)
     else if (off >= __builtin_offsetof(seqs_t, song_pat) && off < __builtin_offsetof(seqs_t, song_rep)) hi = SEQ_PATS - 1u;
     else if (off >= __builtin_offsetof(seqs_t, song_rep) && off < __builtin_offsetof(seqs_t, dr_lvl)) lo = 1, hi = 16;
     else if (off >= __builtin_offsetof(seqs_t, dr_tune) && off < __builtin_offsetof(seqs_t, dr_dec)) hi = 48;
-    else if (off >= __builtin_offsetof(seqs_t, dr_lvl) && off < sizeof(seqs_t)) hi = 127;   /* (the kit) */
+    else if (off >= __builtin_offsetof(seqs_t, dr_lvl) && off <= __builtin_offsetof(seqs_t, dr_ramp)) hi = 127;   /* (the kit) */
+    else if (off == __builtin_offsetof(seqs_t, dr_kit)) hi = DR_KITS - 1u;
     else
         return 0;                               /* (the version, padding, or past the end) */
     if (v < lo || v > hi)
@@ -95,8 +99,8 @@ static int ed_seq_set(uint32_t off, uint32_t v)
 
 #ifndef DINGHY_HOST
 static uint8_t ed_on;                           /* an editor said hello: tell it of changes */
-static patch_t ed_shadow;                       /* the sound as the editor knows it */
-static seqs_t ed_sshadow;                       /* the patterns as the editor knows them */
+static patch_t ed_shadow SPARE_RAM;             /* the sound as the editor knows it */
+static seqs_t ed_sshadow SPARE_RAM;             /* the patterns as the editor knows them (ed_dump fills both first) */
 static int32_t ed_slot = -2;
 
 static void ed_chunks(uint8_t type, const uint8_t *b, uint32_t n)   /* n bytes as 64-byte chunks of nibbles */

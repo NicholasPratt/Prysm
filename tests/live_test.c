@@ -117,31 +117,38 @@ int main(void)
     ui_input(0);
     CHECK(edit.res == 45 && modified(), "KNOB1: the resonance up 5 (the sound changed: unsaved)");
 
-    /* the mutes: F#4 the kick, C#5 OSC 1 (on / off; not the settings) */
-    CHECK(live_keys(13) && live_keys(25) && !live_keys(14) && !live_keys(10), "F#4 .. F#5's black keys taken, the white ones play");
-    live_key(13);
+    /* the mutes: G4 the kick, D5 E5 the oscillators (on / off; not the settings) */
+    CHECK(live_keys(14) && live_keys(19) && live_keys(24) && live_keys(26) && !live_keys(13) && !live_keys(10),
+          "G4 .. G5's white keys taken; the black ones play");
+    live_key(14);
     drum_hit(DR_KICK_S, 127, 0);
-    CHECK(live_mute == 1u && !drv[0].d, "F#4: the kick muted, its hits silent");
-    live_key(13);
+    CHECK(live_mute == 1u && !drv[0].d, "G4: the kick muted, its hits silent");
+    live_key(14);
     drum_hit(DR_KICK_S, 127, 0);
-    CHECK(live_mute == 0u && drv[0].d, "F#4 again: back on");
+    CHECK(live_mute == 0u && drv[0].d, "G4 again: back on");
     engine_all_off();
     run_frames(44100u * 3u);                    /* (the kick and every release rung out) */
-    live_key(20);
-    live_key(22);
+    live_key(21);
+    live_key(23);
     engine_note_on(60);
     {
         int64_t a = 0;
         uint32_t i, j;
         for (j = 0; j < 16u; j++) { static int32_t b[512]; engine_render(b, 256u); for (i = 0; i < 512u; i++) a += b[i] < 0 ? -b[i] : b[i]; }
-        CHECK(a == 0, "C#5, D#5: both oscillators muted: silent");
+        CHECK(a == 0, "D5, E5: both oscillators muted: silent");
         fm1_ms = 0;
-        CHECK(!(live_leds() >> 20 & 1u) && (live_leds() >> 25 & 1u), "their LEDs flash (off now), NOISE's lit");
+        CHECK(!(live_leds() >> 21 & 1u) && (live_leds() >> 24 & 1u), "their LEDs flash (off now), NOISE's lit");
         fm1_ms = 120;
-        CHECK((live_leds() >> 20 & 1u) && (live_leds() >> 25 & 1u), "... (on now)");
+        CHECK((live_leds() >> 21 & 1u) && (live_leds() >> 24 & 1u), "... (on now)");
     }
-    live_key(20);
-    live_key(22);
+    CHECK(live_leds() >> 26 & 1u, "G5 lit: something muted");
+    live_key(14);
+    live_key(26);
+    CHECK(live_mute == 0u && !(live_leds() >> 26 & 1u), "G5: every mute off (the kick's too), its LED out");
+    live_key(14);
+    ui_page(PG_OSC1);
+    CHECK(live_mute == 0u, "out of LIVE: the mutes all on");
+    ui_page(PG_LIVE);
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
 }

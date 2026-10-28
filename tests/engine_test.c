@@ -240,6 +240,9 @@ int main(void)
         render("fenv", &p, A2, 1, 900, 1000);
         p = solo(); p.drive = 127; render("drive", &p, A4, 1, 900, 1000);
         p = saw_through(127, 0); p.hp_cut = 92; render("hp_880", &p, A2, 1, 900, 1000);   /* 883 Hz */
+        p.hp_res = 127; render("hp_res", &p, A2, 1, 900, 1000);   /* HP RES: a peak at 883 Hz (soft-clipped) */
+        p.osc[0].level = 16; render("hp_res_quiet", &p, A2, 1, 900, 1000);   /* (quiet: under the clip) */
+        p.hp_cut = p.hp_res = 0; render("hp_quiet_ref", &p, A2, 1, 900, 1000);
         p = solo(); p.flt_type = FLT_COMBP; p.cut = 64; p.res = 127; p.key = 127; p.comb_damp = 0;
         render("comb_on", &p, A4, 1, 900, 1000);   /* a sine on A4, keytracked: 440 a peak */
         p.flt_type = FLT_COMBM; render("comb_neg", &p, A4, 1, 900, 1000);   /* COMB-: the peaks between: a notch */
@@ -683,20 +686,32 @@ int main(void)
             p.cho_mix = p.dly_mix = p.rev_mix = 127; p.dly_shift = 0; p.rev_shimmer = 127;
             p.dly_wdepth = p.rev_mdepth = 127;
         }
+        if (getenv("PRYSM_NEW")) {              /* (PRYSM_NEW=1: and 1.4's: four routes, the flanger, CRUSH) */
+            uint32_t i;
+            for (i = 0; i < MM_SLOTS; i++) {
+                p.mm_src[i] = (uint8_t)(MM_LFO + i); p.mm_dest[i] = (uint8_t)(i & 1u ? DEST_MOD1 : DEST_CUTOFF);
+                p.mm_amt[i] = 100;
+            }
+            p.mfx_type = MFX_FLANGER; p.mfx_mix = 100; p.mfx_depth = 127; p.mfx_fb = 120;
+            p.crush_bits = 60; p.crush_rate = 40;
+        }
         p.hp_cut = 40; p.flt_type = getenv("PRYSM_LP24") ? FLT_LP24 : FLT_COMBP; p.res = 120; p.comb_spread = 100;   /* the high-pass, the comb, spread */
         p.lfo2_dest = DEST_RES; p.lfo2_amt = 127; p.lfo2_rate = 100;   /* LFO 2 on RES: the comb's, each block */
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
         p.noise_lvl = 127; p.noise_type = NOISE_PINK; p.route[1] = ROUTE_DIRECT;   /* the noise, a route past the filter */
         memset(voice, 0, sizeof voice);
         engine_init();
-        seqs.dr_drive = 100; seqs.dr_crush = 60; seqs.dr_dly = seqs.dr_rev = 127;   /* the drums, all three, all the time, */
-        seqs.dr_flt[0] = seqs.dr_flt[1] = seqs.dr_flt[2] = 64;   /* half through their filter (both paths) */
+        seqs.dr_drive = 100; seqs.dr_crush = 60; seqs.dr_dly = seqs.dr_rev = 127;   /* the four drums, always, half */
+        seqs.dr_flt[0] = seqs.dr_flt[1] = seqs.dr_flt[2] = seqs.dr_flt[3] = 64;   /* through their filter (both ways) */
         engine_set(&p);
         engine_note_on(57); engine_note_on(60); engine_note_on(64); engine_note_on(67);
         t0 = clock();
         for (r = 0; r < reps; r++) {
             memset(blk, 0, sizeof blk);
-            if (r % 8u == 0u) { engine_drum(DR_KICK_S, 127); engine_drum(DR_SNARE_S, 127); engine_drum(DR_OHAT_S, 127); }
+            if (r % 8u == 0u) {
+                engine_drum(DR_KICK_S, 127); engine_drum(DR_SNARE_S, 127); engine_drum(DR_OHAT_S, 127);
+                engine_drum(DR_CLAP_S, 127);
+            }
             engine_render(blk, FRAMES);
         }
         printf("worst case on this computer: %.1f us per 256-frame render (the FM-1 has 5805 us)\n",

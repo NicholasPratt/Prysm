@@ -95,7 +95,7 @@ OSC 1                              1/5
 | --- | --- | --- | --- | --- |
 | FILTER | cutoff | resonance | env amount | keytrack |
 | ENV | A | D | S | R |
-| TYPE | LP 12, LP 24, COMB+, COMB- | drive | high-pass cutoff (0 = off) | |
+| TYPE | LP 12, LP 24, COMB+, COMB- | drive | high-pass cutoff (0 = off) | high-pass resonance |
 | COMB | damping | spread | | |
 
 The ENV row is drawn as an envelope shape; cutoff/resonance as a response curve *(default)* (LP 24: times its first
@@ -103,7 +103,8 @@ stage's; the comb: in^2 / (1 + fb^2 - 2 fb cos(2 pi f / f0)), damping and spread
 
 Per voice: drive -> the filter (TYPE) -> high-pass -> amp (patch format 8: `hp_cut`, `flt_type`, `comb_damp`,
 `comb_spread`). **LP 24** puts a fixed Butterworth SVF (k = sqrt 2, its own coefficients glided the same way) before
-the resonant one. The **high-pass** is two TPT one-poles in series (12 dB / octave, no resonance), 16 Hz .. 4.2 kHz.
+the resonant one. The **high-pass** is a zero-delay-feedback SVF (12 dB / octave), 16 Hz .. 4.2 kHz; HP RES (patch format 15: `hp_res`)
+sets its damping k from 2 (no peak: two one-poles' response, as before) down to 0.16 (+16 dB at the cutoff, soft-clipped).
 The **comb** (the Blofeld's Comb+/-) replaces the low-pass and takes its knobs: its frequency = MIDI 12 + 0.75 x CUT
 (so 64 is C4 and 100 % keytrack is in tune) + the cutoff's own modulation (envelope, keytrack, velocity, LFO / mod
 envelope CUTOFF) + keytrack x (glide and LFO pitch); RES -> feedback 0.98 (1 - (1 - r)^2), negated for COMB-. Its

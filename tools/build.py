@@ -246,7 +246,9 @@ def check(img, syms, dis, rt):
         return int(mm.group(1), 16) if mm else 0
     ram = sym("_bss_end") - 0x01C08000
     pool = sym("_pool_end") - 0x01C20000
-    notes.append(f"image {len(img)} B of {APP_SLOT}; RAM .data+.bss {ram} B of 98304; pool {pool} B of 344064")
+    low = max(sym("_rt_end"), sym("_spare_end")) - 0x01C00000   # (the flash driver's code, then .spare)
+    notes.append(f"image {len(img)} B of {APP_SLOT}; RAM .data+.bss {ram} B of 98304; pool {pool} B of 344064; "
+                 f".ram_text+.spare {low} B of 24576")
     if ram > 96 * 1024:
         errors.append(f"RAM .data+.bss {ram} B > 96 KiB")
     return errors, notes

@@ -56,8 +56,8 @@ static void app_audio(int32_t *out, uint32_t n)
         uint32_t i, w = scope_w;
         for (i = 0; i < n; i++, w++) {
             int32_t l = out[2u * i], r = out[2u * i + 1u];
-            scope_buf[0][w & (SCOPE_N - 1u)] = (int16_t)(l > 32767 ? 32767 : l < -32767 ? -32767 : l);
-            scope_buf[1][w & (SCOPE_N - 1u)] = (int16_t)(r > 32767 ? 32767 : r < -32767 ? -32767 : r);
+            scope_buf[0][w & (SCOPE_N - 1u)] = (int16_t)clip15(l);
+            scope_buf[1][w & (SCOPE_N - 1u)] = (int16_t)clip15(r);
         }
         scope_w = w;
     }
@@ -69,13 +69,15 @@ static void app_audio(int32_t *out, uint32_t n)
 #endif
 }
 
-static void play(uint32_t note, uint32_t vel)   /* a key or MIDI: to the arpeggiator while it is on */
+static void play(uint32_t note, uint32_t vel)   /* a key or MIDI: to the arpeggiator while it is on (and the looper) */
 {
+    loop_note(note, vel);
     if (eg.arp_on) arp_key_down(note, vel);
     else engine_note_on_vel(note, vel);
 }
 static void stop(uint32_t note)
 {
+    loop_note(note, 0);
     if (eg.arp_on) arp_key_up(note);
     else engine_note_off(note);
 }
@@ -329,6 +331,7 @@ static void app_main(void)
             }
             else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) { ui_seq_key_up(d1); stop(d1); }
             else if ((st & 0xF0u) == 0xE0u) bend = d1 | (uint32_t)d2 << 7;   /* pitch bend */
+            else if ((st & 0xF0u) == 0xB0u && d1 == 1u) engine_wheel(d2);   /* the mod wheel (the mod matrix's WHEEL) */
         }
         engine_bend(bend, gset.bend);
 #if DINGHY_USB_LOG

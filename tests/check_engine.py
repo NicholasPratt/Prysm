@@ -172,6 +172,11 @@ check("high-pass slope", -12.5 < h2 - h4 < -8.5, f"440 -> 220 Hz {h2 - h4:.1f} d
 check("high-pass passband", -1 < h40 < 0.3, f"4.4 kHz {h40:.1f} dB")
 hpk = max(atten("hp_880", "lp_open", 110, k) for k in range(2, 48))
 check("high-pass no resonance", hpk < 0.3, f"the most any harmonic gains: {hpk:+.2f} dB")
+r8, r2, r40 = (atten("hp_res_quiet", "hp_quiet_ref", 110, k) for k in (8, 2, 40))
+check("high-pass resonance", 13 < r8 < 18 and r2 < -10 and -1 < r40 < 1,
+      f"HP RES 127: 880 Hz {r8:+.1f} dB (want ~+15.7, k 0.16), 220 Hz {r2:.1f} dB, 4.4 kHz {r40:.1f} dB")
+hl = atten("hp_res", "lp_open", 110, 8)
+check("high-pass resonance, loud", hl > 8, f"full level, soft-clipped: 880 Hz {hl:+.1f} dB")
 cp, cn, ca, co = (harm_db(n, 440, 1, 0.6, 0.9) - harm_db("sine", 440, 1, 0.6, 0.9)
                   for n in ("comb_on", "comb_neg", "comb_abs", "comb_off"))
 check("comb on the note", -2 < cp < 1, f"440 Hz {cp:+.1f} dB (a peak, keytrack 100 %)")

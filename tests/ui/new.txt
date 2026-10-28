@@ -1,0 +1,81 @@
+# the pages and rows of 1.4: MATRIX (LFO three times), MOD FX and CRUSH (FX four, five times), the SEQ page's LOCK row
+# (a lane on CUTOFF, two steps locked), the DRUM page's CLAP (its key) and KIT rows, the LOOP page (SEQ three times: a
+# loop recorded from the first note, played, overdubbed), the PATCH screen's UNDO
+# (tests/run_ui.sh)
+100 btn 5
+120 btn 5
+140 btn 5
+200 enc 2 2
+240 enc 4 30
+300 shot
+320 enc 0 1
+340 enc 2 10
+360 enc 3 6
+380 enc 4 -20
+440 shot
+500 btn 2
+520 btn 2
+540 btn 2
+560 btn 2
+600 enc 2 2
+620 enc 5 40
+700 shot
+720 enc 2 2
+800 shot
+820 enc 0 1
+840 enc 3 30
+900 shot
+950 btn 2
+1000 enc 2 60
+1020 enc 3 40
+1100 shot
+1200 btn 11
+1220 enc 4 2
+1300 enc 2 4
+1320 enc 4 2
+1340 enc 0 2
+1360 enc 2 2
+1380 enc 3 30
+1440 shot
+1460 enc 0 -2
+1480 enc 2 -4
+1500 enc 0 2
+1520 enc 3 90
+1600 shot
+1700 btn 11
+1720 keys 0x100
+1740 keys 0
+1760 keys 0x1
+1780 keys 0
+1800 keys 0x80
+1820 keys 0
+1840 enc 0 5
+1900 shot
+1920 enc 0 2
+1940 enc 2 2
+2000 shot
+2020 enc 2 2
+2100 shot
+2200 btn 11
+2300 shot
+2320 btn 13
+2400 shot
+2500 keys 0x80
+2700 keys 0
+2900 keys 0x800
+3100 keys 0
+3300 keys 0x4000
+3500 keys 0
+3700 shot
+4800 keys 0x10
+4900 keys 0
+5200 shot
+5400 btn 13
+5500 shot
+7400 shot
+7500 btn 9
+7520 enc 0 4
+7600 shot
+7700 btn 9
+7800 shot
+7900 end

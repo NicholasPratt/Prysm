@@ -14,7 +14,7 @@ static uint8_t store[4096];                     /* a fake store (platform.c's st
 static uint32_t store_n;
 static int store_load(void *p, uint32_t n) { if (n != store_n) return -1; memcpy(p, store, n); return 0; }
 static int store_save(const void *p, uint32_t n) { memcpy(store, p, n); store_n = n; return 0; }
-#define SEQSTORE_N 8u                              /* (each slot's sequencer: platform.c's seqstore_load / seqstore_save) */
+#define SEQSTORE_N 9u                              /* (each slot's sequencer, the store's own: platform.c's seqstore_load / seqstore_save) */
 static uint8_t seqstore[SEQSTORE_N][4096];
 static uint32_t seqstore_n[SEQSTORE_N];
 static int seqstore_load(uint32_t i, void *p, uint32_t n) { if (i >= SEQSTORE_N || n != seqstore_n[i]) return -1; memcpy(p, seqstore[i], n); return 0; }
@@ -91,8 +91,9 @@ int main(void)
           "the LFO: no amount, the default rate");
     got.lfo_amt[0] = 100; got.lfo_dest[0] = DEST_CUTOFF;
     CHECK(seqs_fresh, "a bank from before the patterns: the patterns start empty (to take the sound's pattern)");
-    CHECK(patch_save(4, &got) == 0 && store_n == sizeof bank + sizeof seqs, "a save writes format %u and the patterns (%u bytes)",
-          (unsigned)PATCH_VERSION, (unsigned)store_n);
+    CHECK(patch_save(4, &got) == 0 && store_n == sizeof bank && seqstore_n[SEQ_OWN] == sizeof seqs,
+          "a save writes format %u (%u bytes), the patterns apart (%u bytes)", (unsigned)PATCH_VERSION, (unsigned)store_n,
+          (unsigned)seqstore_n[SEQ_OWN]);
     seqs.pat[2].len = 33; seqs.pat[2].trig[5] = SEQ_TIE; seqs.song_len = 7; seqs.mode = 1;
     CHECK(store_write() == 0, "the patterns saved");
     memset(&bank, 0, sizeof bank);
@@ -297,8 +298,79 @@ int main(void)
         CHECK(patch_from(&got, (const uint8_t *)&c, PATCH_V11_SIZE, 11) == 0 && got.noise_lvl == 0 && got.vca == c.vca,
               "a format 11 file converts (no noise)");
     }
-    CHECK(sizeof bank + sizeof seqs <= STORE_MAX, "the bank and the patterns fit the store (%u of %u bytes)",
-          (unsigned)(sizeof bank + sizeof seqs), (unsigned)STORE_MAX);
+    {                                           /* 1.3's store: format 13 and the patterns of version 4 after it */
+        static uint8_t v4[SEQS_V4_SIZE];
+        patch_t c = PATCH_INIT;
+        uint32_t i;
+        c.split = 60; c.cut = 70;
+        seqs_init();                            /* (a version 4 sequencer: three drums, the ratchets, the kit) */
+        seqs.pat[1].len = 32; seqs.pat[1].note[3] = 65; seqs.pat[1].trig[3] = SEQ_ACCENT;
+        drum_put(&seqs.pat[1], 0, 0, 1); drum_put(&seqs.pat[1], 2, 17, 2); drum_put(&seqs.pat[1], 1, 40, 3);
+        ratchet_put(&seqs.pat[1], 17, 3);
+        seqs.dr_lvl[2] = 77; seqs.dr_tune[1] = 30; seqs.dr_dec[0] = 99; seqs.dr_drive = 11; seqs.dr_crush = 12;
+        seqs.dr_dly = 13; seqs.dr_rev = 14; seqs.dr_flt[2] = 15; seqs.dr_ramp = 40; seqs.song_rep[3] = 6;
+        memset(v4, 0, sizeof v4);
+        v4[0] = 4;
+        for (i = 0; i < SEQ_PATS; i++) {        /* (its pattern: as now up to the drums; 3 drums' hits, accents; dret) */
+            const uint8_t *q = (const uint8_t *)&seqs.pat[i];
+            uint8_t *o = v4 + 4u + i * SEQS_V4_PAT;
+            memcpy(o, q, SEQS_V2_PAT);
+            memcpy(o + SEQS_V2_PAT, seqs.pat[i].dhit, 24);
+            memcpy(o + SEQS_V2_PAT + 24, seqs.pat[i].dacc, 24);
+            memcpy(o + SEQS_V3_PAT, seqs.pat[i].dret, 32);
+        }
+        {
+            uint8_t *t = v4 + 4u + SEQ_PATS * SEQS_V4_PAT;
+            memcpy(t, (uint8_t *)&seqs + __builtin_offsetof(seqs_t, div), SEQS_TAIL);
+            t += SEQS_TAIL;
+            memcpy(t, seqs.dr_lvl, 3); memcpy(t + 3, seqs.dr_tune, 3); memcpy(t + 6, seqs.dr_dec, 3);
+            t[9] = seqs.dr_drive; t[10] = seqs.dr_crush; t[11] = seqs.dr_dly; t[12] = seqs.dr_rev;
+            memcpy(t + 13, seqs.dr_flt, 3); t[16] = seqs.dr_ramp;
+        }
+        memset(old_store, 0, sizeof old_store);
+        old_store[0] = 13; old_store[4u + 2u] = 1;
+        memcpy(old_store + BANK_SIZE(0) + 2u * PATCH_V13_SIZE, &c, PATCH_V13_SIZE);
+        memcpy(old_store + BANK_SIZE(PATCH_V13_SIZE), v4, sizeof v4);
+        store_save(old_store, BANK_SIZE(PATCH_V13_SIZE) + SEQS_V4_SIZE);
+        memset(seqstore_n, 0, sizeof seqstore_n);
+        memset(&seqs, 0x55, sizeof seqs);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(2, &a) == 0 && a.split == 60 && a.cut == 70 && a.mm_src[0] == MM_OFF && a.mfx_type == MFX_OFF &&
+              a.crush_bits == 0 && a.mm_amt[3] == 64, "1.3's bank (format 13): kept; the matrix, MOD FX, CRUSH off");
+        CHECK(seqs.version == SEQS_VERSION && seqs.pat[1].len == 32 && seqs.pat[1].note[3] == 65 &&
+              seqs.pat[1].trig[3] == SEQ_ACCENT && drum_at(&seqs.pat[1], 0, 0) == 1 && drum_at(&seqs.pat[1], 2, 17) == 2 &&
+              drum_at(&seqs.pat[1], 1, 40) == 3 && ratchet_at(&seqs.pat[1], 17) == 3 && seqs.song_rep[3] == 6,
+              "patterns v4: the notes, the three drums' lanes, the ratchets kept");
+        CHECK(seqs.dr_lvl[2] == 77 && seqs.dr_tune[1] == 30 && seqs.dr_dec[0] == 99 && seqs.dr_drive == 11 &&
+              seqs.dr_crush == 12 && seqs.dr_dly == 13 && seqs.dr_rev == 14 && seqs.dr_flt[2] == 15 && seqs.dr_ramp == 40,
+              "patterns v4: the kit kept");
+        for (i = 0; i < 64u && !drum_at(&seqs.pat[1], 3, i) && !seqs.pat[1].lk[0][i] && !seqs.pat[1].lk[1][i]; i++) ;
+        CHECK(i == 64u && seqs.dr_lvl[3] == 95 && seqs.dr_tune[3] == 24 && seqs.dr_kit == 0 && !seqs.pat[1].lk_dest[0],
+              "patterns v4: the clap's lane empty, as new; no locks; the LO-FI kit");
+        CHECK(seqs_moved && seqstore_n[SEQ_OWN] == 0, "the store's own sequencer is still to move");
+        seqs_keep();
+        CHECK(!seqs_moved && seqstore_n[SEQ_OWN] == sizeof seqs, "... seqs_keep: moved, apart from the bank");
+        CHECK(store_write() == 0 && store_n == sizeof bank, "the next save: the bank alone (%u bytes)", (unsigned)store_n);
+        memset(&seqs, 0x55, sizeof seqs);
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(!seqs_moved && seqs.dr_ramp == 40 && seqs.pat[1].note[3] == 65 && patch_get(2, &a) == 0 && a.split == 60,
+              "format 14: the bank, and the store's own sequencer from its own place");
+        memcpy(seqstore[3], v4, sizeof v4);     /* a slot's sequencer saved by 1.3: converted as fetched */
+        seqstore_n[3] = sizeof v4;
+        CHECK(seqs_fetch(3) == 0 && seqs_next.version == SEQS_VERSION && seqs_next.dr_flt[2] == 15 &&
+              ratchet_at(&seqs_next.pat[1], 17) == 3, "a slot's version 4 sequencer converts");
+        CHECK(patch_from(&got, (const uint8_t *)&c, PATCH_V13_SIZE, 13) == 0 && got.split == 60 && got.mfx_mix == 64,
+              "a format 13 file converts");
+        c.hp_res = 99; c.crush_rate = 33;
+        CHECK(patch_from(&got, (const uint8_t *)&c, PATCH_V14_SIZE, 14) == 0 && got.crush_rate == 33 && got.hp_res == 0,
+              "a format 14 file converts (HP RES none)");
+        CHECK(seqs_size(4) == SEQS_V4_SIZE && seqs_size(SEQS_VERSION) == sizeof seqs && !seqs_size(SEQS_VERSION + 1u),
+              "the sizes of the versions");
+    }
+    CHECK(sizeof bank <= STORE_MAX && sizeof seqs <= STORE_MAX, "the bank (%u bytes) and a sequencer (%u) fit a sector (%u)",
+          (unsigned)sizeof bank, (unsigned)sizeof seqs, (unsigned)STORE_MAX);
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }

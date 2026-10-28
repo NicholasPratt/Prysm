@@ -1,5 +1,7 @@
 # the NOISE page (EDIT twice): its types; the MIX page's ROUTE row; the DRUM page (SEQ twice): a beat entered on the
-# keys (white: steps, F# G# A#: the drum), an accent, playing; its KICK and BUS rows (tests/run_ui.sh)
+# keys (white: steps, F# G# A#: the drum), an accent, playing; its ROLL row (rolls on the keys, RAMP), its KICK and BUS
+# rows; REC on the DRUM page: a bar's count-in, then the drum keys tapped in; the EDIT row: P1's drums copied, pasted
+# into P2 (tests/run_ui.sh)
 100 btn 6
 120 btn 6
 200 enc 4 90
@@ -81,9 +83,50 @@
 2380 btn 12
 3100 shot
 3140 enc 0 1
-3220 shot
-3260 enc 0 3
-3280 enc 3 60
-3360 shot
-3380 btn 12
-3500 end
+3160 keys 0x10
+3180 keys 0
+3200 keys 0x10
+3220 keys 0
+3240 keys 0x1000
+3260 keys 0
+3280 keys 0x1000
+3300 keys 0
+3320 keys 0x1000
+3340 keys 0
+3360 keys 0x1000
+3380 keys 0
+3400 keys 0x1000
+3420 keys 0
+3440 keys 0x4000000
+3460 keys 0
+3480 keys 0x4000000
+3500 keys 0
+3520 keys 0x4000000
+3540 keys 0
+3560 enc 4 -40
+3640 shot
+3680 enc 0 1
+3760 shot
+3800 enc 0 3
+3820 enc 3 60
+3900 shot
+3920 btn 12
+3940 btn 13
+3960 btn 12
+6200 keys 0x2
+6220 keys 0
+6400 keys 0x8
+6420 keys 0
+6600 keys 0x2
+6620 keys 0
+6700 shot
+6720 btn 12
+6740 btn 13
+6800 enc 0 1
+6860 enc 4 2
+6940 shot
+7000 enc 2 1
+7080 shot
+7100 enc 5 2
+7180 shot
+7240 end

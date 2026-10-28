@@ -61,8 +61,8 @@ void prysm_render(float *l, float *r, uint32_t n)
     engine_render(blk, n);
     for (i = 0; i < n; i++) {
         int32_t a = blk[2u * i], b = blk[2u * i + 1u];
-        l[i] = (float)(a > 32767 ? 32767 : a < -32767 ? -32767 : a) * (1.0f / 32768.0f);
-        r[i] = (float)(b > 32767 ? 32767 : b < -32767 ? -32767 : b) * (1.0f / 32768.0f);
+        l[i] = (float)clip15(a) * (1.0f / 32768.0f);
+        r[i] = (float)clip15(b) * (1.0f / 32768.0f);
     }
 }
 
@@ -72,8 +72,7 @@ uint32_t prysm_seqs_version(void) { return SEQS_VERSION; }
 int prysm_seq_set(uint32_t off, uint32_t v) { return ed_seq_set(off, v); }
 int prysm_seqs_load(const uint8_t *p, uint32_t n, uint32_t version)
 {
-    if (n != (version == SEQS_VERSION ? sizeof seqs : version == 2u ? SEQS_V2_SIZE : version == 1u ? SEQS_V1_SIZE : 0u) ||
-        seqs_from(p, version) != 0)
+    if (!seqs_size(version) || n != seqs_size(version) || seqs_from(p, version) != 0)
         return -1;                              /* (an older version: converted, as the FM-1 converts its store) */
     engine_set(&edit);
     return 0;

@@ -32,6 +32,7 @@
 #define BLK_SHIFT 4                             /* log2(BLK): a block's glide step is a shift */
 #define ENV_FULL (1 << 24)
 #define VOICE_GAIN 8000                         /* Q15: four voices at full level cannot clip (4 x 8000 < 32767) */
+static inline int32_t clip15(int32_t x) { return x > 32767 ? 32767 : x < -32767 ? -32767 : x; }   /* to full scale */
 
 enum { MODE_FM, MODE_RING, MODE_MIX, MODE_N };
 static const char *const MODE_NAME[MODE_N] = {"FM", "RING", "MIX"};
@@ -75,6 +76,13 @@ static const char *const DEST_NAME[DEST2_N] = {"OFF", "PITCH", "PITCH2", "WAVE1"
 #define DEST_V9_N 16u                           /* (format 9's DEST_N: its LFO 2 destinations from here are 3 lower) */
 #define DEST_V10_N 18u                          /* (format 10's: from here 1 lower) */
 #define DEST_LFO2_OK(d) ((d) < DEST2_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)  /* LFO 2's: those, and more */
+/* the mod matrix: MM_SLOTS routes, each a source onto one of the LFO's destinations (DEST_LFO_OK), by an amount */
+#define MM_SLOTS 4u
+enum { MM_OFF, MM_LFO, MM_LFO2, MM_MENV1, MM_MENV2, MM_VEL, MM_KEY, MM_WHEEL, MM_RAND, MM_N };
+static const char *const MM_NAME[MM_N] = {"OFF", "LFO", "LFO 2", "M.ENV 1", "M.ENV 2", "VELO", "KEY", "WHEEL", "RANDOM"};
+/* MOD FX, before the chorus: a phaser (six all-passes, swept) or a flanger (a short line, swept, fed back) */
+enum { MFX_OFF, MFX_PHASER, MFX_FLANGER, MFX_N };
+static const char *const MFX_NAME[MFX_N] = {"OFF", "PHASER", "FLANGER"};
 
 /* ---- the patch: what the pages edit (all small integers, 0..127 unless said) */
 typedef struct {
@@ -135,7 +143,7 @@ typedef struct {
     uint8_t arp_swing;                          /* 0..127 = none .. the even steps 3x the odd */
     /* (formats 7 .. 9 had a pattern here, seq_len .. seq_slide: patches.c, PATCH_SEQ_*; now seqs, below) */
     /* (added in patch format 8: the high-pass, the filter's type, the comb) */
-    uint8_t hp_cut;                             /* the high-pass (12 dB/oct, no resonance): 0 = off; 16 Hz .. 4.2 kHz */
+    uint8_t hp_cut;                             /* the high-pass (12 dB/oct; its peak: hp_res): 0 = off; 16 Hz .. 4.2 kHz */
     uint8_t flt_type;                           /* FLT_LP12 .. FLT_COMBM; the comb: CUT its frequency, RES its feedback */
     uint8_t comb_damp;                          /* the repeats: 0 bright .. 127 dark */
     uint8_t comb_spread;                        /* 0 = even peaks; up: the upper ones stretched apart (bells, metal) */
@@ -162,6 +170,19 @@ typedef struct {
     /* (added in patch format 13: the keyboard split) */
     uint8_t split;                              /* 0 = off; else a note: below it osc 1 alone plays, from it osc 2 alone */
     uint8_t split_oct[2];                       /* each side's octave: 0..4 = -2 .. +2 (2: as played) */
+    /* (added in patch format 14: the mod matrix, MOD FX, CRUSH) */
+    uint8_t mm_src[MM_SLOTS];                   /* MM_OFF .. MM_RAND */
+    uint8_t mm_dest[MM_SLOTS];                  /* DEST_OFF .. DEST_N - 1 (not the LFO's own: LFORATE, LFOAMT, LFOSHAPE) */
+    uint8_t mm_amt[MM_SLOTS];                   /* 64 = none; bipolar */
+    uint8_t mfx_type;                           /* MFX_OFF .. MFX_FLANGER */
+    uint8_t mfx_rate, mfx_depth;                /* the sweep: 0.05 .. 40 Hz; how far */
+    uint8_t mfx_manual;                         /* where it sweeps around: the phaser's notches, the flanger's delay */
+    uint8_t mfx_fb;                             /* feedback: 64 = none; down: inverted (hollow), up: ringing */
+    uint8_t mfx_mix;                            /* 0 = dry .. 127 = all wet */
+    uint8_t crush_bits;                         /* the voices: 0 = as they are; up: fewer bits (16 down to 2) */
+    uint8_t crush_rate;                         /* 0 = as they are; up: a lower rate (a sample held 1 .. 32 frames) */
+    /* (added in patch format 15: the high-pass's resonance) */
+    uint8_t hp_res;                             /* 0 = none (as before); up: a peak at HPF's cutoff, to +16 dB */
 } patch_t;
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
@@ -175,7 +196,10 @@ static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT", "
  * step's own (note, trig, slide: what the STEP row edits; ACCENT and SLIDE are the whole step's), lanes 1 .. 3 the
  * chord's others, each a note and a velocity, or a tie. Each lane plays as a voice of its own: a lane's TIE carries
  * that lane's note on. Beside them, the drums' lanes: a bit a step for each drum, and a bit for its accent (the hat
- * opens). (Patterns of SEQS_VERSION 1 were lane 0 alone, of 2 had no drums: patches.c converts them.) */
+ * opens), and the hat's ratchets: a step played 2 .. 8 times over its length (a roll). And two lock lanes: each a
+ * parameter of the sound (LK_CUTOFF ..), and a value for it on any step (the notes that step plays take it; the
+ * sends: that step's share into the delay, the reverb). (Patterns of SEQS_VERSION 1 were lane 0 alone, of 2 had no
+ * drums, of 3 no ratchets, of 4 three drums and no locks: patches.c converts them.) */
 #define SEQ_PATS 4u
 #define SONG_N 16u
 #define SEQ_LANES 4u
@@ -186,13 +210,27 @@ typedef struct {
     uint8_t vel[64];                            /* lane 0's velocity (recorded): 0 = its trig's (NOTE 100) */
     uint8_t xnote[64][SEQ_LANES - 1u];          /* lanes 1 .. 3: a note (| SEQ_XTIE: a tie) */
     uint8_t xvel[64][SEQ_LANES - 1u];           /* their velocity; 0 and no tie: nothing in the lane */
-    uint8_t dhit[3][8], dacc[3][8];             /* the drums (DRUMS): step k's hit, its accent: bit k & 7 of byte k >> 3
+    uint8_t dhit[4][8], dacc[4][8];             /* the drums (DRUMS): step k's hit, its accent: bit k & 7 of byte k >> 3
                                                  * (an accent with no hit: a flam, the snare's) */
+    uint8_t dret[32];                           /* the hat's ratchets: step k's in nibble k & 1 of byte k >> 1, an index
+                                                 * into RATCHET (0: one hit) */
+    uint8_t lk_dest[2], pad5[2];                /* (SEQS_VERSION 5) the lock lanes (PLOCKS): their parameter (LK_OFF ..) */
+    uint8_t lk[2][64];                          /* each step's lock: 0 none, else the value + 1 */
 } pattern_t;
-#define DRUMS 3u                                /* kick, snare, hat */
-enum { DR_KICK_S, DR_SNARE_S, DR_CHAT_S, DR_OHAT_S, DR_FLAM_S };   /* (prysm_drums.h's sounds: the hat's accent is the
-                                                                        open one; DR_FLAM_S: the snare twice) */
-static const char *const DRUM_NAME[DRUMS] = {"KICK", "SNARE", "HAT"};
+#define DRUMS 4u                                /* kick, snare, hat, clap */
+#define PLOCKS 2u
+enum { DR_KICK_S, DR_SNARE_S, DR_CHAT_S, DR_OHAT_S, DR_CLAP_S, DR_FLAM_S };   /* (a kit's sounds, prysm_drums.h: the
+                                                                     hat's accent is the open one; DR_FLAM_S: the snare
+                                                                     twice) */
+#define DR_SOUNDS 5u
+static const char *const DRUM_NAME[DRUMS] = {"KICK", "SNARE", "HAT", "CLAP"};
+/* what a lock lane locks: a knob of the sound (the notes of the step take its value: CUT .. FM2), or a send (the
+ * step's share of the voices into the delay, the reverb; the steps with no lock: none, so a lane on it throws) */
+enum { LK_OFF, LK_CUTOFF, LK_RES, LK_FENV, LK_DRIVE, LK_ADEC, LK_AREL, LK_FDEC, LK_FM1, LK_FM2, LK_DSEND, LK_RSEND,
+       LK_N };
+static const char *const LK_NAME[LK_N] = {"OFF", "CUTOFF", "RES", "F.ENV", "DRIVE", "A.DEC", "A.REL", "F.DEC",
+                                          "FM1", "FM2", "DLY SND", "REV SND"};
+#define LK_SEND(d) ((d) >= LK_DSEND)
 typedef struct {
     uint32_t version;
     pattern_t pat[SEQ_PATS];
@@ -202,7 +240,7 @@ typedef struct {
     uint8_t song_len;                           /* 1 .. SONG_N entries */
     uint8_t part_mute[2], pad2;                 /* the split's parts (part_of) muted: 1 (the store had 0 here before) */
     uint8_t song_pat[SONG_N], song_rep[SONG_N]; /* each entry: a pattern (0..3), played 1 .. 16 times */
-    /* (SEQS_VERSION 3: the drums' kit, for every pattern) */
+    /* the drums' kit, for every pattern */
     uint8_t dr_lvl[DRUMS];                      /* each drum's level: 0 = silent */
     uint8_t dr_tune[DRUMS];                     /* 0..48: -24 .. +24 semitones (24: as made) */
     uint8_t dr_dec[DRUMS];                      /* 127: its own length; down: shorter (an envelope over it) */
@@ -210,29 +248,36 @@ typedef struct {
     uint8_t dr_crush;                           /* 0 = as stored; up: fewer bits, a lower rate */
     uint8_t dr_dly, dr_rev;                     /* the bus into the delay, the reverb (their MIX: how much comes back) */
     uint8_t dr_flt[DRUMS];                      /* each drum through the sound's filter: 0 = none (dry) .. 127 = all */
+    uint8_t dr_ramp;                            /* a ratchet's hits: 64 = all at the step's level; down: they fade; up: */
+                                                /* they swell into it */
+    uint8_t dr_kit;                             /* (SEQS_VERSION 5) the kit's sounds: DR_KITS's (prysm_drums.h) */
 } seqs_t;
-#define SEQS_VERSION 3u
+#define SEQS_VERSION 5u
+#define RATCHETS 6u
+static const uint8_t RATCHET[RATCHETS] = {1, 2, 3, 4, 6, 8};   /* a ratchet's hits (3, 6: triplets) */
 static seqs_t seqs;
 
-static void seqs_init(void)                     /* four empty patterns (16 rests, C3 waiting), a song of P1 .. P4 */
+static void seqs_blank(seqs_t *s)               /* four empty patterns (16 rests, C3 waiting), a song of P1 .. P4 */
 {
     uint32_t i, k;
-    memset(&seqs, 0, sizeof seqs);
-    seqs.version = SEQS_VERSION;
+    memset(s, 0, sizeof *s);
+    s->version = SEQS_VERSION;
     for (i = 0; i < SEQ_PATS; i++) {
-        seqs.pat[i].len = 16;
-        for (k = 0; k < 64u; k++) seqs.pat[i].note[k] = 48;
+        s->pat[i].len = 16;
+        for (k = 0; k < 64u; k++) s->pat[i].note[k] = 48;
     }
-    seqs.div = DIV_16;
-    seqs.gate = 64;
-    seqs.song_len = SEQ_PATS;
-    for (i = 0; i < SONG_N; i++) { seqs.song_pat[i] = (uint8_t)(i % SEQ_PATS); seqs.song_rep[i] = 1; }
+    s->div = DIV_16;
+    s->gate = 64;
+    s->song_len = SEQ_PATS;
+    for (i = 0; i < SONG_N; i++) { s->song_pat[i] = (uint8_t)(i % SEQ_PATS); s->song_rep[i] = 1; }
     for (i = 0; i < DRUMS; i++) {               /* the kit: as made, the kick loudest */
-        seqs.dr_lvl[i] = (uint8_t)(i == 0u ? 110u : i == 1u ? 100u : 90u);
-        seqs.dr_tune[i] = 24;
-        seqs.dr_dec[i] = 127;
+        s->dr_lvl[i] = (uint8_t)(i == 0u ? 110u : i == 1u ? 100u : i == 2u ? 90u : 95u);
+        s->dr_tune[i] = 24;
+        s->dr_dec[i] = 127;
     }
+    s->dr_ramp = 64;
 }
+static void seqs_init(void) { seqs_blank(&seqs); }
 
 static uint32_t drum_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d on step k: 0 none, 1 a hit, 2 accented, */
 {                                               /* 3 a flam */
@@ -243,9 +288,25 @@ static uint32_t drum_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d 
     return hit ? 1u + acc : acc ? 3u : 0u;
 }
 
-static void drum_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t v)   /* (0 .. 3 as drum_at) */
+static uint32_t ratchet_at(const pattern_t *p, uint32_t k)   /* the hat's ratchet on step k: 0 .. RATCHETS - 1 */
+{
+    uint32_t r;
+    k %= 64u;
+    r = (uint32_t)p->dret[k >> 1] >> (k & 1u) * 4u & 15u;
+    return r < RATCHETS ? r : 0u;
+}
+
+static void ratchet_put(pattern_t *p, uint32_t k, uint32_t r)
+{
+    uint32_t sh = (k % 64u & 1u) * 4u;
+    k = k % 64u >> 1;
+    p->dret[k] = (uint8_t)((p->dret[k] & ~(15u << sh)) | (r < RATCHETS ? r : 0u) << sh);
+}
+
+static void drum_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t v)   /* (0 .. 3 as drum_at; none: no ratchet) */
 {
     uint8_t b = (uint8_t)(1u << (k % 64u & 7u));
+    if (!v && d % DRUMS == 2u) ratchet_put(p, k, 0);
     d %= DRUMS;
     k = k % 64u >> 3;
     p->dhit[d][k] = (uint8_t)(v == 1u || v == 2u ? p->dhit[d][k] | b : p->dhit[d][k] & ~b);
@@ -286,6 +347,11 @@ static const patch_t PATCH_INIT = {
     .vca = 0,
     .noise_type = NOISE_WHITE, .noise_col = 100, .noise_lvl = 0, .route = {ROUTE_FILTER, ROUTE_FILTER, ROUTE_FILTER},
     .split = 0, .split_oct = {2, 2},
+    .mm_src = {MM_OFF, MM_OFF, MM_OFF, MM_OFF}, .mm_dest = {DEST_CUTOFF, DEST_PITCH, DEST_MOD1, DEST_AMP},
+    .mm_amt = {64, 64, 64, 64},
+    .mfx_type = MFX_OFF, .mfx_rate = 40, .mfx_depth = 80, .mfx_manual = 64, .mfx_fb = 80, .mfx_mix = 64,
+    .crush_bits = 0, .crush_rate = 0,
+    .hp_res = 0,
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -304,7 +370,8 @@ static volatile struct {
     int32_t f_key;                              /* keytrack, Q8 (256 = 100 %: a semitone per semitone) */
     int32_t f_k;                                /* damping, Q24 (under 0: self-oscillation) */
     int32_t drive;                              /* gain Q12; 0 = no drive stage */
-    int32_t hp_g;                               /* the high-pass's one-poles: g / (1 + g), Q15; 0 = off */
+    int32_t hp_g;                               /* the high-pass: g = tan(pi fc / fs), Q24; 0 = off */
+    int32_t hp_k;                               /* its damping, Q24: 2 (no peak) .. 0.16 */
     uint8_t flt_type;                           /* FLT_LP12 .. FLT_COMBM */
     int32_t comb_p16;                           /* the comb's CUT: MIDI 12 + 0.75 a step (64: C4, 80: C5), 1/16 st */
     int32_t comb_spread;                        /* 0..127 */
@@ -342,6 +409,9 @@ static volatile struct {
     int32_t n_lvl;                              /* its level, Q15 (0: off) */
     int32_t n_g;                                /* WHITE, PINK, BROWN: the tone's one-pole, Q15 (32767: open) */
     uint32_t n_thr;                             /* CRACKLE: a crackle's chance a frame (of 2^32) */
+    uint8_t mm_n;                               /* the mod matrix: its routes in use (the first mm_n of these) */
+    uint8_t mm_src[MM_SLOTS], mm_dest[MM_SLOTS];
+    int32_t mm_amt[MM_SLOTS];                   /* Q15, signed (squared, as the LFO's) */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -351,15 +421,17 @@ static const int16_t *volatile op_cur[NOSC][NOP];
 /* ... and each operator's whole bank in RAM, for the LFO's wave-position destinations (each voice morphs its own) */
 #ifdef __ELF__
 #define ENGINE_POOL __attribute__((section(".pool")))   /* (the FM-1's big zeroed RAM; a Mac's Mach-O has no .pool) */
-#else
+#define SPARE_RAM __attribute__((section(".spare")))    /* (the RAM beside the flash driver, app.ld: not zeroed at */
+#else                                                   /*  start, so only for buffers written before they are read) */
 #define ENGINE_POOL
+#define SPARE_RAM
 #endif
 static int16_t op_bank[NOSC][NOP][PW_WAVES][PW_N + 1] ENGINE_POOL;
 static uint8_t op_bank_is[NOSC][NOP] = {{0xFF, 0xFF, 0xFF}, {0xFF, 0xFF, 0xFF}};   /* the bank in op_bank */
-/* ... and each voice's comb line: down to 21.5 Hz (in RAM: the pool is nearly full) */
+/* ... and each voice's comb line: down to 21.5 Hz (cleared before a note uses it: comb_live) */
 #define COMB_N 2048u
 #define COMB_MASK (COMB_N - 1u)
-static int16_t comb_buf[NV][COMB_N];
+static int16_t comb_buf[NV][COMB_N] SPARE_RAM;
 
 static const uint32_t INC_C9[12] = {            /* MIDI 120..131 (C9..B9): f * 2^32 / 44100; lower octaves shift */
     815363807u, 863847862u, 915214929u, 969636441u, 1027294024u, 1088380105u,
@@ -383,7 +455,7 @@ static struct {
     int32_t f_ks;                               /* the damping, smoothed (Q24) */
     int32_t f_pk;                               /* the band state's peak, falling (the top of RES: its level control) */
     int32_t fc[3], fc2[3];                      /* the coefficients the last block ended on (Q28; 2: LP 24's first) */
-    int32_t hp1, hp2, hp_gs;                    /* the high-pass: its two one-poles' states; its coefficient, smoothed */
+    int32_t hp1, hp2, hp_gs, hp_ks;             /* the high-pass: its SVF's states; its g and damping, smoothed */
     int32_t cd_q8;                              /* the comb: its delay the last block ended on (frames Q8; 0: none) */
     int32_t clp, cfb, cdk, cin;                 /* its damping state; feedback, damping, the input's share (smoothed) */
     int32_t apx[4], apy[4];                     /* SPREAD's four allpasses: their last input, output */
@@ -405,6 +477,10 @@ static struct {
     /* the arpeggiator's notes (ISR only): start / stop at block itrig / ioff of this render (0xFF: none) */
     uint8_t itrig, ioff, inote, ivel, islide;   /* (islide: the sequencer's legato move to inote, no new attack) */
     int32_t iglide;
+    uint16_t ilk_m, lk_m;                       /* the step's locks (bit LK_x: lk[LK_x] for that knob): the sequencer's
+                                                 * for the note at itrig / islide; the note's own (0: the sound's) */
+    uint8_t ilk[LK_N], lk[LK_N];
+    int32_t rnd;                                /* the mod matrix's RANDOM: the note's own, -32767..32767 */
     noise_t ns;                                 /* its noise */
     uint32_t n_inc;                             /* DIGI, S&H: the note's step (RATE in it) */
 } voice[NV];
@@ -420,6 +496,9 @@ static uint32_t l2_ph, l2_rng = 0x6C8E9CF5u;    /* LFO 2 (free-running, one for 
 static int32_t l2_sh;
 static volatile int32_t bend16;                 /* MIDI pitch bend, 1/16 semitones (the main loop's: engine_bend) */
 static volatile uint8_t l2_restart;             /* the sequencer / MIDI clock started: LFO 2 from the top */
+static volatile int32_t wheel15;                /* MIDI's mod wheel (CC 1), 0..32766 (the main loop's: engine_wheel) */
+static uint32_t mm_rng = 0x1B873593u;           /* RANDOM's sequence */
+static int32_t lk_send[2] = {-1, -1};           /* the step's sends (a lock lane on DLY SND, REV SND): 0..127, -1 none */
 static int32_t last_note = -1;                  /* glide: the note the next one slides from */
 
 /* ---- the arpeggiator: the held notes (the main loop's: arp_key_down / _up), read by the ISR each step */
@@ -491,7 +570,51 @@ static inline int32_t modulated(uint32_t mode, const src_t *t, uint32_t ph, int3
     if (mode == MODE_RING)                      /* e = 0: s untouched; e = full: s times the modulator */
         return (s * (32767 - e + y)) >> 15;
     s += y;                                     /* MIX: the modulator's wave added */
-    return s > 32767 ? 32767 : s < -32767 ? -32767 : s;
+    return clip15(s);
+}
+
+/* an oscillator's block: operator 3 into 2 into 1 (m2, m1: FM, RING or MIX), times lvl, added into dst; ph its phases,
+ * moved on by inc a frame. e1, e2: the modulators' levels, d1, d2 their steps a frame; two: operator 3 silent. (Its
+ * own function, not inlined: engine_render's filter keeps its registers) */
+static __attribute__((noinline)) void osc_block(int32_t *dst, const src_t *t, uint32_t *ph, const uint32_t *inc,
+                                                uint32_t m1, uint32_t m2, int32_t lvl, int32_t e1, int32_t d1,
+                                                int32_t e2, int32_t d2, int two)
+{
+    uint32_t i, p0 = ph[0], p1 = ph[1], p2 = ph[2], i0 = inc[0], i1 = inc[1], i2 = inc[2];
+    /* fm: the usual, plain FM with the waves still (no LFO on their position): a loop with nothing to choose a frame */
+    int fm = m1 == MODE_FM && !t[0].f && !t[1].f;
+    if (two) {
+        if (fm)
+            for (i = 0; i < BLK; i++, e1 += d1) {
+                int32_t y1 = (wave_at(t[1].a, p1) * e1) >> 15;
+                dst[i] += (wave_at(t[0].a, p0 + ((uint32_t)y1 << 18)) * lvl) >> 15;
+                p0 += i0; p1 += i1;
+            }
+        else
+            for (i = 0; i < BLK; i++, e1 += d1) {
+                int32_t y1 = (src_at(&t[1], p1) * e1) >> 15;
+                dst[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
+                p0 += i0; p1 += i1;
+            }
+        p2 += i2 * BLK;
+    } else if (fm && m2 == MODE_FM && !t[2].f) {
+        for (i = 0; i < BLK; i++, e1 += d1, e2 += d2) {
+            int32_t y2 = (wave_at(t[2].a, p2) * e2) >> 15;
+            int32_t y1 = (wave_at(t[1].a, p1 + ((uint32_t)y2 << 18)) * e1) >> 15;
+            dst[i] += (wave_at(t[0].a, p0 + ((uint32_t)y1 << 18)) * lvl) >> 15;
+            p0 += i0; p1 += i1; p2 += i2;
+        }
+    } else {
+        for (i = 0; i < BLK; i++, e1 += d1, e2 += d2) {
+            int32_t y2 = (src_at(&t[2], p2) * e2) >> 15;
+            int32_t y1 = (modulated(m2, &t[1], p1, y2, e2) * e1) >> 15;
+            dst[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
+            p0 += i0; p1 += i1; p2 += i2;
+        }
+    }
+    ph[0] = p0;
+    ph[1] = p1;
+    ph[2] = p2;
 }
 
 /* ---- the noise: a block of it, times lvl, added into dst. WHITE, PINK (Kellet's three poles), BROWN (white
@@ -504,7 +627,7 @@ static void noise_block(noise_t *ns, int32_t *dst, int32_t lvl, uint32_t inc)   
     uint32_t i, r = ns->rng ? ns->rng : 0x2545F491u;
     int32_t lp = ns->lp, g = eg.n_g, x, b0 = ns->b0, b1 = ns->b1, b2 = ns->b2, hold = ns->hold;
 #define WHITE_NEXT() (r ^= r << 13, r ^= r >> 17, r ^= r << 5, ((int32_t)r >> 16) * 3 >> 2)   /* (xorshift: -24576 .. 24575) */
-#define TONE_OUT(v) do { int32_t y = (v) > 32767 ? 32767 : (v) < -32767 ? -32767 : (v); lp += ((y - lp) * g) >> 15; \
+#define TONE_OUT(v) do { int32_t y = clip15(v); lp += ((y - lp) * g) >> 15; \
                          dst[i] += (lp * lvl) >> 15; } while (0)   /* (the tone, then out) */
     switch (eg.n_type) {                        /* (a loop each: no choice made a frame) */
     case NOISE_PINK:                            /* (b2's 1.0527 as 1 + 1727 / 32768) */
@@ -648,12 +771,14 @@ static int32_t hp_q(uint32_t c)                 /* HPF CUT 1..127 -> quarter sem
 }
 
 /* ---- the knobs -> the derived values (engine_set; and the ISR, LFO 2 moving them) */
-static int32_t hp_g_of(uint32_t c)              /* G = g / (1 + g), Q15 (g = tan(pi fc / fs), Q24, under 2^23); 0: off */
+static int32_t hp_g_of(uint32_t c)              /* g = tan(pi fc / fs), Q24 (under 2^23); 0: off */
 {
-    uint32_t g;
-    if (!c) return 0;
-    g = PR_FILT_G[hp_q(c)];
-    return (int32_t)((g << 7) / (((1u << 24) + g) >> 8));
+    return c ? (int32_t)PR_FILT_G[hp_q(c)] : 0;
+}
+
+static int32_t hp_k_of(uint32_t r)              /* HP RES 0..127 -> the damping: RES's curve, up to its 112 (k 0.16) */
+{
+    return PR_RES_K[(r & 127u) * 112u / 127u];
 }
 
 static void comb_of(uint32_t res, uint32_t type, int32_t *fb, int32_t *in)
@@ -673,22 +798,23 @@ static uint32_t knob_moved(uint32_t v, int32_t pz)   /* a knob 0..127 moved by p
 }
 
 /* ---- the LFO */
+static inline int32_t sine_q15(uint32_t ph)     /* a sine (a refined parabola, ~0.1 %) -> -32767..32767 */
+{
+    int32_t x = (int32_t)ph >> 16, ax = x < 0 ? -x : x, y = (x * (32768 - ax)) >> 13, ay = y < 0 ? -y : y;
+    y += ((((y * ay) >> 15) - y) * 7373) >> 15;
+    return clip15(y);
+}
+
 static int32_t lfo_wave(uint32_t w, uint32_t ph, int32_t sh)   /* -> -32767..32767 */
 {
-    int32_t x = (int32_t)(ph >> 16), ax, y, ay;   /* 0..65535 */
+    int32_t x = (int32_t)(ph >> 16);            /* 0..65535 */
     switch (w) {
     case LFO_TRI: return (x < 32768 ? x * 2 - 32768 : (65535 - x) * 2 - 32767) * 32767 / 32768;
     case LFO_SAWUP: return x - 32768 + (x == 0);
     case LFO_SAWDN: return 32767 - x;
     case LFO_SQR: return ph < 0x80000000u ? 32767 : -32767;
     case LFO_SH: return sh;
-    default:                                    /* a sine (a refined parabola, ~0.1 %) */
-        x = (int32_t)ph >> 16;
-        ax = x < 0 ? -x : x;
-        y = (x * (32768 - ax)) >> 13;
-        ay = y < 0 ? -y : y;
-        y += ((((y * ay) >> 15) - y) * 7373) >> 15;
-        return y > 32767 ? 32767 : y < -32767 ? -32767 : y;
+    default: return sine_q15(ph);
     }
 }
 
@@ -768,6 +894,31 @@ static void lfo_mods(int32_t l, lfo_mod_t *m)   /* l: the LFO now (faded in), -3
         mod_add(m, eg.lfo_dest[d], eg.lfo_amt[d], l, 0);
 }
 
+/* the mod matrix's routes into m, for voice v: its sources now (l the LFO, l2 LFO 2, me / me2 the mod envelopes) */
+static __attribute__((noinline)) void mm_mods(lfo_mod_t *m, uint32_t v, int32_t l, int32_t l2, int32_t me, int32_t me2)
+{
+    uint32_t r, n = eg.mm_n < MM_SLOTS ? eg.mm_n : MM_SLOTS;
+    for (r = 0; r < n; r++) {
+        int32_t s, k;
+        int uni = 1;
+        switch (eg.mm_src[r]) {
+        case MM_LFO: s = l; uni = 0; break;
+        case MM_LFO2: s = l2; uni = 0; break;
+        case MM_MENV1: s = me; break;
+        case MM_MENV2: s = me2; break;
+        case MM_VEL: s = (int32_t)voice[v].vel * 258; break;
+        case MM_KEY:                            /* (C4 0; +-5 octaves full) */
+            k = ((int32_t)voice[v].note - 60) * 546;
+            s = clip15(k); uni = 0;
+            break;
+        case MM_WHEEL: s = wheel15; break;
+        case MM_RAND: s = voice[v].rnd; uni = 0; break;
+        default: continue;
+        }
+        mod_add(m, eg.mm_dest[r], eg.mm_amt[r], s, uni);
+    }
+}
+
 static uint32_t rate_moved(uint32_t inc, int32_t r16)   /* the LFO's phase step moved by r16 / 16 semitones (+-4 oct) */
 {
     int32_t oct, rem;
@@ -818,6 +969,7 @@ static void voice_fresh(uint32_t v)             /* from silence: the phases from
     voice[v].fc[0] = -1;
     voice[v].hp1 = voice[v].hp2 = 0;
     voice[v].hp_gs = eg.hp_g;
+    voice[v].hp_ks = eg.hp_k;
     voice[v].cd_q8 = 0;
     voice[v].clp = 0;
     voice[v].cfb = eg.comb_fb; voice[v].cdk = eg.comb_dk; voice[v].cin = eg.comb_in;
@@ -839,6 +991,7 @@ static void voice_start(uint32_t v)
     voice[v].lfo_sh = lfo_random(&voice[v].lfo_rng);
     voice[v].lfo_fade = 0;                      /* the delay: it fades in from the note */
     voice[v].menv[0].st = voice[v].menv[1].st = 1;
+    voice[v].rnd = lfo_random(&mm_rng);
 }
 
 /* ---- which voice a new note takes: the same note, else a silent voice, else the quietest release, else the oldest
@@ -958,6 +1111,8 @@ static struct {
     volatile uint32_t step_at, step_len;        /* when it started (engine_frames), its length (frames Q8) */
     volatile uint8_t rec_mute;                  /* lanes a key is recording into (the main loop's): they rest */
     volatile uint8_t rec_part;                  /* (bit l: that key's part, part_of: only its notes rest) */
+    volatile uint8_t dr_skip;                   /* drums recorded into the step of count dr_skip_n before it */
+    volatile uint32_t dr_skip_n;                /* played (the main loop's): heard already, that step skips them */
     uint32_t n;                                 /* steps since PLAY (the metronome's count) */
     volatile uint32_t ci;                       /* the count-in: its steps still to come (a bar's, from PLAY) */
     volatile uint8_t in_ci, want_ci;            /* counting in; PLAY with a count-in (the main loop's) */
@@ -968,9 +1123,10 @@ static struct {
  * PATTERN mode), and seq_barq asks for seq_bar_hit when the bar line came (the main loop then brings the sound) */
 static seqs_t seqs_next ENGINE_POOL;
 static volatile uint8_t seq_swap, seq_at_bar, seq_barq, seq_bar_hit;
+static uint8_t lp_bar;                          /* (the looper's: the sequencer's bar line came, this block) */
 /* the LIVE screen's mutes (not saved: all on at power-on): a bit each, LM_KICK .. LM_NOISE; a drum's new hits, an
  * oscillator, the noise silenced at once */
-enum { LM_KICK, LM_SNARE, LM_HAT, LM_OSC1, LM_OSC2, LM_NOISE, LM_N };
+enum { LM_KICK, LM_SNARE, LM_HAT, LM_CLAP, LM_OSC1, LM_OSC2, LM_NOISE, LM_N };   /* (the drums': their voices') */
 static volatile uint8_t live_mute;
 static volatile int8_t seq_qpat = -1;
 
@@ -1021,7 +1177,8 @@ static void click_render(int32_t *out, uint32_t n)
 }
 
 /* ---- the drum machine: a voice a drum (the hat's two sounds share one: the closed one chokes the open), each its
- * sound played from the start, its step tuned, each stored sample held (no interpolation: the crunch); its level and
+ * sound (the kit's: KIT, prysm_drums.h) played from the start, its step tuned, each stored sample held (no
+ * interpolation: in LO-FI, the crunch); its level and
  * an envelope (DECAY) over it. Each drum's FILTER: how much of it goes through a filter of the drums' own, set as the
  * sound's (its CUTOFF, RES; LP 24 or else LP 12; no envelope, no self-oscillation), the rest dry. Into a bus of their
  * own: drive, then CRUSH (a sample held 1 .. 16 frames, 12 down to 4 bits); some of it into the delay and the reverb
@@ -1029,26 +1186,31 @@ static void click_render(int32_t *out, uint32_t n)
  * of its own (drv[DRUMS]: the first rings on under it) */
 #define DRUM_GAIN 10000                         /* Q15: the whole kit at its levels as new peaks at ~0.65 of full scale */
 static struct {
-    const int8_t *d;                            /* playing (0: silent) */
+    const void *d;                              /* playing (0: silent): int8_t, or int16_t (wide) */
     uint32_t n, pos_q16, inc_q16;               /* its length, where it is (Q16), its step */
+    uint32_t wide;
     int32_t amp, dk;                            /* its level (Q15); DECAY's coefficient a block (Q16; 0: its own) */
     int32_t at;                                 /* frames into this render it starts (-1: already playing) */
 } drv[DRUMS + 1u];                               /* (drv[DRUMS]: a flam's second snare) */
 #define FLAM_GAP 880u                           /* frames: ~20 ms */
 #define FLAM_VEL 64u                            /* the second's velocity */
-static volatile uint8_t dr_midi[5];             /* a sound's hit from MIDI or the DRUM page's keys (its velocity; the */
+static volatile uint8_t dr_midi[DR_FLAM_S + 1u];   /* a sound's hit from MIDI or the DRUM page's keys (its velocity; the */
                                                 /* main loop's: engine_drum), played at the next render's start */
 static struct { int32_t held, left; } crush;    /* CRUSH: the value held, the frames it is still held for */
 static struct { int32_t ic1, ic2, ic3, ic4, cs; } dflt;   /* the drums' filter: its state, its cutoff (glided, Q8) */
 #define DFLT_MAX 131071                         /* (its output kept where the bus's gain cannot overflow) */
 
+#define DR_VOICE(s) ((s) == DR_CLAP_S ? 3u : (s) >= DR_CHAT_S ? 2u : (s))   /* a sound's drum (the hats: one) */
+static const dr_sound_t *dr_kit(void) { return DR_KIT[seqs.dr_kit < DR_KITS ? seqs.dr_kit : 0u]; }   /* KIT's sounds */
+
 static void drum_hit(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR) a sound from frame at of this render */
 {
-    uint32_t d = sound >= DR_CHAT_S ? 2u : sound, t = seqs.dr_tune[d] <= 48u ? seqs.dr_tune[d] : 24u, dec = seqs.dr_dec[d] & 127u;
-    const dr_sound_t *sd = &DR_SOUND[sound & 3u];
+    uint32_t d = DR_VOICE(sound), t = seqs.dr_tune[d] <= 48u ? seqs.dr_tune[d] : 24u, dec = seqs.dr_dec[d] & 127u;
+    const dr_sound_t *sd = &dr_kit()[sound < DR_SOUNDS ? sound : DR_SNARE_S];
     if (!seqs.dr_lvl[d] || live_mute >> d & 1u)
         return;
     drv[d].d = sd->d;
+    drv[d].wide = sd->wide;
     drv[d].n = sd->n;
     drv[d].pos_q16 = 0;
     drv[d].inc_q16 = (uint32_t)(((uint64_t)sd->inc_q16 * PR_SEMI_Q16[t]) >> 16);
@@ -1067,14 +1229,66 @@ static void drum_flam(uint32_t vel, uint32_t at)   /* (the ISR) a flam from fram
     drum_hit(DR_SNARE_S, vel, at);
 }
 
-static void drum_step(const pattern_t *p, uint32_t k, uint32_t bi)   /* step k's drums (block bi): an accent at full, */
-{                                               /* a hit at 0.7 (the hat's accent opens it) */
-    uint32_t d, h;
+/* the sequencer's hits this render, in time order: drums_render plays each from its frame (two of one drum in a render
+ * both heard, the second cutting the first off) */
+#define DQ_N 16u
+static struct { uint16_t at; uint8_t sound, vel; } dq[DQ_N];
+static uint32_t dq_n;
+static void drum_queue(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR) sound (DR_FLAM_S: a flam) from frame at */
+{
+    if (dq_n < DQ_N) { dq[dq_n].at = (uint16_t)at; dq[dq_n].sound = (uint8_t)sound; dq[dq_n].vel = (uint8_t)vel; dq_n++; }
+}
+
+/* the hat's ratchet playing: the hits still to come, the frames between them (Q8), to the next (Q8, from the block's
+ * start), the sound, its velocity, which hit of how many */
+static struct { uint32_t left, gap_q8, next_q8; uint8_t sound, vel, i, n; } roll;
+
+static uint32_t ratchet_vel(uint32_t vel, uint32_t i, uint32_t n)   /* a ratchet's hit i of n: RAMP fades or swells */
+{                                               /* the step's velocity over them (at most to a quarter of it) */
+    int32_t rp = seqs.dr_ramp & 127u, last = (int32_t)n - 1, v = (int32_t)vel;
+    if (last < 1) return vel;
+    if (rp < 64) v -= v * 3 * (64 - rp) * (int32_t)i / (4 * 64 * last);
+    else if (rp > 64) v -= v * 3 * (rp - 64) * (last - (int32_t)i) / (4 * 63 * last);
+    return v < 1 ? 1u : (uint32_t)v;
+}
+static uint32_t roll_vel(void) { return ratchet_vel(roll.vel, roll.i, roll.n); }
+
+static void roll_block(uint32_t bi)             /* (each block, after the step) the ratchet's next hit, if it is due */
+{
+    if (!roll.left) return;
+    if (roll.next_q8 < (BLK << 8)) {
+        drum_queue(roll.sound, roll_vel(), bi * BLK + (roll.next_q8 >> 8));
+        roll.i++;
+        roll.left--;
+        roll.next_q8 += roll.gap_q8;
+    }
+    roll.next_q8 -= BLK << 8;
+}
+
+static void drum_step(const pattern_t *p, uint32_t k, uint32_t bi, uint32_t len)   /* step k's drums (block bi; the */
+{                                               /* step len frames Q8): an accent at full, a hit at 0.7 (the hat's */
+    uint32_t d, h, skip = seq.dr_skip_n == seq.steps ? seq.dr_skip : 0u;   /* accent opens it); the hat's ratchet */
+    roll.left = 0;                              /* over the step */
     for (d = 0; d < DRUMS; d++)
-        if ((h = drum_at(p, d, k)) == 3u)
-            drum_flam(106u, bi * BLK);
-        else if (h)
-            drum_hit(d == 2u && h == 2u ? DR_OHAT_S : d, h == 2u ? 127u : 106u, bi * BLK);
+        if (skip >> d & 1u)
+            continue;
+        else if ((h = drum_at(p, d, k)) == 3u)
+            drum_queue(DR_FLAM_S, 106u, bi * BLK);
+        else if (h) {
+            uint32_t s = d == 2u && h == 2u ? DR_OHAT_S : d == 3u ? DR_CLAP_S : d, v = h == 2u ? 127u : 106u;
+            uint32_t r = d == 2u ? RATCHET[ratchet_at(p, k)] : 1u;
+            roll.sound = (uint8_t)s;
+            roll.vel = (uint8_t)v;
+            roll.i = 0;
+            roll.n = (uint8_t)r;
+            drum_queue(s, d == 2u && r > 1u ? roll_vel() : v, bi * BLK);
+            if (r > 1u) {
+                roll.i = 1;
+                roll.left = r - 1u;
+                roll.gap_q8 = len / r;
+                roll.next_q8 = roll.gap_q8;
+            }
+        }
 }
 
 static void drums_filter(int32_t *bus, const int32_t *fb, uint32_t n)   /* fb through the drums' filter, into bus */
@@ -1107,45 +1321,63 @@ static void drums_filter(int32_t *bus, const int32_t *fb, uint32_t n)   /* fb th
     dflt.ic1 = ic1; dflt.ic2 = ic2; dflt.ic3 = ic3; dflt.ic4 = ic4;
 }
 
+static int drv_run(uint32_t d, int32_t *bus, int32_t *fb, uint32_t from, uint32_t to)   /* voice d into bus over */
+{                                               /* frames from .. to (from its start, if later); 1: some went to fb */
+    const void *sm = drv[d].d;
+    uint32_t pos = drv[d].pos_q16, inc = drv[d].inc_q16, end = drv[d].n << 16, wide = drv[d].wide, i;
+    int32_t amp = drv[d].amp, dk = drv[d].dk, x;
+    int32_t fs = (int32_t)(seqs.dr_flt[d < DRUMS ? d : 1u] & 127u) * 258;   /* (Q15; the flam's: the snare's) */
+    if (!sm || drv[d].at >= (int32_t)to) return 0;   /* (silent; starts later) */
+    i = drv[d].at > (int32_t)from ? (uint32_t)drv[d].at : from;
+    drv[d].at = -1;
+    for (; i < to; i++) {
+        if (pos >= end || amp < 8) { sm = 0; break; }
+        x = wide ? ((int32_t)((const int16_t *)sm)[pos >> 16] * amp) >> 15   /* (Q15) */
+                 : ((int32_t)((const int8_t *)sm)[pos >> 16] * amp) >> 7;     /* (x 256 / 32768: Q15) */
+        if (fs) {                               /* (FILTER: that much through it, the rest dry) */
+            int32_t w = (x * fs) >> 15;
+            fb[i] += w;
+            x -= w;
+        }
+        bus[i] += x;
+        pos += inc;
+        if (dk && (i & (BLK - 1u)) == BLK - 1u)
+            amp -= (int32_t)(((int64_t)amp * dk) >> 16);
+    }
+    drv[d].d = sm;
+    drv[d].pos_q16 = pos;
+    drv[d].amp = amp;
+    return fs != 0;
+}
+
 static int drums_render(int32_t *bus, uint32_t n)   /* the drums into bus (n frames, mono); 0: nothing played */
 {
     static int32_t fb[MAXBLK * BLK];            /* what goes through the filter */
-    uint32_t d, i, any = 0, fz = 0, wet = dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4;   /* (its tail rings on) */
-    for (d = 0; d < 5u; d++)                    /* (MIDI, the keys: from the top of this render) */
+    uint32_t d, e, i, t = 0, any = dq_n != 0, wet = dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4;   /* (its tail rings on) */
+    for (d = 0; d <= DR_FLAM_S; d++)            /* (MIDI, the keys: from the top of this render) */
         if (dr_midi[d]) { if (d == DR_FLAM_S) drum_flam(dr_midi[d], 0); else drum_hit(d, dr_midi[d], 0); dr_midi[d] = 0; }
-    for (d = 0; d < DRUMS + 1u; d++) {
-        const int8_t *sm = drv[d].d;
-        uint32_t pos = drv[d].pos_q16, inc = drv[d].inc_q16, end = drv[d].n << 16;
-        int32_t amp = drv[d].amp, dk = drv[d].dk, x;
-        int32_t fs = (int32_t)(seqs.dr_flt[d < DRUMS ? d : 1u] & 127u) * 258;   /* (Q15; the flam's: the snare's) */
-        if (!sm) continue;
-        if (drv[d].at >= (int32_t)n) { drv[d].at -= (int32_t)n; continue; }   /* (a later render's) */
-        if (!any) memset(bus, 0, n * sizeof bus[0]);
-        if (fs && !fz) { memset(fb, 0, n * sizeof fb[0]); fz = 1; }
-        any = 1;
-        wet |= fs != 0;
-        i = drv[d].at > 0 ? (uint32_t)drv[d].at : 0u;
-        drv[d].at = -1;
-        for (; i < n; i++) {
-            if (pos >= end || amp < 8) { sm = 0; break; }
-            x = ((int32_t)sm[pos >> 16] * amp) >> 7;   /* (x 256 / 32768: Q15) */
-            if (fs) {                           /* (FILTER: that much through it, the rest dry) */
-                int32_t w = (x * fs) >> 15;
-                fb[i] += w;
-                x -= w;
-            }
-            bus[i] += x;
-            pos += inc;
-            if (dk && (i & (BLK - 1u)) == BLK - 1u)
-                amp -= (int32_t)(((int64_t)amp * dk) >> 16);
-        }
-        drv[d].d = sm;
-        drv[d].pos_q16 = pos;
-        drv[d].amp = amp;
+    for (d = 0; d < DRUMS + 1u; d++)
+        any |= drv[d].d != 0 && drv[d].at < (int32_t)n;
+    if (any) {
+        memset(bus, 0, n * sizeof bus[0]);
+        memset(fb, 0, n * sizeof fb[0]);
     }
+    for (e = 0; any && e <= dq_n; e++) {        /* up to each queued hit, then from it */
+        uint32_t to = e < dq_n && dq[e].at < n ? dq[e].at : n;
+        if (to > t) {
+            for (d = 0; d < DRUMS + 1u; d++) wet |= (uint32_t)drv_run(d, bus, fb, t, to);
+            t = to;
+        }
+        if (e < dq_n) {
+            if (dq[e].sound == DR_FLAM_S) drum_flam(dq[e].vel, to);
+            else drum_hit(dq[e].sound, dq[e].vel, to);
+        }
+    }
+    dq_n = 0;
+    for (d = 0; d < DRUMS + 1u; d++)            /* (a later render's) */
+        if (drv[d].d && drv[d].at >= (int32_t)n) drv[d].at -= (int32_t)n;
     if (wet) {
-        if (!any) memset(bus, 0, n * sizeof bus[0]);
-        if (!fz) memset(fb, 0, n * sizeof fb[0]);
+        if (!any) { memset(bus, 0, n * sizeof bus[0]); memset(fb, 0, n * sizeof fb[0]); }
         drums_filter(bus, fb, n);
         any = 1;
     }
@@ -1182,11 +1414,9 @@ static void seq_off(uint32_t bi)                /* every lane's note ends (block
     }
 }
 
-static uint32_t seq_len_of(uint32_t i)          /* pattern i's length */
-{
-    uint32_t n = seqs.pat[i < SEQ_PATS ? i : 0u].len;
-    return n >= 1u && n <= 64u ? n : 16u;
-}
+static uint32_t pat_len(const pattern_t *pt) { return pt->len >= 1u && pt->len <= 64u ? pt->len : 16u; }
+static uint32_t seq_len_of(uint32_t i) { return pat_len(&seqs.pat[i < SEQ_PATS ? i : 0u]); }   /* pattern i's */
+static uint32_t seq_spb(void) { uint32_t s = eg.seq_spb; return s ? s : 4u; }   /* steps a beat (4: not set yet) */
 
 static seqpos_t seq_adv(seqpos_t s)             /* the step after s: on in the pattern, then the song's next round */
 {
@@ -1215,7 +1445,7 @@ static uint32_t seq_step_len(uint32_t odd)
 static void seq_step(uint32_t bi, uint32_t len);
 static void seq_tick(uint32_t bi, uint32_t len)  /* a step's time: a count-in's step (a tick each beat), or the next */
 {
-    uint32_t spb = eg.seq_spb ? eg.seq_spb : 4u;
+    uint32_t spb = seq_spb();
     if (seq.ci) {
         uint32_t i = 4u * spb - seq.ci;         /* (its place in the bar) */
         seq.in_ci = 1;
@@ -1232,7 +1462,8 @@ static void seq_tick(uint32_t bi, uint32_t len)  /* a step's time: a count-in's 
 static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
 {
     const pattern_t *p, *pn;
-    uint32_t k, kn, l, accent, at_bar = seq.n % (4u * (eg.seq_spb ? eg.seq_spb : 4u)) == 0u;   /* (a bar: 4 beats) */
+    uint32_t k, kn, l, lm, accent, at_bar = seq.n % (4u * seq_spb()) == 0u;   /* (a bar: 4 beats) */
+    uint8_t lv[LK_N];
     if (seq_swap == 1u && (seq_at_bar ? at_bar : seq.at.pos == 0u)) {   /* another patch's sequencer takes over, from
                                                                           * its top */
         memcpy(&seqs, &seqs_next, sizeof seqs);
@@ -1252,6 +1483,7 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
         seq_barq = 0;
         seq_bar_hit = 1;
     }
+    if (at_bar) lp_bar = 1;                     /* (the looper, waiting for it) */
     p = &seqs.pat[seq.at.pat % SEQ_PATS];
     k = seq.at.pos % 64u;
     accent = p->trig[k] == SEQ_ACCENT;
@@ -1264,6 +1496,19 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
     seq.at = seq_adv(seq.at);
     pn = &seqs.pat[seq.at.pat % SEQ_PATS];
     kn = seq.at.pos % 64u;
+    lm = 0;
+    lk_send[0] = lk_send[1] = -1;
+    for (l = 0; l < PLOCKS; l++) {              /* the step's locks: its notes take them; the sends, this step's */
+        uint32_t d = p->lk_dest[l], x = p->lk[l][k];
+        if (!d || d >= LK_N)
+            continue;
+        if (LK_SEND(d)) {
+            if (x) lk_send[d - LK_DSEND] = (int32_t)x - 1;   /* (no lock: the sound's own) */
+        } else if (x) {
+            lm |= 1u << d;
+            lv[d] = (uint8_t)(x - 1u);
+        }
+    }
     for (l = 0; l < SEQ_LANES; l++) {
         uint32_t note, vel, nn, nv, st = seq_lane(p, k, l, &note, &vel), tie_next = seq_lane(pn, kn, l, &nn, &nv) == SEQ_TIE;
         int32_t v = seq.v[l];
@@ -1282,6 +1527,8 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
         } else if (v >= 0 && seq.hold[l] && st != SEQ_REST && voice[v].gate) {   /* the last one slides into it */
             voice[v].inote = (uint8_t)note;
             voice[v].ivel = (uint8_t)vel;
+            voice[v].ilk_m = (uint16_t)lm;
+            if (lm) memcpy(voice[v].ilk, lv, sizeof lv);
             voice[v].islide = (uint8_t)bi;
             if (!l) last_note = (int32_t)note;
         } else {
@@ -1292,6 +1539,8 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
                 voice[w].inote = (uint8_t)note;
                 voice[w].ivel = (uint8_t)vel;
                 voice[w].iglide = l ? 0 : glide_from(note);   /* (a chord: its root glides, the rest land) */
+                voice[w].ilk_m = (uint16_t)lm;
+                if (lm) memcpy(voice[w].ilk, lv, sizeof lv);
                 voice[w].itrig = (uint8_t)bi;
                 voice[w].age = ++ages;
                 v = (int32_t)w;
@@ -1300,19 +1549,21 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
         seq.hold[l] = v >= 0 && (tie_next || (st != SEQ_REST && p->slide[k]));
         seq.v[l] = v;
     }
-    drum_step(p, k, bi);                        /* the drums' lanes */
+    drum_step(p, k, bi, len);                   /* the drums' lanes */
     seq.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.seq_gate) >> 23);
     seq.steps++;
-    if (seq.n % (eg.seq_spb ? eg.seq_spb : 4u) == 0u)   /* a beat: the metronome (the bar's first, higher) */
-        click_start(bi, seq.n % (4u * (eg.seq_spb ? eg.seq_spb : 4u)) == 0u);
+    if (seq.n % seq_spb() == 0u)                /* a beat: the metronome (the bar's first, higher) */
+        click_start(bi, seq.n % (4u * seq_spb()) == 0u);
     seq.n++;
 }
 
-static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; due: a step's tick came (MIDI clock) */
-{
+static void seq_block_run(uint32_t bi, uint32_t due)   /* a block of the sequencer; due: a step's tick came (MIDI */
+{                                               /* clock) */
     if (!eg.seq_play) {                         /* stopped: its notes go */
         seq_off(bi);
         seq.was = 0;
+        roll.left = 0;
+        lk_send[0] = lk_send[1] = -1;
         return;
     }
     if (!seq.was) {                             /* PLAY: from the first step (of the pattern, or of the song) */
@@ -1321,7 +1572,7 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
         seq.at.pos = seq.at.entry = seq.at.rep = 0;
         seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
         seq.n = 0;
-        seq.ci = seq.want_ci && !eg.arp_midi ? 4u * (eg.seq_spb ? eg.seq_spb : 4u) : 0u;   /* (a bar) */
+        seq.ci = seq.want_ci && !eg.arp_midi ? 4u * seq_spb() : 0u;   /* (a bar) */
         seq.want_ci = 0;
         seq.in_ci = 0;
         seq.now = 1;
@@ -1336,10 +1587,10 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
             if (seq.v[l] >= 0 && !seq.hold[l]) { voice[seq.v[l]].ioff = (uint8_t)bi; seq.v[l] = -1; }
     }
     if (eg.arp_midi) {                          /* on the MIDI clock: the step's tick (an odd one swung later) */
-        uint32_t slen = mc.period_q8 ? mc.period_q8 * (24u / (eg.seq_spb ? eg.seq_spb : 4u))
+        uint32_t slen = mc.period_q8 ? mc.period_q8 * (24u / seq_spb())
                                      : eg.seq_len_q8;   /* (the first tick: no tick length yet, its own tempo's) */
         if (due) {
-            uint32_t tps = 24u / (eg.seq_spb ? eg.seq_spb : 4u), odd = (uint32_t)(seq.count / (int32_t)tps) & 1u;
+            uint32_t tps = 24u / seq_spb(), odd = (uint32_t)(seq.count / (int32_t)tps) & 1u;
             seq.wait = odd ? (int32_t)(((uint64_t)slen * (uint32_t)eg.arp_swing) >> 23) : 0;
             seq.odd = odd;
         }
@@ -1358,6 +1609,190 @@ static void seq_block(uint32_t bi, uint32_t due) /* a block of the sequencer; du
         else seq.phase_q8 -= seq_step_len(seq.odd);
         seq.odd ^= 1u;
         seq_tick(bi, seq_step_len(seq.odd));
+    }
+}
+
+static void seq_block(uint32_t bi, uint32_t due)
+{
+    seq_block_run(bi, due);
+    roll_block(bi);                             /* (a step this block: its ratchet from it) */
+}
+
+/* ---- the looper: the notes played, recorded over its BARS (4 beats, 24 ticks a beat), then played back round and
+ * round, more going over them while REC stays on (overdub). Its clock is the sequencer's: the arp's tempo, or the
+ * MIDI clock's ticks; with the sequencer playing it starts on its next bar line, else on the first note. Not saved.
+ * The main loop hands each note over (loop_note: a ring) and asks for the rest (loop_cmd); the ISR stamps a note with
+ * where the loop is (QUANT: a note on to the nearest 1/16 or 1/8, its note off moved as far), keeps them in time order
+ * and plays them as the loop passes */
+#define LOOP_N 1024u
+#define LOOP_TPB 96u                            /* ticks a bar */
+enum { LP_EMPTY, LP_ARMED, LP_REC, LP_PLAY };   /* (LP_REC: the first pass, setting down the loop) */
+enum { LPC_NONE, LPC_REC, LPC_RECOFF, LPC_PLAY, LPC_STOP, LPC_CLEAR };
+typedef struct { uint16_t t; uint8_t f, note, vel, skip; } lev_t;   /* a tick, Q8 into it; vel 0: a note off; skip: */
+                                                                     /* (recorded ahead of where it plays: not this pass) */
+static struct {
+    lev_t ev[LOOP_N];
+    uint32_t n, idx;                            /* the events; the next to play */
+    uint32_t len, tick, acc_q8;                 /* its length (ticks); where it is: the tick, frames Q8 into it */
+    volatile uint32_t at;                       /* (where it is, for the page: ticks Q8) */
+    volatile uint8_t state, rec, run;
+    int8_t v[128];                              /* each note's voice, played back (-1: none) */
+    int16_t qd[128];                            /* each note's QUANT move, Q8 ticks (its note off moves as far) */
+    uint32_t held[4];                           /* notes recorded on and not yet off (bit n) */
+} lp = {.len = 2u * LOOP_TPB};
+static volatile struct { uint8_t note[16], vel[16]; uint32_t w; } lq;   /* (the main loop's notes: loop_note) */
+static uint32_t lq_r;
+static volatile uint8_t lp_cmd, lp_bars = 2, lp_quant;   /* (the main loop's: loop_cmd; BARS 1 2 4 8; QUANT) */
+
+static void loop_note(uint32_t note, uint32_t vel)   /* (the main loop) a note on (vel) or off (0), if recording */
+{
+    uint32_t w = lq.w;
+    if (!lp.rec || w - lq_r >= 16u) return;
+    lq.note[w % 16u] = (uint8_t)(note & 127u);
+    lq.vel[w % 16u] = (uint8_t)vel;
+    lq.w = w + 1u;
+}
+static void loop_cmd(uint32_t c)                /* (the main loop) LPC_REC .. LPC_CLEAR, taken at the next render */
+{
+    lp_cmd = (uint8_t)c;
+    if (c == LPC_REC) lp.rec = 1;               /* (from now: the notes go into the ring) */
+}
+
+static void loop_voice_off(uint32_t note, uint32_t bi)
+{
+    int32_t w = lp.v[note & 127u];
+    if (w >= 0 && voice[w].inote == (note & 127u)) voice[w].ioff = (uint8_t)bi;
+    lp.v[note & 127u] = -1;
+}
+static void loop_all_off(uint32_t bi)
+{
+    uint32_t k;
+    for (k = 0; k < 128u; k++)
+        if (lp.v[k] >= 0) loop_voice_off(k, bi);
+}
+
+static void loop_put(uint32_t at, uint32_t note, uint32_t vel)   /* an event at ticks Q8 at, in time order */
+{
+    uint32_t j = lp.n;
+    lev_t e;
+    if (lp.n >= LOOP_N) return;
+    at %= lp.len << 8;
+    e.t = (uint16_t)(at >> 8); e.f = (uint8_t)at; e.note = (uint8_t)note; e.vel = (uint8_t)vel;
+    while (j > 0u && ((uint32_t)lp.ev[j - 1u].t << 8 | lp.ev[j - 1u].f) > at) j--;
+    e.skip = j >= lp.idx;                       /* (ahead of the playhead: played already, live) */
+    memmove(&lp.ev[j + 1u], &lp.ev[j], (lp.n - j) * sizeof lp.ev[0]);
+    lp.ev[j] = e;
+    lp.n++;
+    if (j < lp.idx) lp.idx++;
+}
+
+static uint32_t loop_tq8(void)                  /* a tick, frames Q8 */
+{
+    uint32_t t = eg.arp_midi && mc.period_q8 ? mc.period_q8 : eg.tick_q8;
+    return t ? t : 1u;
+}
+
+static void loop_start(void)                    /* from the top */
+{
+    lp.tick = lp.acc_q8 = lp.idx = 0;
+    lp.run = 1;
+    if (lp.state == LP_ARMED) lp.state = LP_REC;
+}
+
+static void loop_take(uint32_t bi)              /* (each render's first block) the main loop's commands and notes */
+{
+    uint32_t c = lp_cmd, now, k;
+    lp_cmd = LPC_NONE;
+    switch (c) {
+    case LPC_REC:                               /* empty: a new loop, BARS long (it waits); else overdub */
+        if (lp.state == LP_EMPTY) {
+            lp.len = (uint32_t)(lp_bars ? lp_bars : 1u) * LOOP_TPB;
+            lp.state = LP_ARMED;
+            lp.run = 0;
+        } else if (!lp.run)
+            loop_start();
+        break;
+    case LPC_RECOFF:
+        lp.rec = 0;
+        if (lp.state == LP_ARMED) lp.state = LP_EMPTY;
+        if (lp.state == LP_REC) lp.state = LP_PLAY;   /* (cut short: the loop as BARS long all the same) */
+        for (k = 0; k < 128u; k++)              /* (keys still down: their notes end here) */
+            if (lp.held[k >> 5] >> (k & 31u) & 1u)
+                loop_put((lp.tick << 8 | (lp.acc_q8 * 256u / loop_tq8() & 255u)) + (uint32_t)(int32_t)lp.qd[k], k, 0);
+        memset(lp.held, 0, sizeof lp.held);
+        break;
+    case LPC_PLAY: if (lp.state >= LP_REC && !lp.run) loop_start(); break;
+    case LPC_STOP: lp.run = 0; loop_all_off(bi); break;
+    case LPC_CLEAR:
+        lp.rec = lp.run = 0;
+        lp.n = lp.idx = 0;
+        lp.state = LP_EMPTY;
+        loop_all_off(bi);
+        memset(lp.held, 0, sizeof lp.held);
+        break;
+    default: break;
+    }
+    if (lp.state == LP_ARMED && !eg.seq_play && lq.w != lq_r)
+        loop_start();                           /* (the sequencer stopped: from the first note) */
+    if (!lp.run) { lq_r = lq.w; return; }       /* (not running: nothing to record into) */
+    now = lp.tick << 8 | (lp.acc_q8 * 256u / loop_tq8() & 255u);
+    while (lq_r != lq.w) {
+        uint32_t i = lq_r % 16u, note = lq.note[i], vel = lq.vel[i], g = lp_quant == 1u ? 6u : lp_quant == 2u ? 12u : 0u;
+        int32_t at = (int32_t)now;
+        lq_r++;
+        if (vel) {
+            if (g) {                            /* QUANT: to the nearest line */
+                int32_t q = (int32_t)(((now + (g << 7)) / (g << 8)) * (g << 8));
+                lp.qd[note] = (int16_t)(q - at);
+                at = q;
+            } else
+                lp.qd[note] = 0;
+            lp.held[note >> 5] |= 1u << (note & 31u);
+        } else {
+            if (!(lp.held[note >> 5] >> (note & 31u) & 1u)) continue;   /* (on before the loop started) */
+            lp.held[note >> 5] &= ~(1u << (note & 31u));
+            at += lp.qd[note];
+        }
+        loop_put((uint32_t)(at < 0 ? at + (int32_t)(lp.len << 8) : at), note, vel);
+    }
+}
+
+static void loop_block(uint32_t bi, uint32_t ticked)   /* a block of the looper; ticked: a MIDI clock tick came */
+{
+    uint32_t t = loop_tq8(), end;
+    if (lp.state == LP_ARMED && lp_bar && eg.seq_play) {
+        loop_start();                           /* (the sequencer's bar line: from here) */
+        lp_bar = 0;
+        return;
+    }
+    lp_bar = 0;
+    if (!lp.run) return;
+    if (eg.arp_midi && mc.period_q8) {          /* on the MIDI clock: its ticks move it */
+        if (ticked) { lp.tick++; lp.acc_q8 = 0; }
+        else if ((lp.acc_q8 += BLK << 8) >= t) lp.acc_q8 = t - 1u;
+    } else
+        for (lp.acc_q8 += BLK << 8; lp.acc_q8 >= t; lp.acc_q8 -= t) lp.tick++;
+    if (lp.tick >= lp.len) {                    /* round again: the first pass done (REC on: overdub from here) */
+        lp.tick -= lp.len;
+        lp.idx = 0;
+        if (lp.state == LP_REC) lp.state = LP_PLAY;
+    }
+    end = lp.tick << 8 | (lp.acc_q8 * 256u / t & 255u);
+    lp.at = end;
+    while (lp.idx < lp.n && ((uint32_t)lp.ev[lp.idx].t << 8 | lp.ev[lp.idx].f) <= end) {
+        lev_t *e = &lp.ev[lp.idx++];
+        if (e->skip) { e->skip = 0; continue; }
+        if (lp.v[e->note] >= 0) loop_voice_off(e->note, bi);
+        if (e->vel) {                           /* (as the sequencer's notes start) */
+            uint32_t w = voice_pick(e->note);
+            voice[w].inote = e->note;
+            voice[w].ivel = e->vel;
+            voice[w].iglide = 0;
+            voice[w].ilk_m = 0;
+            voice[w].itrig = (uint8_t)bi;
+            voice[w].age = ++ages;
+            lp.v[e->note] = (int8_t)w;
+        }
     }
 }
 
@@ -1383,7 +1818,8 @@ static void arp_run(uint32_t nb)
     if (mc.last_at && (int32_t)(start - mc.last_at) > 22050)
         mc_bpm10 = 0;                           /* no clock for half a second */
     for (bi = 0; bi < nb; bi++) {
-        uint32_t len = arp_step_len(arp.odd), due = 0, sdue = 0;   /* (its own clock: the step running now) */
+        uint32_t len = arp_step_len(arp.odd), due = 0, sdue = 0, ticked = 0;   /* (its own clock: the step now) */
+        if (!bi) loop_take(0);                  /* (the looper: the main loop's notes and commands) */
         while (clk_r != clk.w) {                /* MIDI clock: the events of this block (one render back) */
             uint32_t k = clk_r % CLK_N, at = clk.at[k], st = clk.st[k];
             int32_t rel = (int32_t)(at + nb * BLK - start), eb = rel < 0 ? 0 : rel / (int32_t)BLK;
@@ -1401,10 +1837,11 @@ static void arp_run(uint32_t nb)
                 mc.last_at = at;
                 if (mc.period_q8) mc_bpm10 = 1102500u * 256u / mc.period_q8;   /* 60 * 44100 * 10 / 24 / period */
                 if (mc.running && eg.arp_midi) {
+                    ticked = 1;
                     mc.count++;
                     if (mc.count % (int32_t)tps == 0) due = 1;
                     if (eg.seq_play) {          /* the sequencer's ticks */
-                        uint32_t st2 = 24u / (eg.seq_spb ? eg.seq_spb : 4u);
+                        uint32_t st2 = 24u / seq_spb();
                         seq.count++;
                         if (seq.count % (int32_t)st2 == 0) sdue = 1;
                     }
@@ -1427,6 +1864,7 @@ static void arp_run(uint32_t nb)
             }
         }
         seq_block(bi, sdue);                    /* the sequencer, this block */
+        loop_block(bi, ticked);                 /* the looper */
         if (arp.v >= 0 && !eg.arp_tie) {        /* the gate: the note ends inside its step */
             arp.gate_left -= (int32_t)BLK;
             if (arp.gate_left <= 0) { voice[arp.v].ioff = (uint8_t)bi; arp.v = -1; }
@@ -1461,6 +1899,61 @@ static void arp_run(uint32_t nb)
         }
     }
     arp.n_was = n;
+}
+
+static void voice_take_locks(uint32_t v)        /* (a note starts, or slides in) the sequencer's locks for it */
+{
+    voice[v].lk_m = voice[v].ilk_m;
+    if (voice[v].ilk_m) memcpy(voice[v].lk, voice[v].ilk, sizeof voice[v].lk);
+    voice[v].ilk_m = 0;
+}
+/* the voice's locks on the filter's knobs: its CUT, RES, F.ENV, DRIVE in place of the sound's (and what they derive).
+ * (A struct, so the render's own stay in registers) */
+typedef struct { int32_t cut, fk, c_fb, c_in, drive, f_env; uint32_t res, drv; } flk_t;
+/* the high-pass on voice v's block (x: past the low-pass), then DIRECT, the amp, into out (its own function: the
+ * render's filter loop keeps its registers). A zero-delay-feedback SVF (Simper), g its cutoff: what is left of the
+ * input past the band (times its damping) and the low; at k 2 (HP RES 0) two one-poles' 12 dB/oct, no peak */
+static __attribute__((noinline)) void hp_block(uint32_t v, int32_t g, int32_t *x, const int32_t *dir, int32_t a,
+                                               int32_t da, int32_t *out)
+{
+    int32_t f[3], ic1 = voice[v].hp1, ic2 = voice[v].hp2, k = voice[v].hp_ks, peak = k < PR_RES_K[0];
+    uint32_t i;
+    svf_coefs((uint32_t)g, k, f);
+    for (i = 0; i < BLK; i++, a += da) {
+        int32_t s = x[i], v1, v2, v3 = s - ic2;
+        v1 = (int32_t)(((int64_t)f[0] * ic1 + (int64_t)f[1] * v3) >> 28);
+        v2 = ic2 + (int32_t)(((int64_t)f[1] * ic1 + (int64_t)f[2] * v3) >> 28);
+        ic1 = 2 * v1 - ic1;
+        ic2 = 2 * v2 - ic2;
+        s -= (int32_t)(((int64_t)k * v1) >> 24) + v2;
+        s = peak ? saturate(s) : clip15(s);     /* (the peak rounds off loud, not clips) */
+        if (dir)                                /* DIRECT: what went past the filter, back in */
+            s = clip15(s + dir[i]);
+        s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
+        out[2u * i] += s;
+        out[2u * i + 1u] += s;
+    }
+    voice[v].hp1 = ic1;
+    voice[v].hp2 = ic2;
+}
+
+static __attribute__((noinline)) void voice_filter_locks(uint32_t v, uint32_t comb, flk_t *q)
+{
+    uint32_t lm = voice[v].lk_m;
+    const uint8_t *lk = voice[v].lk;
+    if (lm >> LK_CUTOFF & 1u)
+        q->cut = 64 + (int32_t)(lk[LK_CUTOFF] & 127u) * ((int32_t)PR_FILT_N - 1 - 64) / 127;
+    if (lm >> LK_RES & 1u) {
+        q->res = lk[LK_RES] & 127u;
+        q->fk = PR_RES_K[q->res];
+        if (comb) comb_of(q->res, eg.flt_type, &q->c_fb, &q->c_in);
+    }
+    if (lm >> LK_FENV & 1u)
+        q->f_env = ((int32_t)(lk[LK_FENV] & 127u) - 64) * 240 / 63;
+    if (lm >> LK_DRIVE & 1u) {
+        q->drv = lk[LK_DRIVE] & 127u;
+        q->drive = drive_of(q->drv);
+    }
 }
 
 /* ---- the audio ISR: add n stereo frames (L R) to out */
@@ -1499,6 +1992,7 @@ static void engine_render(int32_t *out, uint32_t n)
     for (v = 0; v < NV; v++) {
         if (voice[v].trig) {                    /* a note from the main loop: from the first block */
             voice[v].trig = 0;
+            voice[v].lk_m = 0;                  /* (the sound's knobs) */
             voice_start(v);
         }
         if (!voice_on(v) && voice[v].itrig == 0xFFu) {
@@ -1517,12 +2011,14 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].gk = PR_ENV_EXP[SEQ_SLIDE_K];
                 voice[v].note = voice[v].inote;
                 voice[v].vel = voice[v].ivel;
+                voice_take_locks(v);
                 voice_tune(v);
             }
             if (voice[v].itrig == b / BLK) {
                 voice[v].itrig = 0xFF;
                 voice[v].note = voice[v].inote;
                 voice[v].vel = voice[v].ivel;
+                voice_take_locks(v);
                 voice[v].glide_q8 = voice[v].iglide;
                 voice[v].gk = eg.glide_k;
                 voice_tune(v);
@@ -1536,7 +2032,9 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].glide_q8 -= (int32_t)(((int64_t)voice[v].glide_q8 * voice[v].gk) >> 16);
                 if (voice[v].glide_q8 > -64 && voice[v].glide_q8 < 64) voice[v].glide_q8 = 0;
             }
-            int32_t a_to = env_step(&voice[v].amp, gate, eg.a_att, eg.a_dec, eg.a_sus, eg.a_rel) >> 9;
+            uint32_t lm = voice[v].lk_m;        /* (the step's locks: these knobs the note's own) */
+            int32_t a_to = env_step(&voice[v].amp, gate, eg.a_att, lm >> LK_ADEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_ADEC]] : eg.a_dec,
+                                    eg.a_sus, lm >> LK_AREL & 1u ? PR_ENV_EXP[voice[v].lk[LK_AREL]] : eg.a_rel) >> 9;
             uint32_t hold = gate || (eg.vca && voice[v].drone);   /* (a drone: its other envelopes held, as if down) */
             int32_t a, da, l, acc[BLK], dir[BLK], *dst;   /* (into the filter; DIRECT: past it, to the amp) */
             uint32_t direct = 0;
@@ -1546,7 +2044,7 @@ static void engine_render(int32_t *out, uint32_t n)
             int32_t x2 = (g2[bi] * eg.l2_amt) >> 15, pz2 = (x2 * 127) >> 15, me_amt = eg.me_amt[0];
             if (eg.l2_dest == DEST_MENVAMT) {   /* (the mod envelope's amount: +- the whole of it) */
                 me_amt += x2;
-                me_amt = me_amt > 32767 ? 32767 : me_amt < -32767 ? -32767 : me_amt;
+                me_amt = clip15(me_amt);
             }
             int32_t me = menv_step(&voice[v].menv[0], hold, 0) >> 9, me_x = (me * me_amt) >> 15;
             int32_t me2 = menv_step(&voice[v].menv[1], hold, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
@@ -1572,12 +2070,12 @@ static void engine_render(int32_t *out, uint32_t n)
             if (eg.me_dest[0] == DEST_LFOAMT) { /* the LFO's depth: x 0 .. 2 */
                 int32_t f = 32767 + me_x;
                 l = (l * (f < 0 ? 0 : f)) >> 15;
-                l = l > 32767 ? 32767 : l < -32767 ? -32767 : l;
+                l = clip15(l);
             }
             if (eg.me_dest[1] == DEST_LFOAMT) {
                 int32_t f = 32767 + me2_x;
                 l = (l * (f < 0 ? 0 : f)) >> 15;
-                l = l > 32767 ? 32767 : l < -32767 ? -32767 : l;
+                l = clip15(l);
             }
             lfo_mods(l, &m);
             if (DEST_LFO_OK(eg.me_dest[0]))     /* any of the LFO's destinations */
@@ -1585,6 +2083,8 @@ static void engine_render(int32_t *out, uint32_t n)
             if (DEST_LFO_OK(eg.me_dest[1]))
                 mod_add(&m, eg.me_dest[1], eg.me_amt[1], me2, 1);
             mod_add(&m, eg.l2_dest, eg.l2_amt, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
+            if (eg.mm_n)                        /* the mod matrix */
+                mm_mods(&m, v, l, g2[bi], me, me2);
             m.pitch16[0] += bend16;             /* pitch bend: every note (and the comb's keytrack with it) */
             m.pitch16[1] += bend16;
             m.vmod = 32767;                     /* velocity: softer notes quieter (by its square), darker, less bright */
@@ -1619,7 +2119,7 @@ static void engine_render(int32_t *out, uint32_t n)
                     lvl = 0;                    /* (the split: the other side's oscillator; LIVE: muted) */
                 if (m.mix)                      /* the LFO's MIX: one oscillator down as the other stays */
                     lvl = (lvl * (32767 - (o ? (m.mix < 0 ? -m.mix : 0) : (m.mix > 0 ? m.mix : 0)))) >> 15;
-                am1 = eg.m_amt[o][0] + m.amt[o];
+                am1 = (lm >> (LK_FM1 + o) & 1u ? PR_CURVE_Q15[voice[v].lk[LK_FM1 + o]] : eg.m_amt[o][0]) + m.amt[o];
                 am2 = eg.m_amt[o][1] + m.amt[o];
                 am1 = am1 < 0 ? 0 : am1 > 32767 ? 32767 : am1;
                 am2 = am2 < 0 ? 0 : am2 > 32767 ? 32767 : am2;
@@ -1659,24 +2159,10 @@ static void engine_render(int32_t *out, uint32_t n)
                         t[k].f = (int32_t)f;
                     }
                 }
-                if (!e2 && !e2_to) {            /* mod 2 silent: two operators */
-                    for (i = 0; i < BLK; i++, e1 += d1) {
-                        int32_t y1 = (src_at(&t[1], p1) * e1) >> 15;
-                        dst[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
-                        p0 += i0; p1 += i1;
-                    }
-                    p2 += i2 * BLK;
-                } else {
-                    for (i = 0; i < BLK; i++, e1 += d1, e2 += d2) {
-                        int32_t y2 = (src_at(&t[2], p2) * e2) >> 15;
-                        int32_t y1 = (modulated(m2, &t[1], p1, y2, e2) * e1) >> 15;
-                        dst[i] += (modulated(m1, &t[0], p0, y1, e1) * lvl) >> 15;
-                        p0 += i0; p1 += i1; p2 += i2;
-                    }
+                {                               /* (mod 2 silent: two operators) */
+                    const uint32_t inc[NOP] = {i0, i1, i2};
+                    osc_block(dst, t, voice[v].ph[o], inc, m1, m2, lvl, e1, d1, e2, d2, !e2 && !e2_to);
                 }
-                voice[v].ph[o][0] = p0;
-                voice[v].ph[o][1] = p1;
-                voice[v].ph[o][2] = p2;
             }
             if (eg.n_lvl && !(live_mute >> LM_NOISE & 1u)) {   /* the noise (its clock follows the note: pitch, glide, */
                                                 /* bend) */
@@ -1686,28 +2172,36 @@ static void engine_render(int32_t *out, uint32_t n)
                 direct |= eg.route[2];
             }
             {                                   /* drive, the filter, the high-pass, the amp: the voice into both channels */
-                int32_t fe = env_step(&voice[v].flt, hold, eg.f_att, eg.f_dec, eg.f_sus, eg.f_rel);
+                int32_t fe = env_step(&voice[v].flt, hold, eg.f_att, lm >> LK_FDEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_FDEC]]
+                                                                                    : eg.f_dec, eg.f_sus, eg.f_rel);
                 int32_t f[3], f2[3], a1, a2, a3, d1, d2, d3, b1 = 0, b2 = 0, b3 = 0, e1 = 0, e2 = 0, e3 = 0;
                 int32_t ic1 = voice[v].ic1, ic2 = voice[v].ic2, ic3 = voice[v].ic3, ic4 = voice[v].ic4, pk;
-                int32_t drive = eg.drive, hg, hp1 = voice[v].hp1, hp2 = voice[v].hp2, c;
+                int32_t drive = eg.drive, hg, a0 = a, c;
                 int32_t fk = eg.f_k, hp_g = eg.hp_g, c_fb = eg.comb_fb, c_in = eg.comb_in, c_dk = eg.comb_dk;
-                int32_t f_env = eg.f_env;
+                int32_t f_env = eg.f_env, f_cut = eg.f_cut;
+                uint32_t kres = eg.res, kdrv = eg.drv;   /* (RES, DRIVE: the knobs, or the step's locks) */
                 int32_t cfb = 0, cin = 0, cdk = 0, cd = 0, dd = 0, clp = voice[v].clp, ap_a = 0;
                 int32_t ax0 = 0, ax1 = 0, ax2 = 0, ax3 = 0, ay0 = 0, ay1 = 0, ay2 = 0, ay3 = 0;
                 uint32_t cw = voice[v].cw, type = eg.flt_type, comb = type >= FLT_COMBP, lp24 = type == FLT_LP24, self;
                 int16_t *cb = comb_buf[v];
+                if (lm) {                       /* the step's locks on the filter's knobs (LFO 2 moves them from there) */
+                    flk_t q = {f_cut, fk, c_fb, c_in, drive, f_env, kres, kdrv};
+                    voice_filter_locks(v, comb, &q);
+                    f_cut = q.cut; fk = q.fk; c_fb = q.c_fb; c_in = q.c_in; drive = q.drive; f_env = q.f_env;
+                    kres = q.res; kdrv = q.drv;
+                }
                 switch (eg.l2_dest) {           /* LFO 2 on the filter's knobs */
                 case DEST_RES:
-                    fk = PR_RES_K[knob_moved(eg.res, pz2)];
-                    if (comb) comb_of(knob_moved(eg.res, pz2), type, &c_fb, &c_in);
+                    fk = PR_RES_K[knob_moved(kres, pz2)];
+                    if (comb) comb_of(knob_moved(kres, pz2), type, &c_fb, &c_in);
                     break;
-                case DEST_DRIVE: drive = drive_of(knob_moved(eg.drv, pz2)); break;
+                case DEST_DRIVE: drive = drive_of(knob_moved(kdrv, pz2)); break;
                 case DEST_HPF: hp_g = hp_g_of(knob_moved(eg.hp, pz2)); break;
                 case DEST_DAMP: c_dk = damp_of(knob_moved(eg.damp, pz2)); break;
                 case DEST_FENV: f_env += (x2 * 240) >> 15; break;   /* +-60 semitones */
                 default: break;
                 }
-                voice[v].f_cs = glide(voice[v].f_cs, eg.f_cut << 8);   /* knob moves glide, they do not step */
+                voice[v].f_cs = glide(voice[v].f_cs, f_cut << 8);   /* knob moves glide, they do not step */
                 voice[v].f_ks = glide(voice[v].f_ks, fk);
                 self = voice[v].f_ks < K_SELF;  /* (the top of RES: past SELF_LVL the damping rises; at k < 0 the */
                 if (!self)                      /*  filter grows into a sine and settles there, at any cutoff) */
@@ -1716,6 +2210,7 @@ static void engine_render(int32_t *out, uint32_t n)
                     ic1 = 2048;                 /* (nothing in it yet: a nudge, as an analog filter's noise; it grows */
                                                 /*  from there to its level, down to the lowest cutoffs) */
                 voice[v].hp_gs = hg = glide(voice[v].hp_gs, hp_g);
+                voice[v].hp_ks = glide(voice[v].hp_ks, eg.hp_k);
                 c = cut_at((uint32_t)(voice[v].note + voice[v].shift), fe, voice[v].f_cs + (m.cut << 8), f_env);
                 if (comb) {                     /* the comb: the cutoff (keytracked, the envelope, the mods) -> a delay */
                     int32_t p16 = eg.comb_p16 + ((c - voice[v].f_cs) >> 6)   /* (its own CUT scale: in tune) */
@@ -1800,7 +2295,7 @@ static void engine_render(int32_t *out, uint32_t n)
                     ay0 = voice[v].apy[0]; ay1 = voice[v].apy[1]; ay2 = voice[v].apy[2]; ay3 = voice[v].apy[3];
                 }
                 for (i = 0; i < BLK; i++, a += da) {
-                    int32_t s = acc[i] > 32767 ? 32767 : acc[i] < -32767 ? -32767 : acc[i], v1, v2, v3;
+                    int32_t s = clip15(acc[i]), v1, v2, v3;
                     if (drive)
                         s = saturate((s * drive) >> 12);
                     if (comb) {                 /* the comb: the line read a period back (interpolated), damped, fed back */
@@ -1809,7 +2304,7 @@ static void engine_render(int32_t *out, uint32_t n)
                         u = c0 + (((cb[(ri + 1u) & COMB_MASK] - c0) * (int32_t)(pos & 255u)) >> 8);
                         if (ap_a) {             /* SPREAD: y = a (x - y1) + x1, four times (in registers) */
 #define AP(x, y) do { int32_t t = (((u - y) * ap_a) >> 14) + x; x = u; \
-                      y = u = t > 32767 ? 32767 : t < -32767 ? -32767 : t; } while (0)
+                      y = u = clip15(t); } while (0)
                             AP(ax0, ay0); AP(ax1, ay1); AP(ax2, ay2); AP(ax3, ay3);
 #undef AP
                         }
@@ -1825,7 +2320,7 @@ static void engine_render(int32_t *out, uint32_t n)
                             v2 = ic4 + (int32_t)(((int64_t)b2 * ic3 + (int64_t)b3 * v3) >> 28);
                             ic3 = 2 * v1 - ic3;
                             ic4 = 2 * v2 - ic4;
-                            s = v2 > 32767 ? 32767 : v2 < -32767 ? -32767 : v2;
+                            s = clip15(v2);
                             b1 += e1; b2 += e2; b3 += e3;
                         }
                         v3 = s - ic2;           /* the zero-delay-feedback SVF (Simper): stable at any cutoff */
@@ -1837,22 +2332,16 @@ static void engine_render(int32_t *out, uint32_t n)
                             int32_t m = ic1 < 0 ? -ic1 : ic1;
                             if (m > pk) pk = m;
                         }
-                        s = v2 > 32767 ? 32767 : v2 < -32767 ? -32767 : v2;   /* the low-pass */
+                        s = clip15(v2);   /* the low-pass */
                         a1 += d1; a2 += d2; a3 += d3;
                     }
-                    if (hg) {                   /* the high-pass: two one-poles (TPT), what each lets through low gone */
-                        int32_t u = ((s - hp1) * hg) >> 15, lp = u + hp1;
-                        hp1 = lp + u;
-                        s -= lp;
-                        u = ((s - hp2) * hg) >> 15;
-                        lp = u + hp2;
-                        hp2 = lp + u;
-                        s -= lp;
-                        s = s > 32767 ? 32767 : s < -32767 ? -32767 : s;
+                    if (hg) {                   /* the high-pass, the rest: hp_block, after the loop */
+                        acc[i] = s;
+                        continue;
                     }
                     if (direct) {               /* DIRECT: what went past the filter, back in */
                         s += dir[i];
-                        s = s > 32767 ? 32767 : s < -32767 ? -32767 : s;
+                        s = clip15(s);
                     }
                     s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
                     out[2u * (b + i)] += s;
@@ -1863,8 +2352,10 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].ic2 = comb ? 0 : ic2;
                 voice[v].ic3 = lp24 ? ic3 : 0;
                 voice[v].ic4 = lp24 ? ic4 : 0;
-                voice[v].hp1 = hg ? hp1 : 0;
-                voice[v].hp2 = hg ? hp2 : 0;
+                if (hg)
+                    hp_block(v, hg, acc, direct ? dir : 0, a0, da, out + 2u * b);
+                else
+                    voice[v].hp1 = voice[v].hp2 = 0;
                 voice[v].clp = clp;
                 if (ap_a) {
                     voice[v].apx[0] = ax0; voice[v].apx[1] = ax1; voice[v].apx[2] = ax2; voice[v].apx[3] = ax3;
@@ -1884,6 +2375,7 @@ static void engine_render(int32_t *out, uint32_t n)
     {                                           /* the drums: some into the effects, then all of it dry */
         static int32_t bus[MAXBLK * BLK];
         int dr = drums_render(bus, n <= MAXBLK * BLK ? n : MAXBLK * BLK);
+        modfx_render(out, n);                   /* CRUSH, MOD FX: the voices' alone */
         fx_render(out, n, g2, dr ? bus : 0);    /* the effects, over all the voices (LFO 2 on them) */
         if (dr)
             for (i = 0; i < n && i < MAXBLK * BLK; i++) {
@@ -1988,6 +2480,7 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
     eg.f_k = PR_RES_K[patch.res & 127u];
     eg.drive = drive_of(patch.drive);
     eg.hp_g = hp_g_of(patch.hp_cut);
+    eg.hp_k = hp_k_of(patch.hp_res);
     eg.res = patch.res & 127u;
     eg.drv = patch.drive & 127u;
     eg.hp = patch.hp_cut & 127u;
@@ -2033,6 +2526,20 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.me_loop[k] = e[4] ? 1u : 0u;
         eg.me_dest[k] = e[5] < DEST_N ? e[5] : DEST_OFF;
         eg.me_amt[k] = eg.me_dest[k] == DEST_OFF ? 0 : d < 0 ? -q : q;
+    }
+    {                                           /* the mod matrix: its routes in use, packed */
+        uint32_t n = 0;
+        for (k = 0; k < MM_SLOTS; k++) {
+            int32_t d = (int32_t)(patch.mm_amt[k] & 127u) - 64, mag = d < 0 ? -d : d, q = PR_CURVE_Q15[mag * 127 / 64];
+            if (!patch.mm_src[k] || patch.mm_src[k] >= MM_N || !DEST_LFO_OK(patch.mm_dest[k]) ||
+                patch.mm_dest[k] == DEST_OFF || !d)
+                continue;
+            eg.mm_src[n] = patch.mm_src[k];
+            eg.mm_dest[n] = patch.mm_dest[k];
+            eg.mm_amt[n] = d < 0 ? -q : q;
+            n++;
+        }
+        eg.mm_n = (uint8_t)n;
     }
     eg.vel_amp = (int32_t)(patch.vel_amp & 127u) * 32767 / 127;
     eg.vel_mod = (int32_t)(patch.vel_mod & 127u) * 32767 / 127;
@@ -2106,6 +2613,7 @@ static void engine_init(void)
     memset(drv, 0, sizeof drv);                 /* (no drum playing) */
     memset((void *)dr_midi, 0, sizeof dr_midi);
     memset(&dflt, 0, sizeof dflt);              /* (the drums' filter: still) */
+    memset(lp.v, -1, sizeof lp.v);              /* (the looper: no note playing) */
     l2_ph = 0;                                  /* (LFO 2 from the top: the same every time) */
     for (v = 0; v < NV; v++) {
         voice[v].itrig = voice[v].ioff = voice[v].islide = 0xFF;
@@ -2202,6 +2710,7 @@ static void arp_key_up(uint32_t note)
         }
 }
 
+static void engine_wheel(uint32_t v) { wheel15 = (int32_t)(v & 127u) * 258; }   /* MIDI's mod wheel (CC 1) 0..127 */
 static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16383 (8192: none), +-range st */
 {
     int32_t d = (int32_t)v14 - 8192;
@@ -2210,12 +2719,13 @@ static void engine_bend(uint32_t v14, uint32_t range)   /* MIDI pitch bend 0..16
 
 static void engine_seq_play(uint32_t on) { eg.seq_play = on ? 1u : 0u; }   /* the sequencer: run / stop (PLAY) */
 /* a drum, now (the DRUM page's keys, MIDI): sound DR_KICK_S .. DR_FLAM_S at velocity vel (1 .. 127) */
-static void engine_drum(uint32_t sound, uint32_t vel) { if (sound < 5u) dr_midi[sound] = (uint8_t)(vel ? vel : 1u); }
+static void engine_drum(uint32_t sound, uint32_t vel) { if (sound <= DR_FLAM_S) dr_midi[sound] = (uint8_t)(vel ? vel : 1u); }
 static int engine_drum_note(uint32_t note)      /* a MIDI note's sound on channel 10 (General MIDI's), or -1 */
 {
     switch (note) {
     case 35: case 36: return DR_KICK_S;
-    case 37: case 38: case 39: case 40: return DR_SNARE_S;
+    case 37: case 38: case 40: return DR_SNARE_S;
+    case 39: return DR_CLAP_S;
     case 42: case 44: return DR_CHAT_S;
     case 46: return DR_OHAT_S;
     default: return -1;
@@ -2232,6 +2742,15 @@ static void engine_seq_mute(uint32_t lanes, uint32_t parts)   /* lanes that rest
 {
     seq.rec_part = (uint8_t)parts;
     seq.rec_mute = (uint8_t)lanes;
+}
+
+static void engine_seq_skip_drum(uint32_t d, uint32_t ord)   /* drum d recorded into the step of count ord (as */
+{                                               /* engine_seq_now gives it): if it is still to come, it skips d once */
+    if (seq.dr_skip_n != ord) {
+        seq.dr_skip = 0;
+        seq.dr_skip_n = ord;
+    }
+    seq.dr_skip |= (uint8_t)(1u << d % DRUMS);
 }
 
 /* the step a note played now falls on (recording): the one playing, or the next once past its middle; and its count

@@ -127,6 +127,8 @@ def render(d, fps, size, tail, splash, ver=None):
     env = dict(os.environ)
     if (d / "state.bin").exists():              # (none: a scripted take, from the default sound)
         env["PRYSM_STATE"] = str(d / "state.bin")
+    if (d / "seqstore.bin").exists():           # (tools/film.py: each slot's own sequencer)
+        env["PRYSM_SEQSTORE"] = str(d / "seqstore.bin")
     print(f"playing the take again ({(last + off) / 1000 + tail:.1f} s at {fps} fps)...")
     subprocess.run([str(exe), str(work / "f"), str(work / "script.txt"), str(fps)], env=env, check=True,
                    stdout=subprocess.DEVNULL)

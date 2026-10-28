@@ -23,24 +23,30 @@ sys.path.insert(0, str(ROOT / "tools"))
 # ---- the firmware's knobs and default sound
 
 PAGES = {"OSC1": "OSC 1", "OSC2": "OSC 2", "NOISE": "NOISE", "FILTER": "FILTER", "AMP": "AMP", "FENV": "F.ENV", "MENV": "M.ENV 1",
-         "MENV2": "M.ENV 2", "LFO": "LFO", "LFO2": "LFO 2",
-         "MIX": "MIX", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "DRUM", "CHO": "CHORUS", "DLY": "DELAY", "REV": "REVERB",
-         "SETUP": "SETUP", "PATCH": "PATCH", "SCOPE": "SCOPE"}   # (ui.c's order: PG_OSC1 .. PG_SETUP, PG_PATCH, PG_SCOPE)
+         "MENV2": "M.ENV 2", "LFO": "LFO", "LFO2": "LFO 2", "MATRIX": "MATRIX",
+         "MIX": "MIX", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "DRUM", "LOOP": "LOOP", "CHO": "CHORUS", "DLY": "DELAY",
+         "REV": "REVERB", "MFX": "MOD FX", "CRUSH": "CRUSH", "SETUP": "SETUP", "PATCH": "PATCH", "SCOPE": "SCOPE", "LIVE": "LIVE"}   # (ui.c's order: PG_OSC1 .. PG_SETUP,
+                                                #  PG_PATCH, PG_SCOPE, PG_LIVE)
 PG = {p: i for i, p in enumerate(PAGES)}
 ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"],
         "NOISE": ["NOISE"],
         "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL", "VCA"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
         "MENV2": ["ENV", "DEST"], "LFO": ["LFO", "DEST"],
-        "LFO2": ["LFO", "DEST"], "MIX": ["OSC", "ROUTE", "GLIDE"], "ARP": ["ARP", "TIME"],
-        "SEQ": ["STEP", "CHORD", "PATTERN", "EDIT", "CLICK", "SONG", "ENTRY"], "DRUM": ["STEP", "KICK", "SNARE", "HAT", "BUS"],
-        "CHO": ["CHORUS"], "DLY": ["DELAY", "D.MOD"], "REV": ["REVERB", "R.MOD"], "SETUP": ["MIDI"],
-        "PATCH": ["SAVE", "LOAD", "INIT"], "SCOPE": []}
+        "LFO2": ["LFO", "DEST"], "MATRIX": ["MOD 1", "MOD 2", "MOD 3", "MOD 4"],
+        "MIX": ["OSC", "ROUTE", "GLIDE", "SPLIT"], "ARP": ["ARP", "TIME"],
+        "SEQ": ["STEP", "CHORD", "LOCK", "PATTERN", "EDIT", "PARTS", "CLICK", "SONG", "ENTRY"],
+        "DRUM": ["STEP", "ROLL", "KICK", "SNARE", "HAT", "CLAP", "BUS", "KIT", "EDIT"], "LOOP": ["LOOP"],
+        "CHO": ["CHORUS"], "DLY": ["DELAY", "D.MOD"], "REV": ["REVERB", "R.MOD"], "MFX": ["MOD FX", "TONE"],
+        "CRUSH": ["CRUSH"], "SETUP": ["MIDI"],
+        "PATCH": ["SAVE", "LOAD", "SOUND", "INIT", "UNDO"], "SCOPE": [], "LIVE": ["PLAY", "K1", "K2", "K3", "K4"]}
 BTN = {"FX": 2, "SELECT": 3, "ENV": 4, "LFO": 5, "EDIT": 6, "GLO": 7, "HOME": 8, "SAVE": 9, "ARP": 10, "SEQ": 11,
        "PLAY": 12, "REC": 13}
 ENC_SELECT, ENC_KNOB1, ENC_PRESETS = 0, 2, 6
 TURN_MS = 70                                    # between knob events: slower than the UI's fast turn (60 ms: x 3)
-STEPPED = {7, 9, 11, 16, 22, 25, 28, 29, 56, 58}   # ui.c's kinds that move a step per two detents (modes, waves, on / off,
-                                                #  the noise's TYPE, the routes)
+STEPPED = {7, 9, 11, 16, 22, 25, 28, 29, 56, 58, 67, 76, 77, 79, 80, 83, 84, 85, 86}   # ui.c's kinds that move a step
+                                                #  per two detents (modes, waves, on / off, the noise's TYPE, the
+                                                #  routes, the split's octaves; the kit, a lock lane, the matrix's
+                                                #  source, MOD FX's type, the looper's)
 SKIP_DEST = {13, 14}                            # (LFORATE, LFOAMT: the mod envelope's own; the LFOs' knobs skip them)
 
 _info = None
@@ -60,7 +66,8 @@ def info():
            'int main(void)\n{\n    uint32_t i;\n    edit = PATCH_INIT;\n'
            '    for (i = 0; i < sizeof edit; i++) printf("%u ", ((uint8_t *)&edit)[i]);\n    printf("\\n");\n'
            '    for (i = 0; i < prm_n(); i++) printf("%s\\n", prm_info(i));\n'
-           '    printf("seq %u\\n", (unsigned)__builtin_offsetof(patch_t, arp_on));\n'
+           '    printf("seq %u %u %u %u %u\\n", (unsigned)__builtin_offsetof(patch_t, arp_on), gset.knob[0], gset.knob[1],\n'
+           '           gset.knob[2], gset.knob[3]);\n'
            '    return 0;\n}\n')
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
@@ -76,30 +83,81 @@ def info():
         k = (names[page], row, int(knob))       # (a knob's other parameter, PIT1 / PIT2: under k + ("alt",))
         knobs[k + ("alt",) if k in knobs else k] = (int(off), int(mx), int(mn), int(kind), label)
     s = [int(x) for x in out[-1].split()[1:]]
-    _info = {"init": init, "knobs": knobs, "arp_on": s[0]}
+    _info = {"init": init, "knobs": knobs, "arp_on": s[0], "live": s[1:5]}   # (live: the LIVE screen's K1 .. K4, as made)
     return _info
 
 
 def gen_states(states):
-    """Each (path, patch bytes, page, rows {page: row}, seq cursor, PATCH screen row): a take's start state (capture.c's cap_state),
-    the sound as given, the default as the last saved (so a changed sound shows its *), no slot."""
+    """Each (path, patch bytes, page, rows {page: row}, seq cursor, PATCH screen row, slots, load): a take's start state
+    (capture.c's cap_state), the sound as given, the default as the last saved (so a changed sound shows its *), no
+    slot; or with slots {n: (patch bytes, Seq)}, those slots saved, each with its own sequencer (seqstore.bin beside
+    state.bin), and slot `load` loaded, its sequencer playing."""
     body = []
-    for i, (path, patch, pg, rows, cursor, pa_row) in enumerate(states):
+    for i, (path, patch, pg, rows, cursor, pa_row, slots, load) in enumerate(states):
+        store = str(Path(path).with_name("seqstore.bin"))
+        body.append("    seqs_init();\n    seq_owner = -1;\n    memset(host_seqs_n, 0, sizeof host_seqs_n);\n"
+                    "    memset(bank.used, 0, sizeof bank.used);")
         body.append(f"    {{ static const uint8_t b[] = {{{','.join(str(x) for x in patch)}}};\n"
                     f"      memcpy(&edit, b, sizeof edit); }}\n"
                     f"    clean = PATCH_INIT;\n    cur_slot = -1;\n    gset.slot = -1;\n    page = {pg};\n"
                     f"    memset(row, 0, sizeof row);\n    pa_slot = 0;\n    pa_row = {pa_row};\n    seq_cursor = {cursor};")
         body += [f"    row[{p}] = {n};" for p, n in rows.items()]
+        for n, (sp, sq) in sorted((slots or {}).items()):
+            body.append(f"    {{ static const uint8_t b[] = {{{','.join(str(x) for x in sp)}}};\n"
+                        f"      memcpy(&bank.p[{n - 1}], b, sizeof(patch_t)); bank.used[{n - 1}] = 1; }}\n"
+                        f"    seqs_init();\n" + "".join(f"    {c}\n" for c in sq.c) +
+                        f"    seqstore_save({n - 1}, &seqs, sizeof seqs);")
+        if load:
+            body.append(f"    edit = clean = bank.p[{load - 1}];\n    cur_slot = gset.slot = {load - 1};\n"
+                        f"    seqstore_load({load - 1}, &seqs, sizeof seqs);\n    seq_owner = {load - 1};")
+        elif slots:
+            body.append("    seqs_init();")
         body.append(f"    n = cap_state(cap_buf, 0);\n    g = fopen(\"{path}\", \"wb\");\n"
                     f"    fwrite(cap_buf, 1, n, g);\n    fclose(g);")
+        if slots:                               # (capture.c reads it back: PRYSM_SEQSTORE)
+            body.append(f"    g = fopen(\"{store}\", \"wb\");\n    for (s = 0; s < SEQSTORE_N; s++) {{\n"
+                        f"        fwrite(&host_seqs_n[s], 4, 1, g);\n        fwrite(host_seqs[s], 1, host_seqs_n[s], g);\n"
+                        f"    }}\n    fwrite(&seq_owner, 4, 1, g);\n    fclose(g);")
+        else:
+            Path(store).unlink(missing_ok=True)
     src = ('#define main prysm_host_main\n#include "prysm.c"\n#undef main\nint main(void)\n{\n    FILE *g;\n'
-           '    uint32_t n;\n    bank.version = PATCH_VERSION;\n    seqs_init();\n' + "\n".join(body) + "\n    return 0;\n}\n")
+           '    uint32_t n, s;\n    bank.version = PATCH_VERSION;\n' + "\n".join(body) + "\n    return 0;\n}\n")
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
         (t / "states.c").write_text(src)
         subprocess.run([cc(), "-O0", "-w", "-DDINGHY_HOST", f"-I{ROOT / 'firmware/src'}", f"-I{ROOT / 'firmware/gen'}",
                         "-o", str(t / "states"), str(t / "states.c")], check=True)
-        subprocess.run([str(t / "states")], check=True)
+        subprocess.run([str(t / "states")], check=True, stdout=subprocess.DEVNULL)
+
+
+# ---- a slot's own sequencer, for a scene's start (Scene(slots=...))
+
+class Seq:
+    """Patterns written out (as C, run on the firmware's own seqs before it is saved to its slot): pat 0 .. 3,
+    step 1 .. 64, lane 0 .. 3; drums 0 kick, 1 snare, 2 hat; v 1 a hit, 2 an accent, 3 a flam."""
+
+    def __init__(self):
+        self.c = []
+
+    def note(self, pat, step, note, lane=0, steps=1, accent=False, slide=False):   # held `steps` (tied)
+        k = step - 1
+        self.c.append(f"lane_set(&seqs.pat[{pat}], {k}, {lane}, {note}, 0, 0);")
+        self.c += [f"lane_set(&seqs.pat[{pat}], {k + j}, {lane}, {note}, 0, 1);" for j in range(1, steps)]
+        if accent and lane == 0: self.c.append(f"seqs.pat[{pat}].trig[{k}] = SEQ_ACCENT;")
+        if slide and lane == 0: self.c.append(f"seqs.pat[{pat}].slide[{k}] = 1;")
+        return self
+
+    def drum(self, pat, d, steps, v=1):
+        self.c += [f"drum_put(&seqs.pat[{pat}], {d}, {k - 1}, {v});" for k in steps]
+        return self
+
+    def copy(self, src, dst):
+        self.c.append(f"seqs.pat[{dst}] = seqs.pat[{src}];")
+        return self
+
+    def raw(self, *lines):                      # e.g. "seqs.dr_drive = 40;"
+        self.c += lines
+        return self
 
 
 # ---- a scene
@@ -113,9 +171,9 @@ class Scene:
     """A take, written as a player plays it; times in ms from its start (t: where the next action goes). after:
     the scene it carries on from (its sound, page and rows), or None for the default sound on OSC 1."""
 
-    def __init__(self, name, chapter, after=None, splash=False, tail=3.0):
-        I = info()
-        self.name, self.chapter, self.splash, self.tail = name, chapter, splash, tail
+    def __init__(self, name, chapter, after=None, splash=False, tail=3.0, slots=None, load=None):
+        I = info()                              # (slots {n: (patch bytes, Seq)}: saved in slots n (1 .. 8); load: the
+        self.name, self.chapter, self.splash, self.tail = name, chapter, splash, tail   #  one loaded, playing)
         if after:
             self.patch, self.page, self.rows = bytearray(after.patch), after.page, dict(after.rows)
             self.back, self.rec, self.cursor = after.back, after.rec, after.cursor
@@ -124,10 +182,12 @@ class Scene:
             self.patch, self.page, self.rows = bytearray(I["init"]), "OSC1", {p: 0 for p in PAGES}
             self.back, self.rec, self.cursor = "OSC1", False, 0
             self.playing = False
+        if load:
+            self.patch = bytearray(slots[load][0])
         self.entry = set()                      # (step entry: the chord's keys down)
         self.pa_slot = 0
         self.start = (bytes(self.patch), PG[self.page], {PG[p]: n for p, n in self.rows.items() if n and PG[p] < PG["PATCH"]},
-                      self.cursor, self.rows["PATCH"])
+                      self.cursor, self.rows["PATCH"], slots, load)
         self.t, self.ev, self.caps, self.how = 0, [], [], []
 
     # time and captions
@@ -159,22 +219,23 @@ class Scene:
     def press(self, b, gap=500):
         self.ev.append((self.t, f"btn {BTN[b]}"))
         p, I = self.page, info()
-        if b == "HOME":
-            self.page = self.back if p == "SCOPE" else p if p == "PATCH" else "SCOPE"
-            if p not in ("SCOPE", "PATCH"): self.back = p
+        if b == "HOME":                         # (SCOPE, then LIVE, then back where HOME was first pressed)
+            self.page = {"SCOPE": "LIVE", "LIVE": self.back, "PATCH": "PATCH"}.get(p, "SCOPE")
+            if p not in ("SCOPE", "PATCH", "LIVE"): self.back = p
         elif b == "SAVE":
             if p == "PATCH":                    # (do it: SAVE, LOAD or INIT; the sound unchanged by a save)
-                if self.rows["PATCH"] == 2: self.patch = bytearray(I["init"])
+                if self.rows["PATCH"] == 3: self.patch = bytearray(I["init"])
             else:
                 if p != "SCOPE": self.back = p
                 self.page = "PATCH"
         elif b == "EDIT": self.page = {"OSC1": "OSC2", "OSC2": "NOISE"}.get(p, "OSC1")
-        elif b == "FX": self.page = {"CHO": "DLY", "DLY": "REV"}.get(p, "CHO")
+        elif b == "FX": self.page = {"CHO": "DLY", "DLY": "REV", "REV": "MFX", "MFX": "CRUSH"}.get(p, "CHO")
         elif b == "ENV": self.page = {"AMP": "FENV", "FENV": "MENV", "MENV": "MENV2"}.get(p, "AMP")
         elif b == "SELECT": self.page = "FILTER"
-        elif b == "LFO": self.page = "LFO2" if p == "LFO" else "LFO"
+        elif b == "LFO": self.page = {"LFO": "LFO2", "LFO2": "MATRIX"}.get(p, "LFO")
         elif b == "GLO": self.page = "SETUP" if p == "MIX" else "MIX"
-        elif b == "SEQ": self.page = "DRUM" if p == "SEQ" else "SEQ"
+        elif b == "SEQ": self.page = {"SEQ": "DRUM", "DRUM": "LOOP"}.get(p, "SEQ")
+        elif b == "REC" and p == "LOOP": pass   # (the looper's: its page stays)
         elif b == "REC": self.page, self.rec = "SEQ", not self.rec
         elif b == "PLAY": self.playing = not self.playing
         elif b == "ARP":
@@ -185,9 +246,10 @@ class Scene:
 
     def go(self, page):                         # to a page by its button, as a player would
         way = {"OSC1": "EDIT", "OSC2": "EDIT", "NOISE": "EDIT", "FILTER": "SELECT", "AMP": "ENV", "FENV": "ENV", "MENV": "ENV",
-               "MENV2": "ENV", "LFO": "LFO", "LFO2": "LFO",
-               "MIX": "GLO", "SETUP": "GLO", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "SEQ", "CHO": "FX", "DLY": "FX", "REV": "FX",
-               "SCOPE": "HOME", "PATCH": "SAVE"}[page]
+               "MENV2": "ENV", "LFO": "LFO", "LFO2": "LFO", "MATRIX": "LFO",
+               "MIX": "GLO", "SETUP": "GLO", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "SEQ", "LOOP": "SEQ", "CHO": "FX",
+               "DLY": "FX", "REV": "FX", "MFX": "FX", "CRUSH": "FX",
+               "SCOPE": "HOME", "LIVE": "HOME", "PATCH": "SAVE"}[page]
         for _ in range(5):
             if self.page == page: return self
             self.press(way)
@@ -205,6 +267,8 @@ class Scene:
     def _knob(self, knob):
         if knob == "cut":
             return info()["knobs"][("FILTER", "FILTER", 0)][:3] + (1, "CUTOFF")
+        if self.page == "LIVE":                 # (K1 .. K4: the parameters they have as made)
+            return next(v for v in info()["knobs"].values() if v[0] == info()["live"][knob - 1])
         k = (self.page, ROWS[self.page][self.rows[self.page]], knob - 1)
         if self.page in ("OSC1", "OSC2") and k[1] == "RATIO" and knob in (2, 3):   # MIX / RING: PIT1 / PIT2
             mode = info()["knobs"][(self.page, "MODE", knob - 2)][0]
@@ -260,6 +324,10 @@ class Scene:
             self.ev.append((self.t + hold, "keys 0"))
             self.t += gap
         self._how(label)
+        return self
+
+    def sound(self, patch):                     # the sound changed by the firmware itself (a LIVE patch key): from here
+        self.patch = bytearray(patch)
         return self
 
     def on(self, *notes, vel=127):

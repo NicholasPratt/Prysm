@@ -40,9 +40,9 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **Glide** | portamento, always or legato |
 | **Arpeggiator** | UP, DOWN, UPDN, RAND, ORDER; 1/4 .. 1/32 with triplets; 1 .. 4 octaves; gate (to tied), swing, latch; 40 .. 240 BPM or the MIDI clock (START / STOP / CONTINUE); sample-accurate |
 | **Sequencer** | polyphonic: chords of up to 4 notes a step; 4 patterns of up to 64 steps, 303-style: notes, rests, accents, slides (legato glide), ties; a song of up to 16 entries, each a pattern played 1 .. 16 times; row copy / paste; step entry from the keys (chords: keys held together) or real-time recording (quantized to the step, velocity, held notes tied, overdub); a metronome (always, or only while recording) and a bar's count-in; its own or the MIDI clock; each patch slot has its own (patterns, song, kit); with the split on, two parts (one each side, by pitch) to mute or clear apart |
-| **Drums** | kick, snare, hat (an accent opens it): 8-bit samples at 11 .. 22 kHz, made from scratch, played back unsmoothed; a lane in each of the 4 patterns, entered on the keys as on a TR (white keys the steps, their LEDs the lane), accents; level, tune (+-24 st), decay and a send through the sound's filter each; the bus: drive, crush (bits and rate), sends into the delay and the reverb; MIDI channel 10 (General MIDI notes) |
+| **Drums** | kick, snare, hat (an accent opens it): 8-bit samples at 11 .. 22 kHz, made from scratch, played back unsmoothed; a lane in each of the 4 patterns, entered on the keys as on a TR (white keys the steps, their LEDs the lane), accents, a snare flam, hat rolls (2 .. 8 hits a step, fading or swelling); level, tune (+-24 st), decay and a send through the sound's filter each; the bus: drive, crush (bits and rate), sends into the delay and the reverb; MIDI channel 10 (General MIDI notes) |
 | **Split** | per patch: OSC 1 below a key, OSC 2 from it, an octave each side (a bass under a lead), the 4 voices shared; the key set with a knob or LEARN |
-| **LIVE** | HOME twice: patterns (the black keys) and patches (the white keys) change on the next bar line; mutes for the kick, snare, hats, each oscillator and the noise; four knobs, each any parameter you choose |
+| **LIVE** | HOME twice: patterns (the black keys) and patches (the white keys) change on the next bar line; mutes (the top white keys) for the kick, snare, hats, clap, each oscillator and the noise, and one to unmute all; four knobs, each any parameter you choose |
 | **Oscilloscope** | on HOME: left and right, locked to the newest note, auto-zoom |
 | **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on |
 | **Editor** | [in the browser](https://nicholaspratt.github.io/Prysm/editor/): the firmware itself running in the page (screen, knobs, keys, sound), every parameter, patch files; in sync with a connected FM-1 both ways |
@@ -70,7 +70,7 @@ envelopes, the LFO, the effects chain.
 | SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK, pitch BEND range |
 | ARP | ARP (again: on / off) | ARP, TIME |
 | SEQ | SEQ (PLAY: run; REC: step entry, or recording while it plays) | STEP, CHORD, PATTERN, EDIT, PARTS, CLICK, SONG, ENTRY |
-| DRUM | SEQ (twice; the keys: the steps) | STEP, KICK, SNARE, HAT, BUS |
+| DRUM | SEQ (twice; the keys: the steps) | STEP, ROLL, KICK, SNARE, HAT, BUS |
 | CHORUS / DELAY / REVERB | FX (1, 2, 3 times) | CHORUS; DELAY, D.MOD; REVERB, R.MOD |
 | PATCH | SAVE | SAVE, LOAD, INIT over 8 slots |
 | SCOPE | HOME | the output, live (KNOB1: cycles) |

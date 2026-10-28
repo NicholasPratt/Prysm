@@ -207,15 +207,28 @@ static void ota_commit(const uint8_t *parm)
 
 /* ---- storage: [magic][length][crc32] then the bytes. A save erases (~50 ms a sector with the interrupts off:
  * the sound drops out), so save when nothing plays, not on every knob step. Each sector wears out after ~100,000 */
-static uint32_t crc32(const uint8_t *p, uint32_t n)
+static uint32_t crc32_add(uint32_t c, const uint8_t *p, uint32_t n)   /* (c: ~ the CRC so far; 0xFFFFFFFF to start) */
 {
-    uint32_t c = 0xFFFFFFFFu, k;
+    uint32_t k;
     while (n--) {
         c ^= *p++;
         for (k = 0; k < 8u; k++)
             c = c & 1u ? (c >> 1) ^ 0xEDB88320u : c >> 1;
     }
-    return ~c;
+    return c;
+}
+static uint32_t crc32(const uint8_t *p, uint32_t n) { return ~crc32_add(0xFFFFFFFFu, p, n); }
+static int flash_crc_is(uint32_t at, uint32_t n, uint32_t crc)   /* n bytes of flash at at have this CRC: 1 (read a */
+{                                               /* piece at a time: no buffer the size of a sector) */
+    uint8_t b[64];
+    uint32_t c = 0xFFFFFFFFu, k;
+    for (; n; n -= k, at += k) {
+        k = n < sizeof b ? n : sizeof b;
+        if (st_read(at, b, k))
+            return 0;
+        c = crc32_add(c, b, k);
+    }
+    return ~c == crc;
 }
 static int area_load(uint32_t at, uint32_t max, uint32_t magic, void *p, uint32_t n)   /* reads straight into p */
 {
@@ -240,14 +253,14 @@ static int area_save(uint32_t at, uint32_t sectors, uint32_t magic, const void *
         return rc;
     return fl_write(at, (const uint8_t *)h, sizeof h);   /* the header last: a cut save stays invalid */
 }
-/* one sector each, up to SECTOR_MAX bytes; 0: done. A load that fails leaves p as it was (a copy first) */
+/* one sector each, up to SECTOR_MAX bytes; 0: done. A load that fails leaves p as it was (checked first, in place) */
 static int sector_load(uint32_t at, void *p, uint32_t n)
 {
-    static uint8_t buf[SECTOR_MAX];
-    if (n > sizeof buf || area_load(at, SECTOR_MAX, STORE_MAGIC, buf, n))
+    uint32_t h[3];
+    if (!flash_ok || n > SECTOR_MAX || st_read(at, h, sizeof h) || h[0] != STORE_MAGIC || h[1] != n ||
+        !flash_crc_is(at + sizeof h, n, h[2]))
         return -1;
-    memcpy(p, buf, n);
-    return 0;
+    return st_read(at + sizeof h, p, n) ? -1 : 0;
 }
 static int settings_load(void *p, uint32_t n) { return sector_load(SETTINGS_AT, p, n); }
 static int settings_save(const void *p, uint32_t n) { return area_save(SETTINGS_AT, 1u, STORE_MAGIC, p, n); }
@@ -302,23 +315,22 @@ static void smk_trim_read(void)
  * [magic][length][sequence][crc32] then the bytes. A save goes to the sector not holding the newest copy, so a cut
  * save (the power gone mid-erase) loses that save only, never what was there. Save when nothing plays (an erase
  * drops the sound for ~50 ms). Each patch slot's sequencer is kept the same way, in the first two sectors of
- * store.h's slot of that number (seqstore_load / seqstore_save) */
+ * store.h's slot of that number (seqstore_load / seqstore_save); the store's own sequencer (SEQSTORE_N - 1) in the
+ * last two of slot 0 */
 #define PRYSM_MAGIC 0x53595250u                 /* "PRYS" */
 #define PSEQ_MAGIC 0x51455350u                  /* "PSEQ": a slot's sequencer */
 #define STORE_MAX (0x1000u - 16u)
-#define SEQSTORE_N 8u                           /* (one for each patch slot: patches.c) */
-_Static_assert(BOARD_SMK37 || SEQSTORE_N <= NSLOT, "a slot of store.h for each patch slot's sequencer");
+#define SEQSTORE_N 9u                           /* (one for each patch slot, and the store's own: patches.c) */
+_Static_assert(BOARD_SMK37 || (SEQSTORE_N - 1u <= NSLOT && SLOT_SECT >= 4u), "a slot of store.h for each patch slot's sequencer");
 typedef struct { uint32_t a, magic, seq, at; } ab_t;   /* sectors a and a + 4 KiB; the newest copy: its sequence and
                                                            sector (0: none yet) */
 static ab_t store_ab = {STORE_A, PRYSM_MAGIC, 0, 0};
 static ab_t seq_ab[SEQSTORE_N];
 static int ab_valid(uint32_t at, uint32_t magic, uint32_t n, uint32_t *seq)   /* the sector holds n good bytes: 1 */
 {
-    static uint8_t buf[STORE_MAX];
     uint32_t h[4];
-    if (st_read(at, h, sizeof h) || h[0] != magic || h[1] != n || n > STORE_MAX)
-        return 0;
-    if (st_read(at + sizeof h, buf, n) || crc32(buf, n) != h[3])
+    if (st_read(at, h, sizeof h) || h[0] != magic || h[1] != n || n > STORE_MAX ||
+        !flash_crc_is(at + sizeof h, n, h[3]))
         return 0;
     *seq = h[2];
     return 1;
@@ -359,7 +371,7 @@ static int store_save(const void *p, uint32_t n) { return ab_save(&store_ab, p, 
 static ab_t *seq_area(uint32_t i)
 {
     ab_t *s = &seq_ab[i];
-    if (!s->a) { s->a = SLOTS_AT + i * SLOT_SECT * 0x1000u; s->magic = PSEQ_MAGIC; }
+    if (!s->a) { s->a = SLOTS_AT + (i < SEQSTORE_N - 1u ? i * SLOT_SECT : 2u) * 0x1000u; s->magic = PSEQ_MAGIC; }
     return s;
 }
 static int seqstore_load(uint32_t i, void *p, uint32_t n) { return i < SEQSTORE_N ? ab_load(seq_area(i), p, n) : -1; }

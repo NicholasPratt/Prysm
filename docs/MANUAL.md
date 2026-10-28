@@ -3,14 +3,16 @@
 Prysm is a 4-voice synthesizer firmware for the **M-VAVE FM-1**. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators, and a noise source (six kinds) beside them; each of the three
 goes through a resonant filter (12 or 24 dB low-pass, or a comb) or straight past it. Then a high-pass, an amp envelope, an
-LFO, two looping mod envelopes and stereo chorus, delay and reverb. Alongside it a lo-fi **drum machine** (kick, snare,
-hat) plays a lane of its own in every sequencer pattern.
+LFO, two looping mod envelopes, a mod matrix, a phaser / flanger, a bit-crusher and stereo chorus, delay and reverb.
+Alongside it a **drum machine** (kick, snare, hat, clap; three kits) plays a lane of its own in every sequencer pattern,
+the sequencer's steps can lock knobs, and a **looper** records what you play over it.
 
 - [Installing](#installing)
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
 - [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [NOISE](#noise), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
-  [LFO 2](#lfo-2), [MIX](#mix), [ARP](#arp), [SEQ](#seq), [DRUM](#drum), [FX](#fx) (CHORUS, DELAY, REVERB), [SETUP](#setup)
+  [LFO 2](#lfo-2), [MATRIX](#matrix), [MIX](#mix), [ARP](#arp), [SEQ](#seq), [DRUM](#drum), [LOOP](#loop),
+  [FX](#fx) (CHORUS, DELAY, REVERB, MOD FX, CRUSH), [SETUP](#setup)
 - [Patches](#patches)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
@@ -88,13 +90,13 @@ cutoff).
 | **EDIT** | OSC 1 (press again: OSC 2, then NOISE) |
 | **ENV** | AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2) |
 | **SELECT** (the button) | FILTER |
-| **LFO** | LFO (press again: LFO 2) |
+| **LFO** | LFO (press again: LFO 2, then MATRIX) |
 | **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
-| **SEQ** | SEQ (press again: DRUM) |
+| **SEQ** | SEQ (press again: DRUM, then LOOP) |
 | **PLAY** | the sequencer: run / stop (from any page; its LED shows it) |
-| **REC** | step entry on the SEQ page; while the sequencer plays, real-time recording (its LED shows it) |
-| **FX** | CHORUS (press again: DELAY, then REVERB) |
+| **REC** | step entry on the SEQ page; while the sequencer plays, real-time recording (on the DRUM page: the drums; on the LOOP page: the looper) (its LED shows it) |
+| **FX** | CHORUS (press again: DELAY, REVERB, MOD FX, then CRUSH) |
 | **HOME** | the oscilloscope (press again: LIVE) |
 | **SAVE** | the PATCH screen |
 
@@ -193,7 +195,7 @@ envelope's shape.
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | FILTER | cutoff (16 Hz .. 20 kHz) | resonance | envelope amount (bipolar, +-60 semitones) | keytrack (0 .. 100 %) |
-| TYPE | LP 12, LP 24, COMB+, COMB- | drive (0 = clean) | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | |
+| TYPE | LP 12, LP 24, COMB+, COMB- | drive (0 = clean) | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | HP RES: the high-pass's resonance (0 = none; up: a peak at its cutoff, to +16 dB, soft-clipped when loud) |
 | COMB | damping (0 bright .. 127 dark) | spread | | |
 
 Cutoff and resonance glide as you turn them, so sweeps are smooth. **Keytrack** at 100 % moves the cutoff with the
@@ -339,6 +341,29 @@ it is set, as far as the whole knob):
 | DLYFDBK | the delay's feedback |
 | REVSIZE | the reverb's size |
 
+### MATRIX
+
+Press **LFO** a third time for the mod matrix: four more routes, each a **source** onto any of the LFO's destinations
+(the same list as the LFO's DEST), with an **amount** either way. They add to what the LFO, LFO 2 and the mod
+envelopes already do. A route is off while its source is OFF or its amount is 0 (the middle of the knob).
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| MOD 1 .. MOD 4 | SRC: the source | DEST: the destination | AMT: -64 .. +63 | |
+
+| Source | |
+| --- | --- |
+| LFO, LFO 2 | the LFOs, as they run (a second route from the same LFO, at its own amount) |
+| M.ENV 1, M.ENV 2 | the mod envelopes |
+| VELO | how hard the note was played (the FM-1's keys: full; MIDI: as played) |
+| KEY | the note: 0 at middle C, up above it, down below (five octaves either way: the whole amount) |
+| WHEEL | the MIDI mod wheel (CC 1) |
+| RANDOM | a new value at each note, held while it plays |
+
+The picture lists the four routes, source to destination, each amount a bar from the middle. Some ideas: VELO onto
+the CUTOFF (a harder note, brighter); KEY onto MOD1 (high notes less FM, so they stay clean); WHEEL onto the LFO's
+pitch depth for vibrato on demand; RANDOM onto the pitch, a little, for an old synth's drift.
+
 ### MIX
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
@@ -394,9 +419,10 @@ swing and gate still apply. With CLOCK = MIDI and no clock running, the arpeggia
 
 ### FX
 
-Stereo effects after the voices: **chorus -> delay -> reverb**, a page each: **FX** steps through CHORUS, DELAY
-and REVERB. Each one is off while its **MIX** is 0. The picture draws the chain, with a mix bar under each effect
-and the page's own effect lit.
+Effects after the voices: **crush -> mod FX -> chorus -> delay -> reverb**, a page each: **FX** steps through
+CHORUS, DELAY, REVERB, MOD FX and CRUSH. Each one is off while its **MIX** (CRUSH: its BITS and RATE) is at 0. The
+chorus, delay and reverb pages draw the chain, with a mix bar under each effect and the page's own lit. CRUSH and
+MOD FX work on the synth's voices only, before the chorus: the drums have a crush of their own (DRUM page, BUS row).
 
 | Page | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- | --- |
@@ -405,6 +431,9 @@ and the page's own effect lit.
 | DELAY | D.MOD | wow rate | wow depth | shift (-12 .. +12 st) | tone |
 | REVERB | REVERB | size | damping | mix | pre-delay (up to 93 ms) |
 | REVERB | R.MOD | rate | depth | shimmer | |
+| MOD FX | MOD FX | TYPE: OFF, PHASER, FLANGER | rate | depth | mix |
+| MOD FX | TONE | MANUAL: where it sweeps around | FDBK: feedback, either way | | |
+| CRUSH | CRUSH | BITS: OFF, 15 .. 2 bits | RATE: OFF, 44100 .. 1378 Hz | | |
 
 - **Chorus**: left and right swept against each other, for width. Full mix is half wet: the classic chorus.
 - **Delay**: **ping** sends the repeats from side to side. **Tone** darkens each repeat. Turning the time while it
@@ -416,6 +445,13 @@ and the page's own effect lit.
   the gap before it starts.
 - **R.MOD**: sweeps the reverb's inside, so the tail shimmers and wobbles around the note.
 - **Shimmer**: the tail climbs in octaves as it fades. It never runs away, at any setting.
+- **Phaser**: six stages, their notches swept up and down by the rate and depth, around MANUAL (low: a deep, slow
+  whoosh; high: a thin one). Feedback deepens the notches; turned down (negative), it hollows the sound instead.
+- **Flanger**: a short delay (0.2 .. 8 ms, MANUAL) swept against the dry sound: a jet. With feedback it rings at the
+  delay's pitch; negative feedback gives the hollower, metallic flange. MIX at about half is the classic one (full mix
+  is all delay, a vibrato).
+- **Crush**: BITS takes the sound down to fewer bits (grit at 12, broken at 4), RATE holds each sample longer (a
+  lower sample rate, with the aliasing of an old sampler). The picture is a sine as it comes out.
 
 With every effect on, Prysm uses roughly twice the CPU: watch the header.
 
@@ -438,6 +474,7 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 | --- | --- | --- | --- | --- |
 | STEP | the step (the cursor) | its note | its trigger: REST, NOTE, ACCENT, TIE | SLIDE ON / OFF |
 | CHORD | the step's 2nd note (-- none) | 3rd note | 4th note | its velocity: AUTO (100, an accent 127) or 1 .. 127 |
+| LOCK | LANE1: the parameter of the pattern's first lock lane (OFF: none) | VAL1: the step's value (-- none) | LANE2 | VAL2 |
 | PATTERN | the pattern edited: P1 .. P4 | its length: 1 .. 64 | step: 1/4 .. 1/32 (all patterns) | gate (all patterns) |
 | EDIT | the row: 1 .. 4, or ALL | COPY | PASTE | CLEAR |
 | PARTS | MUTE1: part 1 PLAY / MUTE | MUTE2: part 2 | CLR1: clear part 1 | CLR2: clear part 2 |
@@ -459,7 +496,8 @@ downbeat.) Each note lands on the nearest step
 keyboard: as played), and a held note is tied over the steps you held it through. Recording **overdubs**: what is
 there stays, and each pass adds to it, up to four notes a step (playing a note that is already in the step records
 it again, at the new velocity). While you hold a key, the pattern's note in that place rests, so you hear yourself,
-not both. You can record from any page (turn the filter as you go); REC or PLAY ends it. To take something out, use
+not both. You can record from any page (turn the filter as you go; on the DRUM page the drum keys record hits, see
+[DRUM](#drum)); REC or PLAY ends it. To take something out, use
 the STEP and CHORD rows, or CLEAR a row.
 
 - **PLAY** starts from the first step (of the pattern, or of the song) and stops.
@@ -500,37 +538,76 @@ the STEP and CHORD rows, or CLEAR a row.
   of the sound that comes back at power-on becomes pattern 1.
 - **On the MIDI clock** (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
   PLAY must be on.
+- **Parameter locks** (LOCK row): each pattern has two lock lanes, each one a parameter: CUTOFF, RES, F.ENV (the
+  filter envelope's amount), DRIVE, A.DEC and A.REL (the amp envelope's decay and release), F.DEC (the filter
+  envelope's decay), FM1 and FM2 (the oscillators' modulation), DLY SND or REV SND. Pick the step with the STEP row's
+  cursor (KNOB1), then on the LOCK row set its value with VAL1 or VAL2: the notes that start on that step play
+  with the knob there instead of where the sound has it, and the next step without a lock goes back. A locked step has
+  a mark in its corner. A lock is part of the step (the EDIT row's COPY, PASTE and CLEAR take it with the notes; a
+  lock pasted into a pattern whose lane is OFF brings the lane's parameter), the lane's parameter part of the
+  pattern. **DLY SND** and **REV SND** set how much of the synth goes into the delay and reverb
+  for that step alone: a single echo thrown on the last note of a phrase, a snare-like reverb burst on one chord.
 
 ### DRUM
 
-A drum machine of three drums, **KICK**, **SNARE** and **HAT** (closed; an accent opens it), each a lane of steps in
-every pattern, under the notes: they play together, from the same steps, in the song too. **SEQ** twice. The sounds
-were made from scratch in the style of an 808 / 909, then stored as an old sampler would keep them, 8 bits at a low
-rate (11 kHz for the kick, 16 kHz the snare, 22 kHz the hats), and played back without smoothing: crunchy and lo-fi
-by design. The kit (levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, part of the
-slot's sequencer: LOAD brings it in, SOUND leaves the beat going.
+A drum machine of four drums, **KICK**, **SNARE**, **HAT** (closed; an accent opens it) and **CLAP**, each a lane of
+steps in every pattern, under the notes: they play together, from the same steps, in the song too. **SEQ** twice. The
+sounds were made from scratch (no recordings) in the style of the classic drum machines, in three kits (KIT row):
 
-The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, past
-the pattern's length dots; the drum you are editing named bright; a mark under the step playing. Below, that drum's
-sound as it will play (its length tuned, DECAY over it), or on the BUS row its settings.
+| Kit | |
+| --- | --- |
+| **LO-FI** | stored as an old sampler would keep them, 8 bits at a low rate (11 kHz the kick, 16 kHz the snare and clap, 22 kHz the hats), played back without smoothing: crunchy by design (Prysm 1.3's kit, with a clap) |
+| **TR** | clean and bright, 16 bits: a punchy kick, a crisp snare, metallic hats |
+| **BOOM** | 16 bits, deep: a long, low kick, a fat snare, a wide clap |
+
+The kit (which one, the levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, part of the
+slot's sequencer: LOAD brings it in, SOUND leaves the beat going. Kits of your own can be built into the firmware
+from WAV files (`tools/gen_drums.py --kit NAME=DIR`, then build): only use sounds you have the rights to.
+
+The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, a
+hat step with a roll cut into its hits, past the pattern's length dots; the drum you are editing named bright; a mark
+under the step playing. Below, that drum's sound as it will play (its length tuned, DECAY over it), on the ROLL row the
+step's hits, each as loud as it plays, or on the BUS row its settings.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| STEP | the drum: KICK / SNARE / HAT | the step (the cursor) | its HIT: --, HIT, ACCENT (the snare: FLAM too) | CLEAR the drum's lane (turn twice) |
-| KICK, SNARE, HAT | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
+| STEP | the drum: KICK / SNARE / HAT / CLAP | the step (the cursor) | its HIT: --, HIT, ACCENT (the snare: FLAM too) | CLEAR the drum's lane (turn twice) |
+| ROLL | the step (the cursor) | the hat step's ROLL: OFF, 2, 3, 4, 6, 8 hits | RAMP: EVEN; down: FADE; up: SWELL | |
+| KICK, SNARE, HAT, CLAP | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
 | BUS | DRIVE | CRUSH: fewer bits and a lower rate still | DELAY send | REVERB send |
+| KIT | LO-FI, TR, BOOM (and any of your own) | | | |
+| EDIT | the pattern: P1 .. P4 | LANE: ALL, KICK, SNARE, HAT, CLAP | COPY (turn) | PASTE (turn) |
+
+**Copying drum patterns** (EDIT row): pick the pattern with KNOB1 and the LANE with KNOB2, turn **COPY**, pick
+another pattern and turn **PASTE**. Only the drums change; the pattern's notes and length stay as they are. The copy
+fills the pattern's length, repeated if it was shorter (a 16-step beat pasted into a 32-step pattern plays twice), and
+steps past the length are left alone. With LANE on ALL, all four drums go to their own lanes. Copy one lane and paste
+it into another to move a part, such as the kick's beat onto the snare (a flam becomes an accent off the snare, and
+rolls stay on the hat). Copy one lane and paste with LANE on ALL to put it back in its own lane. The drum clipboard is
+separate from the SEQ page's, which copies notes and drums together.
 
 **On the DRUM page the keys are the drum machine's**, as on a TR (they play no notes here):
 
 - The **16 white keys** (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; (the snare) again: a
   flam; again: none. Their **LEDs** show the lane (an accent blinks, a flam faster; the step playing flips its LED as
   it passes).
-- **F#3, G#3, A#3** (the three lowest black keys) pick KICK, SNARE, HAT, and play it.
-- **C#4 / D#4**: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).
+- **F#3, G#3, A#3, C#4** (the first four black keys) pick KICK, SNARE, HAT and CLAP, and play it.
+- **Recording drums in real time**: on the DRUM page, press **REC** (the header says DRUM P1 REC; the page stays) and
+  **PLAY** (with the count-in if REC came first), then tap **F#3, G#3, A#3, C#4** in time. Each hit lands on the nearest
+  step, as notes do (the one playing, or the next if you are past its middle), and you hear it once, as you hit it.
+  Recording overdubs: a hit, accent, flam or roll already there stays. Add accents and flams with the white keys.
+- **F#4 / G#4**: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).
+- On the **ROLL** row the white keys set the hat's rolls instead: each press the next, OFF, 2, 3, 4, 6, 8, then OFF
+  (on an empty step it puts a hit there too). A step with a roll flickers its LED.
 
 - **Accents** play at full level, hits a little softer; the hat's accent is the **open hat**, and the next hat (open
   or closed) cuts it off, as on an 808.
 - **A flam** (the snare's) is two snares: a hit, then ~20 ms later a softer one, the first ringing on under it.
+- **A roll** (the hat's, also called a ratchet) plays the step 2 .. 8 times, evenly over its length: the trap hat. 3
+  and 6 are triplets; on a 1/16 step, 2 is a 1/32 and 4 a 1/64. Each hit cuts the one before off (an open hat's too);
+  a swung step spreads them over its swung length. **RAMP** shapes the hits: EVEN, all at the step's level; FADE, each
+  softer than the last (at most to a quarter); SWELL, rising into it. RAMP is one for every roll in the sequencer,
+  saved with the kit. Taking a step's hit away takes its roll.
 - **The sends** feed the drums into the sound's **delay** and **reverb**: what comes back is that effect's MIX on its
   page (a mixer's send and return), so with the effect's MIX at 0 nothing comes back. The rest of the drums stay dry.
 - **FILTER** sends a drum through a filter of the drums' own that follows the sound's **CUTOFF** and **RES** (and
@@ -539,10 +616,33 @@ sound as it will play (its length tuned, DECAY over it), or on the BUS row its s
   full, or the other way round.
 - **CRUSH** holds each sample for up to 16 frames and cuts it to as few as 4 bits: from a little grit to a broken
   toy. **DRIVE** saturates the drums' bus before it.
-- **Copy, paste, clear** on the SEQ page's EDIT row take the drums with the notes. **INIT** clears them too and puts
+- **Copy, paste, clear** on the SEQ page's EDIT row take the drums (and the rolls) with the notes. **INIT** clears them too and puts
   the kit back as new.
 - **MIDI**: notes on **channel 10** play the drums (General MIDI's: 36 kick, 38 or 40 snare, 42 or 44 closed hat, 46
-  open hat), whatever the IN channel, with their velocity. So a DAW's drum track plays them.
+  open hat, 39 clap), whatever the IN channel, with their velocity. So a DAW's drum track plays them.
+
+### LOOP
+
+**SEQ** three times: a MIDI looper. It records the **notes** you play (the keys and MIDI in: which, when, how hard,
+not the audio), then plays them back through the synth, round and round, in time with the sequencer and arpeggiator's
+tempo, while you play on top. Because it records notes, the loop plays whatever the sound is now: change the patch or
+turn the filter and the loop follows.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| LOOP | BARS: 1, 2, 4, 8 (the next loop's length) | QUANT: OFF, 1/16, 1/8 | PLAY: ON / OFF | CLEAR (turn) |
+
+- **Recording**: on the LOOP page press **REC**. With the sequencer playing, recording starts at the next bar line;
+  stopped, it starts with the first note you play. After BARS bars the loop closes and plays back, still recording:
+  an overdub, until you press **REC** (the header's REC goes out, PLAYING).
+- **Overdub**: press **REC** again while it plays and what you play is added on the next passes. **REC** once more
+  ends the overdub. (Pressed during the first pass, it stops recording there; the loop stays BARS long.)
+- **QUANT** moves each note's start to the nearest 1/16 or 1/8 as you record it (OFF: as played).
+- **PLAY** stops and starts the loop; **CLEAR** empties it.
+- The picture is the loop: its bars and beats, each note a dash at its pitch from its start to its end, the playhead,
+  and what the looper is doing. The header says **REC** while it records.
+- It holds up to 512 notes. Its notes play on the synth's four voices, with the keys and the sequencer. The loop is
+  not saved: power off and it is gone.
 
 ### SETUP
 
@@ -564,11 +664,11 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 Press **SAVE** for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
 osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
 them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
-tabs SAVE, LOAD, SOUND, INIT.
+tabs SAVE, LOAD, SOUND, INIT, UNDO.
 
 | Control | Does |
 | --- | --- |
-| **SELECT** | SAVE, LOAD, SOUND or INIT |
+| **SELECT** | SAVE, LOAD, SOUND, INIT or UNDO |
 | **KNOB1** | the slot |
 | **SAVE** | does it |
 | **HOME**, ALGORITHM or a page button | back |
@@ -585,6 +685,10 @@ tabs SAVE, LOAD, SOUND, INIT.
 - **SOUND** brings the slot's sound back alone: the sequencer plays on, still saving into the slot it came from.
 - **INIT** loads the default sound (the sequencer plays on). If you have unsaved changes, LOAD, SOUND and INIT ask
   first: press SAVE again.
+- **UNDO** takes the last change back: the sound and the sequencer as they were before it. A change is a knob turned
+  after a pause (2 seconds: a sweep of turns is one change), or an action: a PASTE, a CLEAR, a LOAD, SOUND or INIT.
+  The screen says what it will undo; press **SAVE**. Press SAVE again to redo. It is one step: the change before that
+  is gone. It does not undo a save (the slot keeps what was saved), and the looper is apart from it.
 - The header shows the current slot on every page, with **\*** when there are unsaved changes.
 - When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.
 - Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.
@@ -618,7 +722,7 @@ scope, then LIVE).
 LIVE > PLAY                      2
 PATTERN                       PATT
 [ P1 ][#P2#][ P3 ][ P4 ]          the pattern playing filled, the one waiting framed, blinking
-PATCH  BD SD HH O1 O2 NZ           the mutes: filled while on, dim while muted
+PATCH  BD SD HH CP O1 O2 NZ        the mutes: filled while on, dim while muted
 [1][#2#][3][4][5][6][7][8]        the same for the patches (empty slots dim)
 ====  ----  ----  ----            the bar: its four beats, the one playing lit
    SELECT: CHOOSE A KNOB          a hint (on K1 .. K4: PRESETS: ITS PARAMETER)
@@ -630,9 +734,10 @@ FILTER FILTER DELAY REVERB         each knob's page
 | --- | --- |
 | **The first 4 black keys** (F#3 G#3 A#3 C#4) | a pattern, P1 .. P4 |
 | **The first 8 white keys** (F3 .. F4) | a patch, slot 1 .. 8: its sound and its sequencer |
-| **F#4, G#4, A#4** | mute the kick, the snare, the hats (press again: on) |
-| **C#5, D#5** | mute OSC 1, OSC 2 |
-| **F#5** | mute the noise |
+| **G4, A4, B4, C5** | mute the kick, the snare, the hats, the clap (press again: on) |
+| **D5, E5** | mute OSC 1, OSC 2 |
+| **F5** | mute the noise |
+| **G5** | unmute all (lit while anything is muted) |
 | **KNOB1 .. KNOB4** | the parameters chosen for them |
 | **SELECT** | PLAY, or K1 .. K4: the knob PRESETS chooses for |
 | **PRESETS** | on K1 .. K4: that knob's parameter (any of the sound's, page by page); on PLAY: the cutoff, as everywhere |
@@ -646,10 +751,10 @@ FILTER FILTER DELAY REVERB         each knob's page
   within a few milliseconds). Unsaved changes to the sound playing are let go, as on a synth's program change; the
   pattern chosen is kept with the sequencer.
 - **The mutes** act at once and on everything: the sequencer, the keys, MIDI. A muted drum's new hits are silent; a
-  muted oscillator or the noise goes quiet in every voice. Their keys are lit while on and flash while muted; on
-  other pages the header shows an inverted **M** while anything is muted. They are not saved: at power-on all are on.
+  muted oscillator or the noise goes quiet in every voice. Their keys are lit while on and flash while muted. They
+  hold only on the LIVE screen: leave it and all are on again (they are not saved either).
   (They are apart from the SEQ page's MUTE1 and MUTE2, which mute a part of the sequencer and are saved with it.)
-- The other keys play as usual: D#4 and the white keys from G4 up.
+- The other keys play as usual: D#4 and the white keys from G4 to F5.
 - Which parameter each knob turns is a setting, kept for every patch and after power-off. At first: the cutoff,
   the resonance, the delay's mix and the reverb's mix. Turning a knob changes the sound (the header's **\*** shows it).
 

@@ -34,7 +34,6 @@ static int press(uint32_t row, uint32_t slot)   /* the PATCH screen: row, slot, 
 
 int main(void)
 {
-    seqs_t q;
     printf("slot sequencer checks\n");
     /* a store from 1.2: slots 1 and 3 used, the one sequencer (first note 60), no slot with its own */
     edit = PATCH_INIT;
@@ -120,8 +119,7 @@ int main(void)
     ui_init(2, 0);
     CHECK(cur_slot == 2 && seq_owner == 0 && first_note() == 72, "power-on: slot 3's sound with slot 1's sequencer");
 
-    CHECK(store_load(store_buf, STORE_NOW) == 0 && (memcpy(&q, store_buf + sizeof bank, sizeof q), q.pat[0].note[0] == 60),
-          "the store's own sequencer: as it was (60), through every save of the bank");
+    CHECK(area_note(SEQ_OWN) == 60, "the store's own sequencer: as it was (60), through every save of the bank");
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
 }

@@ -14,41 +14,17 @@
  *     'M' st>>7 st&7F d1 d2     a MIDI message received
  *     'X'                       the take ends
  * Not captured: the MASTER knob, the MIDI clock (a take on CLOCK = MIDI plays on the internal tempo). */
-#define CAP_STATE_MAX 4400u
-static uint8_t cap_buf[CAP_STATE_MAX];
 static uint32_t cap_t0;
 
-/* the state a take starts from, field by field (the same bytes on the FM-1 and on a computer); load: buffer ->
- * state. Returns the length. */
-static uint32_t cap_state(uint8_t *b, int load)
-{
-    uint32_t n = 0, s;
-    uint8_t seq_on = eg.seq_play;
-#define CAP_F(p, len) do { if (load) memcpy((p), b + n, (len)); else memcpy(b + n, (p), (len)); n += (len); } while (0)
-    CAP_F(&bank.version, 4u);
-    CAP_F(bank.used, sizeof bank.used);
-    for (s = 0; s < PATCH_SLOTS; s++)
-        CAP_F(&bank.p[s], sizeof(patch_t));
-    CAP_F(&edit, sizeof edit);
-    CAP_F(&clean, sizeof clean);
-    CAP_F(&cur_slot, 4u);
-    CAP_F(&gset, sizeof gset);
-    CAP_F(&page, 4u);
-    CAP_F(row, sizeof row);
-    CAP_F(&pa_slot, 4u);
-    CAP_F(&pa_row, 4u);
-    CAP_F(&seq_cursor, 1u);
-    CAP_F(&seq_on, 1u);
-    CAP_F(&seqs, sizeof seqs);                  /* the patterns and the song */
-    CAP_F(&seq_row, 1u);
-    CAP_F(&song_cursor, 1u);
+/* the state a take starts from, field by field (the same bytes on the FM-1 and on a computer) */
+static uint8_t cap_seq_on;                      /* (the state's copy of eg.seq_play) */
+#define CAP_F(x) {&(x), sizeof(x)}
+static const struct { void *p; uint16_t n; } CAP_STATE[] = {
+    CAP_F(bank.version), CAP_F(bank.used), CAP_F(bank.p), CAP_F(edit), CAP_F(clean), CAP_F(cur_slot), CAP_F(gset),
+    CAP_F(page), CAP_F(row), CAP_F(pa_slot), CAP_F(pa_row), CAP_F(seq_cursor), CAP_F(cap_seq_on),
+    CAP_F(seqs), CAP_F(seq_row), CAP_F(song_cursor)};   /* (seqs: the patterns and the song) */
 #undef CAP_F
-    if (load)
-        engine_seq_play(seq_on);
-    return n;
-}
-_Static_assert(4u + PATCH_SLOTS + (PATCH_SLOTS + 2u) * sizeof(patch_t) + 4u + sizeof(gset_t) + 4u +
-               PG_N * 4u + 12u + sizeof(seqs_t) <= CAP_STATE_MAX, "the capture state fits its buffer");
+#define CAP_FIELDS (sizeof CAP_STATE / sizeof CAP_STATE[0])
 
 #ifndef DINGHY_HOST
 static int cap_send(uint8_t type, const uint8_t *d, uint32_t n, int timed)   /* d: 7-bit bytes; 0 = sent */
@@ -91,24 +67,33 @@ static void cap_midi(uint8_t st, uint8_t d1, uint8_t d2)
     if (cap_on) cap_send('M', d, 4u, 1);
 }
 
+static void cap_part(uint8_t *d, uint32_t i)   /* the state's message i (d: its 64 bytes as nibbles), then cleared */
+{
+    d[0] = (uint8_t)(i >> 7);
+    d[1] = (uint8_t)(i & 127u);
+    cap_send('S', d, 2u + 128u, 0);
+    memset(d + 2, 0, 128u);
+}
+
 static void cap_start(uint32_t keys)            /* the state (64 bytes a message, as nibbles), then the keys held */
 {
-    uint32_t n = cap_state(cap_buf, 0), i, j;
+    uint8_t d[2u + 128u];
+    uint32_t f, j, n = 0;
     cap_t0 = fm1_ms;
-    for (i = 0; i < n; i += 64u) {
-        uint8_t d[2u + 128u];
-        d[0] = (uint8_t)(i / 64u >> 7); d[1] = (uint8_t)(i / 64u & 127u);
-        for (j = 0; j < 64u; j++) {
-            uint8_t v = i + j < n ? cap_buf[i + j] : 0u;
-            d[2u + 2u * j] = v >> 4;
-            d[3u + 2u * j] = v & 15u;
+    cap_seq_on = eg.seq_play;
+    memset(d, 0, sizeof d);
+    for (f = 0; f < CAP_FIELDS; f++)            /* (each message sent as it fills: no buffer for the whole state) */
+        for (j = 0; j < CAP_STATE[f].n; j++, n++) {
+            uint8_t v = ((const uint8_t *)CAP_STATE[f].p)[j];
+            d[2u + 2u * (n % 64u)] = v >> 4;
+            d[3u + 2u * (n % 64u)] = v & 15u;
+            if (n % 64u == 63u) cap_part(d, n / 64u);
         }
-        cap_send('S', d, sizeof d, 0);
-    }
-    {
-        uint8_t d[3] = {(uint8_t)(n >> 14 & 127u), (uint8_t)(n >> 7 & 127u), (uint8_t)(n & 127u)};
-        cap_send('T', d, 3u, 0);
-    }
+    if (n % 64u) cap_part(d, n / 64u);          /* (the last, its rest zeros) */
+    d[0] = (uint8_t)(n >> 14 & 127u);
+    d[1] = (uint8_t)(n >> 7 & 127u);
+    d[2] = (uint8_t)(n & 127u);
+    cap_send('T', d, 3u, 0);
     cap_on = 1;
     cap_keys(keys);
 }
@@ -173,6 +158,26 @@ static void cap_midi(uint8_t st, uint8_t d1, uint8_t d2) { (void)st; (void)d1; (
 static void cap_start(uint32_t keys) { (void)keys; }
 static void cap_stop(void) {}
 
+#define CAP_STATE_MAX 6144u
+static uint8_t cap_buf[CAP_STATE_MAX];
+_Static_assert(4u + PATCH_SLOTS + (PATCH_SLOTS + 2u) * sizeof(patch_t) + 4u + sizeof(gset_t) + 4u +
+               PG_N * 4u + 12u + sizeof(seqs_t) <= CAP_STATE_MAX, "the capture state fits its buffer");
+
+/* the state into b (load: b into the state; b 0: neither), its length */
+static uint32_t cap_state(uint8_t *b, int load)
+{
+    uint32_t f, n = 0;
+    cap_seq_on = eg.seq_play;
+    for (f = 0; f < CAP_FIELDS; f++) {
+        if (b && load) memcpy(CAP_STATE[f].p, b + n, CAP_STATE[f].n);
+        else if (b) memcpy(b + n, CAP_STATE[f].p, CAP_STATE[f].n);
+        n += CAP_STATE[f].n;
+    }
+    if (b && load)
+        engine_seq_play(cap_seq_on);
+    return n;
+}
+
 static void cap_restore(void)
 {
     const char *path = getenv("PRYSM_STATE"), *dump = getenv("PRYSM_STATE_DUMP");
@@ -186,11 +191,19 @@ static void cap_restore(void)
     if (!(f = fopen(path, "rb"))) { perror(path); exit(1); }
     n = fread(cap_buf, 1, sizeof cap_buf, f);
     fclose(f);
-    {
-        static uint8_t now[CAP_STATE_MAX];      /* (how long the state is: lay out the present one aside) */
-        if (n < cap_state(now, 0)) { fprintf(stderr, "%s: too short (%zu bytes)\n", path, n); exit(1); }
-    }
+    if (n < cap_state(0, 0)) { fprintf(stderr, "%s: too short (%zu bytes)\n", path, n); exit(1); }
     cap_state(cap_buf, 1);
+    if ((path = getenv("PRYSM_SEQSTORE")) != 0) {   /* (a scripted take: each slot's own sequencer, and whose plays) */
+        static uint8_t sq[sizeof seqs];
+        uint32_t i, len;
+        int32_t own;
+        if (!(f = fopen(path, "rb"))) { perror(path); exit(1); }
+        for (i = 0; i < PATCH_SLOTS; i++)
+            if (fread(&len, 4, 1, f) == 1 && len == sizeof seqs && fread(sq, 1, len, f) == len)
+                seqstore_save(i, sq, len);
+        if (fread(&own, 4, 1, f) == 1) seq_owner = own;
+        fclose(f);
+    }
     engine_set(&edit);
     engine_sync(gset.clock);
     lcd_fill(0, 0, 240, 240, C_BLACK);
