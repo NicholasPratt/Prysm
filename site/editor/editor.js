@@ -59,7 +59,7 @@ function restore() {                            // the patches and the settings,
     const s = localStorage.getItem("prysm.store"), g = localStorage.getItem("prysm.settings");
     if (s) { const b = unb64(s); M.HEAPU8.set(b, M._web_store()); M._web_store_set_len(b.length); }
     if (g) M.HEAPU8.set(unb64(g).subarray(0, M._web_settings_size()), M._web_settings());
-    for (let i = 0; i < 8; i++) {               // each slot's sequencer
+    for (let i = 0; i < 9; i++) {               // each slot's sequencer, the store's own
       const q = localStorage.getItem("prysm.seq" + i);
       if (q) { const b = unb64(q); M.HEAPU8.set(b, M._web_seqstore(i)); M._web_seqstore_set_len(i, b.length); }
     }
@@ -69,7 +69,7 @@ function keep() {
   try {
     const n = M._web_store_len();
     if (n) localStorage.setItem("prysm.store", b64(M.HEAPU8.subarray(M._web_store(), M._web_store() + n)));
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 9; i++) {
       const q = M._web_seqstore_len(i);
       if (q) localStorage.setItem("prysm.seq" + i, b64(M.HEAPU8.subarray(M._web_seqstore(i), M._web_seqstore(i) + q)));
     }
@@ -235,7 +235,7 @@ function seqLayout() {
   const L = M.UTF8ToString(M._web_seq_layout()).split("|").map(Number);
   const k = ["pat", "patSize", "len", "note", "trig", "slide", "div", "gate", "cur", "mode", "songLen", "songPat", "songRep",
              "size", "pats", "entries", "vel", "xnote", "xvel", "lanes", "dhit", "dacc", "drums", "drLvl", "drTune", "drDec",
-             "drDrive", "drCrush", "drDly", "drRev", "drFlt"];
+             "drDrive", "drCrush", "drDly", "drRev", "drFlt", "dret", "lkDest", "lk", "locks", "drRamp", "drKit", "kits"];
   SQ = Object.fromEntries(k.map((n, i) => [n, L[i]]));
 }
 const patAt = (sq, p) => SQ.pat + (p % SQ.pats) * SQ.patSize;   // where pattern p starts
@@ -374,7 +374,8 @@ function refreshSeq(sq) {                       // the SEQ tab from the patterns
 // ---- the DRUM tab: the drums' lanes of the pattern edited (bits: dhit, dacc, 8 bytes a drum; an accent with no hit:
 // a flam, the snare's), and the kit
 let drEls = null;
-const DRUMS = ["KICK", "SNARE", "HAT"];
+const DRUMS = ["KICK", "SNARE", "HAT", "CLAP"];
+const KITS = ["LO-FI", "TR", "BOOM"];           // (prysm_drums.h's; a kit of your own shows as its number)
 const drumAt = (sq, a, d, k) => { const b = 1 << (k & 7), o = d * 8 + (k >> 3); return sq[a + SQ.dhit + o] & b ? (sq[a + SQ.dacc + o] & b ? 2 : 1) : sq[a + SQ.dacc + o] & b ? 3 : 0; };
 function drumPut(a, d, k, v) {                  // step k of drum d (in the pattern at a): 0 none, 1 a hit, 2 an accent, 3 a flam
   const b = 1 << (k & 7), o = d * 8 + (k >> 3);
@@ -407,7 +408,7 @@ function drumUI() {
         row.append(cell);
       }
       row.append(el("span"));
-      if (d === 2 && r < 3) row.style.marginBottom = "10px";
+      if (d === DRUMS.length - 1 && r < 3) row.style.marginBottom = "10px";
       grid.append(row);
     });
   const kit = el("div", { className: "prms" });   // the kit: a knob each, as the DRUM page's rows
@@ -427,6 +428,7 @@ function drumUI() {
   knob("CRUSH", SQ.drCrush, 127, (v) => v);
   knob("DELAY SEND", SQ.drDly, 127, (v) => v);
   knob("REVERB SEND", SQ.drRev, 127, (v) => v);
+  knob("KIT", SQ.drKit, SQ.kits - 1, (v) => KITS[v] || "KIT " + (v + 1));
   box.append(el("h3", { textContent: "DRUMS of the pattern edited: click a step for a hit, then an accent (the hat opens), then (the snare) a flam, then none; shift-click: none" }),
              bar, grid, el("h3", { textContent: "KIT: for every pattern (FILTER: how much goes through the sound's filter, its CUTOFF and RES; the delay and reverb sends: the sound's effects, their MIX the return)" }), kit);
   return box;

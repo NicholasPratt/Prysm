@@ -14,18 +14,20 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.3</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.4</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators, and a noise source (six kinds) beside them; each of the three
 goes through a resonant filter (12 or 24 dB low-pass, or a comb) or straight past it. Then a high-pass, an amp envelope, an
-LFO, two looping mod envelopes and stereo chorus, delay and reverb. Alongside it a lo-fi <strong>drum machine</strong> (kick, snare,
-hat) plays a lane of its own in every sequencer pattern.</p>
+LFO, two looping mod envelopes, a mod matrix, a phaser / flanger, a bit-crusher and stereo chorus, delay and reverb.
+Alongside it a <strong>drum machine</strong> (kick, snare, hat, clap; three kits) plays a lane of its own in every sequencer pattern,
+the sequencer's steps can lock knobs, and a <strong>looper</strong> records what you play over it.</p>
 <ul>
 <li><a href="#installing">Installing</a></li>
 <li><a href="#playing">Playing</a></li>
 <li><a href="#finding-your-way-around">Finding your way around</a></li>
 <li><a href="#the-pages">The pages</a>: <a href="#osc-1--osc-2">OSC 1 / OSC 2</a>, <a href="#noise">NOISE</a>, <a href="#filter">FILTER</a>, <a href="#amp">AMP</a>, <a href="#lfo">LFO</a>,
-  <a href="#lfo-2">LFO 2</a>, <a href="#mix">MIX</a>, <a href="#arp">ARP</a>, <a href="#seq">SEQ</a>, <a href="#drum">DRUM</a>, <a href="#fx">FX</a> (CHORUS, DELAY, REVERB), <a href="#setup">SETUP</a></li>
+  <a href="#lfo-2">LFO 2</a>, <a href="#matrix">MATRIX</a>, <a href="#mix">MIX</a>, <a href="#arp">ARP</a>, <a href="#seq">SEQ</a>, <a href="#drum">DRUM</a>, <a href="#loop">LOOP</a>,
+  <a href="#fx">FX</a> (CHORUS, DELAY, REVERB, MOD FX, CRUSH), <a href="#setup">SETUP</a></li>
 <li><a href="#patches">Patches</a></li>
 <li><a href="#the-oscilloscope">The oscilloscope</a></li>
 <li><a href="#usb-audio-and-midi">USB: audio and MIDI</a></li>
@@ -39,7 +41,7 @@ hat) plays a lane of its own in every sequencer pattern.</p>
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.3.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.4.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
@@ -93,7 +95,7 @@ community firmware; Prysm answers its updater like the others.</p>
   [WAVE]  WAVE2  RATIO  MODE  ENV          &lt;- the page's rows: SELECT moves along them
 </code></pre>
 <p>Turning a knob shows its name and value large in the picture's top right corner for a moment (PRESETS too: the
-cutoff).</p>
+cutoff). The value drifts <strong>blue</strong> as you turn it up and <strong>red</strong> as you turn it down, and fades back to white.</p>
 <table>
 <thead>
 <tr>
@@ -132,7 +134,7 @@ cutoff).</p>
 </tr>
 <tr>
 <td><strong>LFO</strong></td>
-<td>LFO (press again: LFO 2)</td>
+<td>LFO (press again: LFO 2, then MATRIX)</td>
 </tr>
 <tr>
 <td><strong>GLO</strong></td>
@@ -144,7 +146,7 @@ cutoff).</p>
 </tr>
 <tr>
 <td><strong>SEQ</strong></td>
-<td>SEQ (press again: DRUM)</td>
+<td>SEQ (press again: DRUM, then LOOP)</td>
 </tr>
 <tr>
 <td><strong>PLAY</strong></td>
@@ -152,11 +154,11 @@ cutoff).</p>
 </tr>
 <tr>
 <td><strong>REC</strong></td>
-<td>step entry on the SEQ page; while the sequencer plays, real-time recording (its LED shows it)</td>
+<td>step entry on the SEQ page; while the sequencer plays, real-time recording (on the DRUM page: the drums; on the LOOP page: the looper) (its LED shows it)</td>
 </tr>
 <tr>
 <td><strong>FX</strong></td>
-<td>CHORUS (press again: DELAY, then REVERB)</td>
+<td>CHORUS (press again: DELAY, REVERB, MOD FX, then CRUSH)</td>
 </tr>
 <tr>
 <td><strong>HOME</strong></td>
@@ -168,7 +170,7 @@ cutoff).</p>
 </tr>
 </tbody>
 </table>
-<p>The header's battery shows <strong>0 to 3 bars</strong>; empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
+<p>The header's battery shows <strong>0 to 3 bars</strong> (red, green, blue: a prism); empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
 <strong>bolt</strong> (USB power) instead, as the FM-1 cannot tell its charge while it is charging. The splash shows it too, and the
 SETUP page in words, with the raw reading (ADC).</p>
 <p>The header's <strong>CPU</strong> bar is how much of the FM-1's time the sound takes (its peak over the last half second); it
@@ -354,7 +356,7 @@ envelope's shape.</p>
 <td>LP 12, LP 24, COMB+, COMB-</td>
 <td>drive (0 = clean)</td>
 <td>high-pass cutoff (OFF, 16 Hz .. 4.2 kHz)</td>
-<td></td>
+<td>HP RES: the high-pass's resonance (0 = none; up: a peak at its cutoff, to +16 dB, soft-clipped when loud)</td>
 </tr>
 <tr>
 <td>COMB</td>
@@ -700,6 +702,67 @@ it is set, as far as the whole knob):</p>
 </tr>
 </tbody>
 </table>
+<h3 id="matrix">MATRIX</h3>
+<p>Press <strong>LFO</strong> a third time for the mod matrix: four more routes, each a <strong>source</strong> onto any of the LFO's destinations
+(the same list as the LFO's DEST), with an <strong>amount</strong> either way. They add to what the LFO, LFO 2 and the mod
+envelopes already do. A route is off while its source is OFF or its amount is 0 (the middle of the knob).</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MOD 1 .. MOD 4</td>
+<td>SRC: the source</td>
+<td>DEST: the destination</td>
+<td>AMT: -64 .. +63</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LFO, LFO 2</td>
+<td>the LFOs, as they run (a second route from the same LFO, at its own amount)</td>
+</tr>
+<tr>
+<td>M.ENV 1, M.ENV 2</td>
+<td>the mod envelopes</td>
+</tr>
+<tr>
+<td>VELO</td>
+<td>how hard the note was played (the FM-1's keys: full; MIDI: as played)</td>
+</tr>
+<tr>
+<td>KEY</td>
+<td>the note: 0 at middle C, up above it, down below (five octaves either way: the whole amount)</td>
+</tr>
+<tr>
+<td>WHEEL</td>
+<td>the MIDI mod wheel (CC 1)</td>
+</tr>
+<tr>
+<td>RANDOM</td>
+<td>a new value at each note, held while it plays</td>
+</tr>
+</tbody>
+</table>
+<p>The picture lists the four routes, source to destination, each amount a bar from the middle. Some ideas: VELO onto
+the CUTOFF (a harder note, brighter); KEY onto MOD1 (high notes less FM, so they stay clean); WHEEL onto the LFO's
+pitch depth for vibrato on demand; RANDOM onto the pitch, a little, for an old synth's drift.</p>
 <h3 id="mix">MIX</h3>
 <table>
 <thead>
@@ -804,9 +867,10 @@ from its first note, <strong>STOP</strong> stops it, <strong>CONTINUE</strong> g
 millisecond, one audio buffer (5.8 ms) later. The BPM cell then shows the clock's tempo (<strong>EXT</strong> while none comes);
 swing and gate still apply. With CLOCK = MIDI and no clock running, the arpeggiator waits.</p>
 <h3 id="fx">FX</h3>
-<p>Stereo effects after the voices: <strong>chorus -&gt; delay -&gt; reverb</strong>, a page each: <strong>FX</strong> steps through CHORUS, DELAY
-and REVERB. Each one is off while its <strong>MIX</strong> is 0. The picture draws the chain, with a mix bar under each effect
-and the page's own effect lit.</p>
+<p>Effects after the voices: <strong>crush -&gt; mod FX -&gt; chorus -&gt; delay -&gt; reverb</strong>, a page each: <strong>FX</strong> steps through
+CHORUS, DELAY, REVERB, MOD FX and CRUSH. Each one is off while its <strong>MIX</strong> (CRUSH: its BITS and RATE) is at 0. The
+chorus, delay and reverb pages draw the chain, with a mix bar under each effect and the page's own lit. CRUSH and
+MOD FX work on the synth's voices only, before the chorus: the drums have a crush of their own (DRUM page, BUS row).</p>
 <table>
 <thead>
 <tr>
@@ -859,6 +923,30 @@ and the page's own effect lit.</p>
 <td>shimmer</td>
 <td></td>
 </tr>
+<tr>
+<td>MOD FX</td>
+<td>MOD FX</td>
+<td>TYPE: OFF, PHASER, FLANGER</td>
+<td>rate</td>
+<td>depth</td>
+<td>mix</td>
+</tr>
+<tr>
+<td>MOD FX</td>
+<td>TONE</td>
+<td>MANUAL: where it sweeps around</td>
+<td>FDBK: feedback, either way</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>CRUSH</td>
+<td>CRUSH</td>
+<td>BITS: OFF, 15 .. 2 bits</td>
+<td>RATE: OFF, 44100 .. 1378 Hz</td>
+<td></td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <ul>
@@ -872,6 +960,13 @@ and the page's own effect lit.</p>
   the gap before it starts.</li>
 <li><strong>R.MOD</strong>: sweeps the reverb's inside, so the tail shimmers and wobbles around the note.</li>
 <li><strong>Shimmer</strong>: the tail climbs in octaves as it fades. It never runs away, at any setting.</li>
+<li><strong>Phaser</strong>: six stages, their notches swept up and down by the rate and depth, around MANUAL (low: a deep, slow
+  whoosh; high: a thin one). Feedback deepens the notches; turned down (negative), it hollows the sound instead.</li>
+<li><strong>Flanger</strong>: a short delay (0.2 .. 8 ms, MANUAL) swept against the dry sound: a jet. With feedback it rings at the
+  delay's pitch; negative feedback gives the hollower, metallic flange. MIX at about half is the classic one (full mix
+  is all delay, a vibrato).</li>
+<li><strong>Crush</strong>: BITS takes the sound down to fewer bits (grit at 12, broken at 4), RATE holds each sample longer (a
+  lower sample rate, with the aliasing of an old sampler). The picture is a sine as it comes out.</li>
 </ul>
 <p>With every effect on, Prysm uses roughly twice the CPU: watch the header.</p>
 <h3 id="seq">SEQ</h3>
@@ -910,6 +1005,13 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 <td>3rd note</td>
 <td>4th note</td>
 <td>its velocity: AUTO (100, an accent 127) or 1 .. 127</td>
+</tr>
+<tr>
+<td>LOCK</td>
+<td>LANE1: the parameter of the pattern's first lock lane (OFF: none)</td>
+<td>VAL1: the step's value (-- none)</td>
+<td>LANE2</td>
+<td>VAL2</td>
 </tr>
 <tr>
 <td>PATTERN</td>
@@ -968,7 +1070,8 @@ downbeat.) Each note lands on the nearest step
 keyboard: as played), and a held note is tied over the steps you held it through. Recording <strong>overdubs</strong>: what is
 there stays, and each pass adds to it, up to four notes a step (playing a note that is already in the step records
 it again, at the new velocity). While you hold a key, the pattern's note in that place rests, so you hear yourself,
-not both. You can record from any page (turn the filter as you go); REC or PLAY ends it. To take something out, use
+not both. You can record from any page (turn the filter as you go; on the DRUM page the drum keys record hits, see
+<a href="#drum">DRUM</a>); REC or PLAY ends it. To take something out, use
 the STEP and CHORD rows, or CLEAR a row.</p>
 <ul>
 <li><strong>PLAY</strong> starts from the first step (of the pattern, or of the song) and stops.</li>
@@ -1009,17 +1112,49 @@ the STEP and CHORD rows, or CLEAR a row.</p>
   of the sound that comes back at power-on becomes pattern 1.</li>
 <li><strong>On the MIDI clock</strong> (SETUP: CLOCK = MIDI): START plays from the first step, STOP stops, as for the arpeggiator;
   PLAY must be on.</li>
+<li><strong>Parameter locks</strong> (LOCK row): each pattern has two lock lanes, each one a parameter: CUTOFF, RES, F.ENV (the
+  filter envelope's amount), DRIVE, A.DEC and A.REL (the amp envelope's decay and release), F.DEC (the filter
+  envelope's decay), FM1 and FM2 (the oscillators' modulation), DLY SND or REV SND. Pick the step with the STEP row's
+  cursor (KNOB1), then on the LOCK row set its value with VAL1 or VAL2: the notes that start on that step play
+  with the knob there instead of where the sound has it, and the next step without a lock goes back. A locked step has
+  a mark in its corner. A lock is part of the step (the EDIT row's COPY, PASTE and CLEAR take it with the notes; a
+  lock pasted into a pattern whose lane is OFF brings the lane's parameter), the lane's parameter part of the
+  pattern. <strong>DLY SND</strong> and <strong>REV SND</strong> set how much of the synth goes into the delay and reverb
+  for that step alone: a single echo thrown on the last note of a phrase, a snare-like reverb burst on one chord.</li>
 </ul>
 <h3 id="drum">DRUM</h3>
-<p>A drum machine of three drums, <strong>KICK</strong>, <strong>SNARE</strong> and <strong>HAT</strong> (closed; an accent opens it), each a lane of steps in
-every pattern, under the notes: they play together, from the same steps, in the song too. <strong>SEQ</strong> twice. The sounds
-were made from scratch in the style of an 808 / 909, then stored as an old sampler would keep them, 8 bits at a low
-rate (11 kHz for the kick, 16 kHz the snare, 22 kHz the hats), and played back without smoothing: crunchy and lo-fi
-by design. The kit (levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, part of the
-slot's sequencer: LOAD brings it in, SOUND leaves the beat going.</p>
-<p>The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, past
-the pattern's length dots; the drum you are editing named bright; a mark under the step playing. Below, that drum's
-sound as it will play (its length tuned, DECAY over it), or on the BUS row its settings.</p>
+<p>A drum machine of four drums, <strong>KICK</strong>, <strong>SNARE</strong>, <strong>HAT</strong> (closed; an accent opens it) and <strong>CLAP</strong>, each a lane of
+steps in every pattern, under the notes: they play together, from the same steps, in the song too. <strong>SEQ</strong> twice. The
+sounds were made from scratch (no recordings) in the style of the classic drum machines, in three kits (KIT row):</p>
+<table>
+<thead>
+<tr>
+<th>Kit</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>LO-FI</strong></td>
+<td>stored as an old sampler would keep them, 8 bits at a low rate (11 kHz the kick, 16 kHz the snare and clap, 22 kHz the hats), played back without smoothing: crunchy by design (Prysm 1.3's kit, with a clap)</td>
+</tr>
+<tr>
+<td><strong>TR</strong></td>
+<td>clean and bright, 16 bits: a punchy kick, a crisp snare, metallic hats</td>
+</tr>
+<tr>
+<td><strong>BOOM</strong></td>
+<td>16 bits, deep: a long, low kick, a fat snare, a wide clap</td>
+</tr>
+</tbody>
+</table>
+<p>The kit (which one, the levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, part of the
+slot's sequencer: LOAD brings it in, SOUND leaves the beat going. Kits of your own can be built into the firmware
+from WAV files (<code>tools/gen_drums.py --kit NAME=DIR</code>, then build): only use sounds you have the rights to.</p>
+<p>The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, a
+hat step with a roll cut into its hits, past the pattern's length dots; the drum you are editing named bright; a mark
+under the step playing. Below, that drum's sound as it will play (its length tuned, DECAY over it), on the ROLL row the
+step's hits, each as loud as it plays, or on the BUS row its settings.</p>
 <table>
 <thead>
 <tr>
@@ -1033,13 +1168,20 @@ sound as it will play (its length tuned, DECAY over it), or on the BUS row its s
 <tbody>
 <tr>
 <td>STEP</td>
-<td>the drum: KICK / SNARE / HAT</td>
+<td>the drum: KICK / SNARE / HAT / CLAP</td>
 <td>the step (the cursor)</td>
 <td>its HIT: --, HIT, ACCENT (the snare: FLAM too)</td>
 <td>CLEAR the drum's lane (turn twice)</td>
 </tr>
 <tr>
-<td>KICK, SNARE, HAT</td>
+<td>ROLL</td>
+<td>the step (the cursor)</td>
+<td>the hat step's ROLL: OFF, 2, 3, 4, 6, 8 hits</td>
+<td>RAMP: EVEN; down: FADE; up: SWELL</td>
+<td></td>
+</tr>
+<tr>
+<td>KICK, SNARE, HAT, CLAP</td>
 <td>LEVEL (0: silent)</td>
 <td>TUNE: +-24 semitones</td>
 <td>DECAY: FULL (as made), down: shorter</td>
@@ -1052,22 +1194,54 @@ sound as it will play (its length tuned, DECAY over it), or on the BUS row its s
 <td>DELAY send</td>
 <td>REVERB send</td>
 </tr>
+<tr>
+<td>KIT</td>
+<td>LO-FI, TR, BOOM (and any of your own)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>EDIT</td>
+<td>the pattern: P1 .. P4</td>
+<td>LANE: ALL, KICK, SNARE, HAT, CLAP</td>
+<td>COPY (turn)</td>
+<td>PASTE (turn)</td>
+</tr>
 </tbody>
 </table>
+<p><strong>Copying drum patterns</strong> (EDIT row): pick the pattern with KNOB1 and the LANE with KNOB2, turn <strong>COPY</strong>, pick
+another pattern and turn <strong>PASTE</strong>. Only the drums change; the pattern's notes and length stay as they are. The copy
+fills the pattern's length, repeated if it was shorter (a 16-step beat pasted into a 32-step pattern plays twice), and
+steps past the length are left alone. With LANE on ALL, all four drums go to their own lanes. Copy one lane and paste
+it into another to move a part, such as the kick's beat onto the snare (a flam becomes an accent off the snare, and
+rolls stay on the hat). Copy one lane and paste with LANE on ALL to put it back in its own lane. The drum clipboard is
+separate from the SEQ page's, which copies notes and drums together.</p>
 <p><strong>On the DRUM page the keys are the drum machine's</strong>, as on a TR (they play no notes here):</p>
 <ul>
 <li>The <strong>16 white keys</strong> (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; (the snare) again: a
   flam; again: none. Their <strong>LEDs</strong> show the lane (an accent blinks, a flam faster; the step playing flips its LED as
   it passes).</li>
-<li><strong>F#3, G#3, A#3</strong> (the three lowest black keys) pick KICK, SNARE, HAT, and play it.</li>
+<li><strong>F#3, G#3, A#3, C#4</strong> (the first four black keys) pick KICK, SNARE, HAT and CLAP, and play it.</li>
+<li><strong>Recording drums in real time</strong>: on the DRUM page, press <strong>REC</strong> (the header says DRUM P1 REC; the page stays) and
+  <strong>PLAY</strong> (with the count-in if REC came first), then tap <strong>F#3, G#3, A#3, C#4</strong> in time. Each hit lands on the nearest
+  step, as notes do (the one playing, or the next if you are past its middle), and you hear it once, as you hit it.
+  Recording overdubs: a hit, accent, flam or roll already there stays. Add accents and flams with the white keys.</li>
+<li><strong>F#4 / G#4</strong>: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).</li>
 <li>
-<p><strong>C#4 / D#4</strong>: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).</p>
+<p>On the <strong>ROLL</strong> row the white keys set the hat's rolls instead: each press the next, OFF, 2, 3, 4, 6, 8, then OFF
+  (on an empty step it puts a hit there too). A step with a roll flickers its LED.</p>
 </li>
 <li>
 <p><strong>Accents</strong> play at full level, hits a little softer; the hat's accent is the <strong>open hat</strong>, and the next hat (open
   or closed) cuts it off, as on an 808.</p>
 </li>
 <li><strong>A flam</strong> (the snare's) is two snares: a hit, then ~20 ms later a softer one, the first ringing on under it.</li>
+<li><strong>A roll</strong> (the hat's, also called a ratchet) plays the step 2 .. 8 times, evenly over its length: the trap hat. 3
+  and 6 are triplets; on a 1/16 step, 2 is a 1/32 and 4 a 1/64. Each hit cuts the one before off (an open hat's too);
+  a swung step spreads them over its swung length. <strong>RAMP</strong> shapes the hits: EVEN, all at the step's level; FADE, each
+  softer than the last (at most to a quarter); SWELL, rising into it. RAMP is one for every roll in the sequencer,
+  saved with the kit. Taking a step's hit away takes its roll.</li>
 <li><strong>The sends</strong> feed the drums into the sound's <strong>delay</strong> and <strong>reverb</strong>: what comes back is that effect's MIX on its
   page (a mixer's send and return), so with the effect's MIX at 0 nothing comes back. The rest of the drums stay dry.</li>
 <li><strong>FILTER</strong> sends a drum through a filter of the drums' own that follows the sound's <strong>CUTOFF</strong> and <strong>RES</strong> (and
@@ -1076,10 +1250,48 @@ sound as it will play (its length tuned, DECAY over it), or on the BUS row its s
   full, or the other way round.</li>
 <li><strong>CRUSH</strong> holds each sample for up to 16 frames and cuts it to as few as 4 bits: from a little grit to a broken
   toy. <strong>DRIVE</strong> saturates the drums' bus before it.</li>
-<li><strong>Copy, paste, clear</strong> on the SEQ page's EDIT row take the drums with the notes. <strong>INIT</strong> clears them too and puts
+<li><strong>Copy, paste, clear</strong> on the SEQ page's EDIT row take the drums (and the rolls) with the notes. <strong>INIT</strong> clears them too and puts
   the kit back as new.</li>
 <li><strong>MIDI</strong>: notes on <strong>channel 10</strong> play the drums (General MIDI's: 36 kick, 38 or 40 snare, 42 or 44 closed hat, 46
-  open hat), whatever the IN channel, with their velocity. So a DAW's drum track plays them.</li>
+  open hat, 39 clap), whatever the IN channel, with their velocity. So a DAW's drum track plays them.</li>
+</ul>
+<h3 id="loop">LOOP</h3>
+<p><strong>SEQ</strong> three times: a MIDI looper. It records the <strong>notes</strong> you play (the keys and MIDI in: which, when, how hard,
+not the audio), then plays them back through the synth, round and round, in time with the sequencer and arpeggiator's
+tempo, while you play on top. Because it records notes, the loop plays whatever the sound is now: change the patch or
+turn the filter and the loop follows.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>LOOP</td>
+<td>BARS: 1, 2, 4, 8 (the next loop's length)</td>
+<td>QUANT: OFF, 1/16, 1/8</td>
+<td>PLAY: ON / OFF</td>
+<td>CLEAR (turn)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Recording</strong>: on the LOOP page press <strong>REC</strong>. With the sequencer playing, recording starts at the next bar line;
+  stopped, it starts with the first note you play. After BARS bars the loop closes and plays back, still recording:
+  an overdub, until you press <strong>REC</strong> (the header's REC goes out, PLAYING).</li>
+<li><strong>Overdub</strong>: press <strong>REC</strong> again while it plays and what you play is added on the next passes. <strong>REC</strong> once more
+  ends the overdub. (Pressed during the first pass, it stops recording there; the loop stays BARS long.)</li>
+<li><strong>QUANT</strong> moves each note's start to the nearest 1/16 or 1/8 as you record it (OFF: as played).</li>
+<li><strong>PLAY</strong> stops and starts the loop; <strong>CLEAR</strong> empties it.</li>
+<li>The picture is the loop: its bars and beats, each note a dash at its pitch from its start to its end, the playhead,
+  and what the looper is doing. The header says <strong>REC</strong> while it records.</li>
+<li>It holds up to 512 notes. Its notes play on the synth's four voices, with the keys and the sequencer. The loop is
+  not saved: power off and it is gone.</li>
 </ul>
 <h3 id="setup">SETUP</h3>
 <p>Settings for your setup rather than a sound: they are kept with the octave, not in patches. <strong>GLO</strong> twice.</p>
@@ -1114,7 +1326,7 @@ sound as it will play (its length tuned, DECAY over it), or on the BUS row its s
 <p>Press <strong>SAVE</strong> for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
 osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
 them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
-tabs SAVE, LOAD, SOUND, INIT.</p>
+tabs SAVE, LOAD, SOUND, INIT, UNDO.</p>
 <table>
 <thead>
 <tr>
@@ -1125,7 +1337,7 @@ tabs SAVE, LOAD, SOUND, INIT.</p>
 <tbody>
 <tr>
 <td><strong>SELECT</strong></td>
-<td>SAVE, LOAD, SOUND or INIT</td>
+<td>SAVE, LOAD, SOUND, INIT or UNDO</td>
 </tr>
 <tr>
 <td><strong>KNOB1</strong></td>
@@ -1154,6 +1366,10 @@ tabs SAVE, LOAD, SOUND, INIT.</p>
 <li><strong>SOUND</strong> brings the slot's sound back alone: the sequencer plays on, still saving into the slot it came from.</li>
 <li><strong>INIT</strong> loads the default sound (the sequencer plays on). If you have unsaved changes, LOAD, SOUND and INIT ask
   first: press SAVE again.</li>
+<li><strong>UNDO</strong> takes the last change back: the sound and the sequencer as they were before it. A change is a knob turned
+  after a pause (2 seconds: a sweep of turns is one change), or an action: a PASTE, a CLEAR, a LOAD, SOUND or INIT.
+  The screen says what it will undo; press <strong>SAVE</strong>. Press SAVE again to redo. It is one step: the change before that
+  is gone. It does not undo a save (the slot keeps what was saved), and the looper is apart from it.</li>
 <li>The header shows the current slot on every page, with <strong>*</strong> when there are unsaved changes.</li>
 <li>When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.</li>
 <li>Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.</li>
@@ -1165,7 +1381,29 @@ tabs SAVE, LOAD, SOUND, INIT.</p>
 <hr />
 <h2 id="the-oscilloscope">The oscilloscope</h2>
 <p>Press <strong>HOME</strong> for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
-down): <strong>left in white, right in grey</strong> (the chorus and a ping-pong delay show as the two apart).</p>
+down). <strong>KNOB2</strong> picks how it draws it:</p>
+<table>
+<thead>
+<tr>
+<th>Style</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>PRISM</strong> (the first)</td>
+<td>the left channel split like light through a prism: red above, violet below, a white core. The last few traces linger behind it, fading through the colours, and a spectrum glows between the wave and the centre line. A sound that moves (FM, an LFO on the wave) leaves trails</td>
+</tr>
+<tr>
+<td><strong>ORBIT</strong></td>
+<td>the wave across, the same wave a quarter of a cycle later up: a sine draws a circle, FM knots and stars, in colours along the cycle</td>
+</tr>
+<tr>
+<td><strong>MONO</strong></td>
+<td><strong>left in white, right in grey</strong> (the chorus and a ping-pong delay show as the two apart)</td>
+</tr>
+</tbody>
+</table>
 <ul>
 <li>It locks onto the <strong>newest note</strong>: the trace shows that many of its cycles, starting on a rising zero, so the
   wave stands still whatever you play. <strong>KNOB1</strong> sets how many cycles (1 .. 8; it starts at 2).</li>
@@ -1180,7 +1418,7 @@ scope, then LIVE).</p>
 <pre><code>LIVE &gt; PLAY                      2
 PATTERN                       PATT
 [ P1 ][#P2#][ P3 ][ P4 ]          the pattern playing filled, the one waiting framed, blinking
-PATCH  BD SD HH O1 O2 NZ           the mutes: filled while on, dim while muted
+PATCH  BD SD HH CP O1 O2 NZ        the mutes: filled while on, dim while muted
 [1][#2#][3][4][5][6][7][8]        the same for the patches (empty slots dim)
 ====  ----  ----  ----            the bar: its four beats, the one playing lit
    SELECT: CHOOSE A KNOB          a hint (on K1 .. K4: PRESETS: ITS PARAMETER)
@@ -1204,16 +1442,20 @@ FILTER FILTER DELAY REVERB         each knob's page
 <td>a patch, slot 1 .. 8: its sound and its sequencer</td>
 </tr>
 <tr>
-<td><strong>F#4, G#4, A#4</strong></td>
-<td>mute the kick, the snare, the hats (press again: on)</td>
+<td><strong>G4, A4, B4, C5</strong></td>
+<td>mute the kick, the snare, the hats, the clap (press again: on)</td>
 </tr>
 <tr>
-<td><strong>C#5, D#5</strong></td>
+<td><strong>D5, E5</strong></td>
 <td>mute OSC 1, OSC 2</td>
 </tr>
 <tr>
-<td><strong>F#5</strong></td>
+<td><strong>F5</strong></td>
 <td>mute the noise</td>
+</tr>
+<tr>
+<td><strong>G5</strong></td>
+<td>unmute all (lit while anything is muted)</td>
 </tr>
 <tr>
 <td><strong>KNOB1 .. KNOB4</strong></td>
@@ -1245,10 +1487,10 @@ FILTER FILTER DELAY REVERB         each knob's page
   within a few milliseconds). Unsaved changes to the sound playing are let go, as on a synth's program change; the
   pattern chosen is kept with the sequencer.</li>
 <li><strong>The mutes</strong> act at once and on everything: the sequencer, the keys, MIDI. A muted drum's new hits are silent; a
-  muted oscillator or the noise goes quiet in every voice. Their keys are lit while on and flash while muted; on
-  other pages the header shows an inverted <strong>M</strong> while anything is muted. They are not saved: at power-on all are on.
+  muted oscillator or the noise goes quiet in every voice. Their keys are lit while on and flash while muted. They
+  hold only on the LIVE screen: leave it and all are on again (they are not saved either).
   (They are apart from the SEQ page's MUTE1 and MUTE2, which mute a part of the sequencer and are saved with it.)</li>
-<li>The other keys play as usual: D#4 and the white keys from G4 up.</li>
+<li>The other keys play as usual: D#4 and the white keys from G4 to F5.</li>
 <li>Which parameter each knob turns is a setting, kept for every patch and after power-off. At first: the cutoff,
   the resonance, the delay's mix and the reverb's mix. Turning a knob changes the sound (the header's <strong>*</strong> shows it).</li>
 </ul>
