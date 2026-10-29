@@ -79,7 +79,7 @@ Every page works the same way:
 ```
 
 Turning a knob shows its name and value large in the picture's top right corner for a moment (PRESETS too: the
-cutoff).
+cutoff). The value drifts **blue** as you turn it up and **red** as you turn it down, and fades back to white.
 
 | Control | Does |
 | --- | --- |
@@ -100,7 +100,7 @@ cutoff).
 | **HOME** | the oscilloscope (press again: LIVE) |
 | **SAVE** | the PATCH screen |
 
-The header's battery shows **0 to 3 bars**; empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
+The header's battery shows **0 to 3 bars** (red, green, blue: a prism); empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
 **bolt** (USB power) instead, as the FM-1 cannot tell its charge while it is charging. The splash shows it too, and the
 SETUP page in words, with the raw reading (ADC).
 
@@ -702,7 +702,13 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO.
 ## The oscilloscope
 
 Press **HOME** for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
-down): **left in white, right in grey** (the chorus and a ping-pong delay show as the two apart).
+down). **KNOB2** picks how it draws it:
+
+| Style | |
+| --- | --- |
+| **PRISM** (the first) | the left channel split like light through a prism: red above, violet below, a white core. The last few traces linger behind it, fading through the colours, and a spectrum glows between the wave and the centre line. A sound that moves (FM, an LFO on the wave) leaves trails |
+| **ORBIT** | the wave across, the same wave a quarter of a cycle later up: a sine draws a circle, FM knots and stars, in colours along the cycle |
+| **MONO** | **left in white, right in grey** (the chorus and a ping-pong delay show as the two apart) |
 
 - It locks onto the **newest note**: the trace shows that many of its cycles, starting on a rising zero, so the
   wave stands still whatever you play. **KNOB1** sets how many cycles (1 .. 8; it starts at 2).

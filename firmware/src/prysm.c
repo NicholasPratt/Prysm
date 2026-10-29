@@ -117,20 +117,6 @@ static uint32_t spl_hash(uint32_t x)            /* a speck's own random numbers 
     return x;
 }
 
-static uint16_t spl_hue(uint32_t h, uint32_t v) /* hue 0..1535 at brightness v 0..255 -> RGB565 */
-{
-    uint32_t f = h & 255u, r, g, b;
-    switch ((h >> 8) % 6u) {
-    case 0: r = 255; g = f; b = 0; break;
-    case 1: r = 255 - f; g = 255; b = 0; break;
-    case 2: r = 0; g = 255; b = f; break;
-    case 3: r = 0; g = 255 - f; b = 255; break;
-    case 4: r = f; g = 0; b = 255; break;
-    default: r = 255; g = 0; b = 255 - f; break;
-    }
-    return RGB(r * v / 255u, g * v / 255u, b * v / 255u);
-}
-
 static int spl_ink(uint32_t letter, uint32_t gx, uint32_t gy)   /* the word's pixel (FONT_P's cell): set? */
 {
     static const char WORD[] = "PRYSM";
@@ -155,7 +141,7 @@ static void spl_frame(uint32_t t)               /* the screen at t ms */
                 rng = rng * 1664525u + 1013904223u;
                 if ((rng >> 16) < dens && (uint32_t)(dx * dx) * eb * eb + (uint32_t)(dy * dy) * ea * ea <= eab)
                     cv_rect((int32_t)(i % 120u) * 2, (int32_t)(i / 120u) * 2, 2, 2,
-                            spl_hue((rng >> 5) % 1536u, 40u + (rng & 31u) * 6u));
+                            hue565((rng >> 5) % 1536u, 40u + (rng & 31u) * 6u));
             }
         for (i = 0, l = 0; l < 5u; l++)         /* the word's specks: each from somewhere, flying home */
             for (gy = 0; gy < FONT_P.h; gy++)
@@ -180,7 +166,7 @@ static void spl_frame(uint32_t t)               /* the screen at t ms */
                     if (e >= 1024u)
                         cv_rect(x, y, 2, 2, C_WHITE);
                     else {                      /* rainbow on the way, whiter as it nears home */
-                        uint16_t c = spl_hue((h + t * 3u) % 1536u, 255u);
+                        uint16_t c = hue565((h + t * 3u) % 1536u, 255u);
                         uint32_t w = e * e >> 12;   /* 0 .. 256 */
                         uint32_t r = (c >> 11) * 8u, g = (c >> 5 & 63u) * 4u, b = (c & 31u) * 8u;
                         r += (255u - r) * w >> 8; g += (255u - g) * w >> 8; b += (255u - b) * w >> 8;

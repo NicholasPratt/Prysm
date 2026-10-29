@@ -17,7 +17,8 @@
  *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
- *   HOME             the oscilloscope (KNOB1: how many cycles); ALGORITHM or a page button: back; HOME again: LIVE
+ *   HOME             the oscilloscope (KNOB1: how many cycles, KNOB2: PRISM / X-Y / MONO); ALGORITHM or a page
+ *                    button: back; HOME again: LIVE
  *                    (the first 4 black keys a pattern, the first 8 white keys a patch, from the next bar line; KNOB1 ..
  *                    KNOB4 the parameters chosen for them: SELECT a knob, PRESETS its parameter); HOME there: back
  *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / SOUND / INIT, KNOB1 = the slot, SAVE again = do it
@@ -28,7 +29,7 @@
  * marker each, as in the sketch, then the four cells). Only what changed is redrawn, at most every UI_FRAME_MS.
  * Pages are tables (page_t -> row_t -> prm_t): a parameter is a field of patch_t, its range and how it shows. */
 
-/* the colours: white and greys on black */
+/* the colours: white and greys on black, and two muted accents */
 #define C_ACC RGB(255, 255, 255)                /* what is being edited, where we are */
 #define C_BRIGHT RGB(255, 255, 255)             /* what is being touched */
 #define C_MID RGB(150, 150, 150)                /* values, curves not being edited */
@@ -36,6 +37,18 @@
 #define C_BOX RGB(56, 56, 56)                   /* frames */
 #define C_SEL RGB(40, 40, 40)                   /* the selected row's band */
 #define C_FILL RGB(34, 34, 34)                  /* under a curve */
+/* the accents: a prism's red, green and blue (the battery's bars); a value turned up drifts blue, down red, and
+ * fades back to white (SHIFT_MS) */
+#define PR1_R 232u
+#define PR1_G 96u
+#define PR1_B 88u
+#define PR3_R 104u
+#define PR3_G 144u
+#define PR3_B 248u
+#define C_PR1 RGB(PR1_R, PR1_G, PR1_B)
+#define C_PR2 RGB(112, 208, 120)
+#define C_PR3 RGB(PR3_R, PR3_G, PR3_B)
+#define SHIFT_MS 700u
 
 #include "prysm_font_m.h"                       /* FONT_M: the focus row's values (Terminus 22 bold, 11 x 22) */
 #include "prysm_font_p.h"                       /* FONT_P: the pop-up's value (Terminus 32 bold, 16 x 32) */
@@ -646,11 +659,13 @@ static void cv_frame(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)   /
     cv_rect(x, y, 1, h, c); cv_rect(x + w - 1, y, 1, h, c);
 }
 
-/* the battery (fm1_batt: 0 .. 3 bars, 4 on USB power: a bolt), 17 x 9 px times s; empty, it blinks */
+/* the battery (fm1_batt: 0 .. 3 bars, 4 on USB power: a bolt), 17 x 9 px times s; the bars a prism's colours;
+ * empty, it blinks */
 static void cv_batt(int32_t x, int32_t y, uint32_t lvl, int32_t s)
 {
     static const char BOLT[6][14] = {".......##....", "......##.....", ".....######..", "........##...",
                                      ".......##....", "......#......"};
+    static const uint16_t BAR[3] = {C_PR1, C_PR2, C_PR3};
     uint16_t c = lvl == 0u ? ((fm1_ms / 500u) & 1u ? C_BRIGHT : C_FAINT) : C_MID;
     int32_t i, j;
     cv_rect(x, y, 15 * s, 9 * s, c);            /* the case, and its tip */
@@ -663,7 +678,7 @@ static void cv_batt(int32_t x, int32_t y, uint32_t lvl, int32_t s)
         return;
     }
     for (i = 0; i < (int32_t)lvl && i < 3; i++)
-        cv_rect(x + (2 + 4 * i) * s, y + 2 * s, 3 * s, 5 * s, C_BRIGHT);
+        cv_rect(x + (2 + 4 * i) * s, y + 2 * s, 3 * s, 5 * s, BAR[i]);
 }
 
 static void cv_hdots(int32_t x0, int32_t x1, int32_t y, int32_t step)   /* a guide: dotted, faint */
@@ -1454,13 +1469,23 @@ static void gfx_loop(uint32_t lit)
 
 static char pop_name[16], pop_val[20];          /* the knob just turned (or PRESETS: the cutoff) */
 static uint32_t pop_until, pop_drawn;
+static uint32_t pop_at, pop_tinted;             /* (when it was set; drawn shifted: redraw till it is white) */
+static int32_t pop_dir;                         /* a value turned up: 1, down: -1 (the shift), else 0 */
 
 static void pop(const char *name, const char *val)
 {
     put(pop_name, name);
     put(pop_val, val);
     pop_until = fm1_ms + POP_MS;
+    pop_at = fm1_ms;
+    pop_dir = 0;
     dirty |= D_GFX;
+}
+
+static void pop_turn(const char *name, const char *val, int32_t d)   /* a value turned: up blue, down red */
+{
+    pop(name, val);
+    pop_dir = d > 0 ? 1 : -1;
 }
 
 static void draw_pop(void);
@@ -1518,10 +1543,17 @@ static void draw_pop(void)                      /* (into the picture's canvas) *
         cv_rect(x0, 0, bw, h, C_BLACK);         /* (the picture shows around it) */
         cv_frame(x0, 0, bw, h, C_MID);
         cv_text(x0 + (bw - nw) / 2, 3, &FONT_S, pop_name, C_MID);
-        cv_text(x0 + (bw - w) / 2, 20, f, pop_val, C_BRIGHT);
+        {                                       /* the value: shifted, fading back to white */
+            uint32_t age = fm1_ms - pop_at, s = pop_dir && age < SHIFT_MS ? 256u - age * 256u / SHIFT_MS : 0u;
+            uint32_t r = pop_dir > 0 ? PR3_R : PR1_R, g = pop_dir > 0 ? PR3_G : PR1_G, b = pop_dir > 0 ? PR3_B : PR1_B;
+            s = s * s >> 8;                     /* (eased: it lingers, then goes) */
+            cv_text(x0 + (bw - w) / 2, 20, f, pop_val, s ? RGB(255u - ((255u - r) * s >> 8), 255u - ((255u - g) * s >> 8),
+                                                            255u - ((255u - b) * s >> 8)) : C_BRIGHT);
+            pop_tinted = s != 0u;
+        }
         pop_drawn = 1;
     } else
-        pop_drawn = 0;
+        pop_drawn = pop_tinted = 0;
 }
 
 #define PG_PATCH PG_N                           /* (the PATCH screen: not in ALGORITHM's round, only SAVE leads here) */
@@ -2319,13 +2351,35 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
     return (int)changed;
 }
 
-/* ---- the SCOPE (the HOME button): the output, left (white) and right (grey), triggered on a rising zero, over
- * sc_cycles periods of the newest note (whatever the note, the wave stands still), redrawn every SC_FRAME_MS */
+/* ---- the SCOPE (the HOME button): the output, triggered on a rising zero, over sc_cycles periods of the newest note
+ * (whatever the note, the wave stands still), redrawn every SC_FRAME_MS. KNOB2 the style: PRISM (the left channel
+ * split like light, a spectrum either side of a white core, over the last traces fading through the colours, a glow
+ * under it), ORBIT (the wave across, itself a quarter cycle later up: a sine a circle, FM a knot; in colours) or
+ * MONO (left white, right grey) */
 #define PG_SCOPE (PG_N + 1u)
 #define SC_H 132
 #define SC_Y 40u
 #define SC_FRAME_MS 40u
-static uint32_t sc_back = PG_OSC1, sc_cycles = 2, sc_gain = 1, sc_shown = 0xFFFF;   /* gain: x1 .. x8 (auto) */
+#define SC_HIST 6u                              /* PRISM: the traces that linger */
+enum { SC_PRISM, SC_ORBIT, SC_MONO, SC_STYLES };
+static const char *const SC_STYLE[SC_STYLES] = {"PRISM", "ORBIT", "MONO"};
+static uint32_t sc_back = PG_OSC1, sc_cycles = 2, sc_gain = 1, sc_shown = 0xFFFFFFFFu;   /* gain: x1 .. x8 (auto) */
+static uint32_t sc_style = SC_PRISM, sc_hn, sc_hi;   /* (the traces kept, the newest's index) */
+static uint8_t sc_hist[SC_HIST][240];
+
+static uint16_t hue565(uint32_t h, uint32_t v)  /* hue 0..1535 at brightness v 0..255 -> RGB565 */
+{
+    uint32_t f = h & 255u, r, g, b;
+    switch ((h >> 8) % 6u) {
+    case 0: r = 255; g = f; b = 0; break;
+    case 1: r = 255 - f; g = 255; b = 0; break;
+    case 2: r = 0; g = 255; b = f; break;
+    case 3: r = 0; g = 255 - f; b = 255; break;
+    case 4: r = f; g = 0; b = 255; break;
+    default: r = 255; g = 0; b = 255 - f; break;
+    }
+    return RGB(r * v / 255u, g * v / 255u, b * v / 255u);
+}
 
 static uint32_t sc_note(void)                   /* the newest sounding note (255: none) */
 {
@@ -2343,10 +2397,32 @@ static uint32_t sc_period(void)                 /* the newest note's period in f
     return inc ? 0xFFFFFFFFu / inc : 0;
 }
 
+static void sc_prism(const uint8_t *y, uint32_t t)   /* PRISM: the glow, the traces before, the split trace */
+{
+    uint32_t a, i;
+    int32_t x;
+    for (x = 0; x < 240; x++) {                 /* the glow: from the centre line to the wave, the spectrum across */
+        int32_t y0 = SC_H / 2, y1 = y[x];
+        cv_rect(x, y1 < y0 ? y1 : y0, 1, (y1 < y0 ? y0 - y1 : y1 - y0) + 1,
+                hue565(((uint32_t)x * 1536u / 240u + t / 4u) % 1536u, 64u));
+    }
+    for (a = sc_hn; a-- > 1u;) {                /* the traces before: oldest first, dimmer and further round */
+        const uint8_t *h = sc_hist[(sc_hi + SC_HIST - a) % SC_HIST];
+        uint16_t c = hue565((t / 2u + a * 256u) % 1536u, 220u - a * 32u);
+        for (x = 1; x < 240; x++) cv_line(x - 1, h[x - 1], x, h[x], c);
+    }
+    for (i = 0; i < 8u; i++) {                  /* the split: red above, violet below, outermost first; a white core */
+        int32_t o = (i & 1u ? 1 : -1) * (int32_t)(4u - i / 2u);   /* (-4, 4, -3, 3 .. -1, 1) */
+        uint16_t c = hue565((uint32_t)(o + 4) * 1280u / 8u, 255u);
+        for (x = 1; x < 240; x++) cv_line(x - 1, y[x - 1] + o, x, y[x] + o, c);
+    }
+    for (x = 1; x < 240; x++) cv_line(x - 1, y[x - 1], x, y[x], C_BRIGHT);
+}
+
 static void sc_draw(void)
 {
     static int16_t snap[2][SCOPE_N];
-    uint32_t end = scope_w, p = sc_period(), w, s, k, ch, i;
+    uint32_t end = scope_w, p = sc_period(), w, s, k, ch, i, t = fm1_ms;
     int32_t x, py[2] = {0, 0};
     w = p ? p * sc_cycles : 512u;               /* the window */
     if (w < 32u) w = 32u;
@@ -2371,6 +2447,21 @@ static void sc_draw(void)
         sc_gain = sc_gain < 1u ? 1u : sc_gain > 8u ? 8u : sc_gain;
     }
     cv_begin(240, SC_H, C_BLACK);
+    if (sc_style == SC_ORBIT) {                 /* ORBIT: the wave across, a quarter cycle later up; colours along it */
+        uint32_t q = p ? p / 4u : 64u;
+        for (x = 0; x < 240; x += 4) cv_pset(x, SC_H / 2, C_BOX);
+        for (i = 0; i < (uint32_t)SC_H; i += 4u) cv_pset(120, (int32_t)i, C_BOX);
+        for (i = 0; i + q <= w; i++) {          /* (the later point: still inside the window) */
+            int32_t l = snap[0][(s + i) & (SCOPE_N - 1u)] * (int32_t)sc_gain;
+            int32_t r = snap[0][(s + i + q) & (SCOPE_N - 1u)] * (int32_t)sc_gain;
+            int32_t px = 120 + l * (SC_H / 2 - 2) / 32767, y = SC_H / 2 - r * (SC_H / 2 - 2) / 32767;
+            if (i) cv_line(py[0], py[1], px, y, hue565((i * 1536u / (w - q) + t / 2u) % 1536u, 255u));
+            py[0] = px;
+            py[1] = y;
+        }
+        cv_blit(0, SC_Y);
+        return;
+    }
     for (x = 0; x < 240; x += 4) {              /* the graticule: the centre, the quarters, the cycles */
         cv_pset(x, SC_H / 2, C_BOX);
         cv_pset(x, SC_H / 4, C_SEL);
@@ -2379,7 +2470,20 @@ static void sc_draw(void)
     for (k = 1; p && k < sc_cycles; k++)
         for (i = 0; i < (uint32_t)SC_H; i += 4u)
             cv_pset((int32_t)(k * 240u / sc_cycles), (int32_t)i, C_BOX);
-    for (ch = 2; ch-- > 0;)                     /* right under, left over */
+    if (sc_style == SC_PRISM) {
+        uint8_t *y;
+        sc_hi = (sc_hi + 1u) % SC_HIST;         /* this trace: the newest kept */
+        y = sc_hist[sc_hi];
+        if (sc_hn < SC_HIST) sc_hn++;
+        for (x = 0; x < 240; x++) {
+            int32_t v = snap[0][(s + (uint32_t)x * w / 240u) & (SCOPE_N - 1u)] * (int32_t)sc_gain;
+            y[x] = (uint8_t)(SC_H / 2 - v * (SC_H / 2 - 6) / 32767);   /* (room for the split) */
+        }
+        sc_prism(y, t);
+        cv_blit(0, SC_Y);
+        return;
+    }
+    for (ch = 2; ch-- > 0;)                     /* MONO: right under, left over */
         for (x = 0; x < 240; x++) {
             int32_t v = snap[ch][(s + (uint32_t)x * w / 240u) & (SCOPE_N - 1u)] * (int32_t)sc_gain;
             int32_t y = SC_H / 2 - v * (SC_H / 2 - 2) / 32767;
@@ -2394,7 +2498,7 @@ static void sc_text(void)                       /* the header: the note, the cyc
     char s[32], *e;
     static const char *const NAME[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
     uint32_t note = sc_note();
-    sc_shown = note << 8 | sc_cycles << 4 | sc_gain;
+    sc_shown = sc_style << 16 | note << 8 | sc_cycles << 4 | sc_gain;
     draw_text_box(4, HDR_Y, 130, &FONT_S, "SCOPE", C_ACC, 0);
     e = s;
     if (note < 128u) {
@@ -2405,8 +2509,8 @@ static void sc_text(void)                       /* the header: the note, the cyc
     e = num(e, sc_cycles);
     put(e, sc_cycles == 1u ? " CYCLE" : " CYCLES");
     draw_text_box(110, HDR_Y, 126, &FONT_S, s, C_FAINT, 2);
-    e = put(s, "L WHITE   R GREY   x");
-    num(e, sc_gain);
+    e = put(put(s, "KNOB2: "), SC_STYLE[sc_style]);
+    num(put(e, sc_style == SC_MONO ? "  L/R  x" : "  x"), sc_gain);
     draw_text_box(0, SC_Y + SC_H + 12u, 240, &FONT_S, s, C_FAINT, 1);
     draw_text_box(0, 222, 240, &FONT_S, "KNOB1: CYCLES   HOME: LIVE", C_FAINT, 1);
 }
@@ -2475,18 +2579,30 @@ static int ui_input(uint32_t buttons)
             {
                 char val[8];
                 num(val, (uint32_t)x);
-                pop("CUTOFF", val);
+                pop_turn("CUTOFF", val, d);
             }
             dirty |= D_HDR | (page == PG_FILTER ? D_GFX | D_ROWS : 0u);
         }
     }
-    if (page == PG_SCOPE) {                     /* the SCOPE: KNOB1 the cycles; HOME, ALGORITHM, SAVE or a page leave */
+    if (page == PG_SCOPE) {                     /* the SCOPE: KNOB1 the cycles, KNOB2 the style; HOME, ALGORITHM, SAVE */
+                                                /* or a page leave */
         if ((d = fm1_enc_take(ENC_KNOB1)) != 0) {
             int32_t c = (int32_t)sc_cycles + d;
             sc_cycles = (uint32_t)(c < 1 ? 1 : c > 8 ? 8 : c);
+            sc_hn = 0;                          /* (the traces kept: another window) */
             dirty |= D_ALL;
         }
-        for (i = 1; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
+        if ((d = fm1_enc_take(ENC_KNOB1 + 1u)) != 0) {   /* KNOB2: the style */
+            static int32_t slow;                /* (one per two detents) */
+            slow += d;
+            if (slow <= -2 || slow >= 2) {
+                sc_style = (sc_style + SC_STYLES + (slow > 0 ? 1u : SC_STYLES - 1u)) % SC_STYLES;
+                slow = 0;
+                sc_hn = 0;
+                dirty |= D_ALL;
+            }
+        }
+        for (i = 2; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
         (void)fm1_enc_take(ENC_SELECT);
         if (buttons & (1u << BTN_HOME)) { ui_page(PG_LIVE); return (int)changed; }   /* HOME again: LIVE */
         if (fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
@@ -2613,7 +2729,7 @@ static int ui_input(uint32_t buttons)
         if (p->kind != K_CURSOR && p->kind != K_DCUR) {   /* its name and value, large, for a moment */
             char val[16];
             fmt(val, p, v);
-            pop(prm_label(p), val);
+            pop_turn(prm_label(p), val, d);
         }
         if (p->kind == K_DHIT)                  /* the step's hit: into the lane */
             drum_put(seq_ed(), dr_sel, dr_cursor, (uint32_t)x);
@@ -2844,7 +2960,7 @@ static void ui_draw(void)                       /* from the main loop: what chan
     if (page == PG_SCOPE) {                     /* the scope: the trace every SC_FRAME_MS, the text when it changes */
         static uint32_t last_sc;
         if (fm1_ms - last_sc >= SC_FRAME_MS) { last_sc = fm1_ms; sc_draw(); }
-        if (dirty & (D_ROWS | D_LEG) || sc_shown != (sc_note() << 8 | sc_cycles << 4 | sc_gain))
+        if (dirty & (D_ROWS | D_LEG) || sc_shown != (sc_style << 16 | sc_note() << 8 | sc_cycles << 4 | sc_gain))
             sc_text();                          /* (the note, the cycles or the zoom changed) */
         dirty = 0;
         return;
@@ -2867,8 +2983,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
             dirty |= D_GFX | D_ROWS;
         }
     }
-    if (pop_drawn && fm1_ms >= pop_until)
-        dirty |= D_GFX;                         /* (the pop-up's time is up: the picture back) */
+    if (pop_drawn && (fm1_ms >= pop_until || pop_tinted))
+        dirty |= D_GFX;                         /* (the pop-up's time is up: the picture back; or it is fading) */
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;

@@ -6,9 +6,10 @@
 
 Two oscillators per voice, each a chain of three wavetable operators (mod 2 -> mod 1 -> carrier) that modulate
 each other by FM, ring or mix, and a noise source (white, pink, brown, digital, S&H, crackle), each through the filter
-or past it; a lo-fi drum machine (kick, snare, hat: 8-bit samples, a lane in every pattern); a resonant, self-oscillating filter (12 / 24 dB low-pass or a comb) with drive and a high-pass; an LFO with six shapes and two destinations; a second, tempo-syncable LFO with many more; two mod
-envelopes that can loop and modulate the LFO's rate; stereo chorus, delay (with wow and pitch-shifting repeats) and
-a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; USB audio and MIDI.
+or past it; a drum machine (kick, snare, hat, clap in three kits, a lane in every pattern); a resonant, self-oscillating filter (12 / 24 dB low-pass or a comb) with drive and a high-pass; an LFO with six shapes and two destinations; a second, tempo-syncable LFO with many more; two mod
+envelopes that can loop and modulate the LFO's rate; a mod matrix; a bit-crusher, a phaser / flanger, stereo chorus,
+delay (with wow and pitch-shifting repeats) and a plate reverb (with modulation and shimmer); sequencer steps that lock
+knobs; a MIDI looper; 8 patch slots with UNDO; graphical pages; USB audio and MIDI.
 
 - **See it**: [the demo video](https://www.youtube.com/watch?v=mpHz8HwsCX0) (2½ minutes: the screen and the sound)
 - **Install it**: [the web installer](https://nicholaspratt.github.io/Prysm/) (Chrome or Edge), or `tools/fm1_install.py` (below)
@@ -35,16 +36,18 @@ a plate reverb (with modulation and shimmer); 8 patch slots; graphical pages; US
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch (together or mod 1 / mod 2 alone), cutoff, amp, mix) |
 | **LFO 2** | one for all the voices; the same shapes; free (0.05 .. 40 Hz) or in time (4/1 .. 1/32, triplets); any LFO destination, or resonance, drive, high-pass, comb damping, filter envelope amount, levels, osc 2 detune, the mod envelope's amount, the LFO's shape (morphed), the effects' mixes, delay time and feedback, reverb size |
 | **Mod envelopes** | two, each an ADSR with LOOP (attack-decay until release) and its own destination and amount; into the LFO's rate, depth or shape (a morph through its waves), or any LFO destination |
-| **Effects** | stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer |
+| **Mod matrix** | four more routes: LFO, LFO 2, the mod envelopes, velocity, key, the mod wheel or a random value per note onto any LFO destination, an amount either way |
+| **Effects** | bit-crusher (bits and rate); phaser or flanger (manual, feedback either way); stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer |
 | **Velocity** | from MIDI, to level, cutoff and modulation (the FM-1's keys play at full velocity) |
 | **Glide** | portamento, always or legato |
 | **Arpeggiator** | UP, DOWN, UPDN, RAND, ORDER; 1/4 .. 1/32 with triplets; 1 .. 4 octaves; gate (to tied), swing, latch; 40 .. 240 BPM or the MIDI clock (START / STOP / CONTINUE); sample-accurate |
-| **Sequencer** | polyphonic: chords of up to 4 notes a step; 4 patterns of up to 64 steps, 303-style: notes, rests, accents, slides (legato glide), ties; a song of up to 16 entries, each a pattern played 1 .. 16 times; row copy / paste; step entry from the keys (chords: keys held together) or real-time recording (quantized to the step, velocity, held notes tied, overdub); a metronome (always, or only while recording) and a bar's count-in; its own or the MIDI clock; each patch slot has its own (patterns, song, kit); with the split on, two parts (one each side, by pitch) to mute or clear apart |
-| **Drums** | kick, snare, hat (an accent opens it): 8-bit samples at 11 .. 22 kHz, made from scratch, played back unsmoothed; a lane in each of the 4 patterns, entered on the keys as on a TR (white keys the steps, their LEDs the lane), accents, a snare flam, hat rolls (2 .. 8 hits a step, fading or swelling); level, tune (+-24 st), decay and a send through the sound's filter each; the bus: drive, crush (bits and rate), sends into the delay and the reverb; MIDI channel 10 (General MIDI notes) |
+| **Sequencer** | polyphonic: chords of up to 4 notes a step; 4 patterns of up to 64 steps, 303-style: notes, rests, accents, slides (legato glide), ties; a song of up to 16 entries, each a pattern played 1 .. 16 times; row copy / paste; step entry from the keys (chords: keys held together) or real-time recording (quantized to the step, velocity, held notes tied, overdub); step locks (two lanes a pattern, any knob, a value per step); a metronome (always, or only while recording) and a bar's count-in; its own or the MIDI clock; each patch slot has its own (patterns, song, kit); with the split on, two parts (one each side, by pitch) to mute or clear apart |
+| **Drums** | kick, snare, hat (an accent opens it), clap, made from scratch in three kits: LO-FI (8-bit samples at 11 .. 22 kHz, played back unsmoothed), TR (clean, bright), BOOM (deep); a lane in each of the 4 patterns, entered on the keys as on a TR (white keys the steps, their LEDs the lane), accents, a snare flam, hat rolls (2 .. 8 hits a step, fading or swelling); level, tune (+-24 st), decay and a send through the sound's filter each; the bus: drive, crush (bits and rate), sends into the delay and the reverb; MIDI channel 10 (General MIDI notes) |
 | **Split** | per patch: OSC 1 below a key, OSC 2 from it, an octave each side (a bass under a lead), the 4 voices shared; the key set with a knob or LEARN |
 | **LIVE** | HOME twice: patterns (the black keys) and patches (the white keys) change on the next bar line; mutes (the top white keys) for the kick, snare, hats, clap, each oscillator and the noise, and one to unmute all; four knobs, each any parameter you choose |
-| **Oscilloscope** | on HOME: left and right, locked to the newest note, auto-zoom |
-| **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on |
+| **Looper** | records the notes you play (not the audio) over 1, 2, 4 or 8 bars, in time with the sequencer; overdub, quantize to 1/16 or 1/8; up to 512 notes |
+| **Oscilloscope** | on HOME: locked to the newest note, auto-zoom; three styles: PRISM (the wave split into a spectrum, fading trails), ORBIT (the wave against itself a quarter cycle later: a sine a circle, FM a knot), MONO (left and right) |
+| **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on; UNDO (and redo) of the last change |
 | **Editor** | [in the browser](https://nicholaspratt.github.io/Prysm/editor/): the firmware itself running in the page (screen, knobs, keys, sound), every parameter, patch files; in sync with a connected FM-1 both ways |
 | **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out, with channel select and clock; MIDI in and clock on the TRS jack too |
 
@@ -65,15 +68,16 @@ envelopes, the LFO, the effects chain.
 | FILTER | SELECT (the button) | FILTER, TYPE, COMB |
 | AMP | ENV | ENV, VEL, VCA |
 | F.ENV, M.ENV 1, M.ENV 2 | ENV (2, 3, 4 times) | ENV; the mod envelopes: ENV, DEST |
-| LFO | LFO (twice: LFO 2) | LFO, DEST; LFO 2: LFO, DEST |
+| LFO | LFO (twice: LFO 2; three times: MATRIX) | LFO, DEST; LFO 2: LFO, DEST; MATRIX: MOD 1 .. MOD 4 |
 | MIX | GLO | OSC, ROUTE, GLIDE, SPLIT |
 | SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK, pitch BEND range |
 | ARP | ARP (again: on / off) | ARP, TIME |
-| SEQ | SEQ (PLAY: run; REC: step entry, or recording while it plays) | STEP, CHORD, PATTERN, EDIT, PARTS, CLICK, SONG, ENTRY |
-| DRUM | SEQ (twice; the keys: the steps) | STEP, ROLL, KICK, SNARE, HAT, BUS |
-| CHORUS / DELAY / REVERB | FX (1, 2, 3 times) | CHORUS; DELAY, D.MOD; REVERB, R.MOD |
-| PATCH | SAVE | SAVE, LOAD, INIT over 8 slots |
-| SCOPE | HOME | the output, live (KNOB1: cycles) |
+| SEQ | SEQ (PLAY: run; REC: step entry, or recording while it plays) | STEP, CHORD, LOCK, PATTERN, EDIT, PARTS, CLICK, SONG, ENTRY |
+| DRUM | SEQ (twice; the keys: the steps) | STEP, ROLL, KICK, SNARE, HAT, CLAP, BUS, KIT, EDIT |
+| LOOP | SEQ (three times; REC: record, overdub) | LOOP (BARS, QUANT, PLAY, CLEAR) |
+| CHORUS / DELAY / REVERB / MOD FX / CRUSH | FX (1 .. 5 times) | CHORUS; DELAY, D.MOD; REVERB, R.MOD; MOD FX, TONE; CRUSH |
+| PATCH | SAVE | SAVE, LOAD, SOUND, INIT, UNDO over 8 slots |
+| SCOPE | HOME | the output, live (KNOB1: cycles, KNOB2: PRISM / ORBIT / MONO) |
 | LIVE | HOME (twice; the keys: patterns, patches, mutes) | PLAY, K1 .. K4 (the knobs' parameters) |
 
 ## Installing from the command line
