@@ -89,7 +89,9 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_DKIT, K_LKDEST, K_LKVAL,               /* (the drums' kit; the SEQ page's LOCK row: a lane's parameter, the */
                                                 /* step's value) */
        K_MMSRC, K_MFX, K_CBITS, K_CRATE,        /* (the mod matrix's source; MOD FX's type; CRUSH's bits, rate) */
-       K_LBARS, K_LQUANT, K_LPLAY, K_LCLR };    /* (the LOOP page's: the looper's, not saved) */
+       K_LBARS, K_LQUANT, K_LPLAY, K_LCLR,      /* (the LOOP page's: the looper's, not saved) */
+       K_MMTIME,                                /* (a matrix route's drum envelope: its decay) */
+       K_DPRE, K_DLOAD };                       /* (the KIT row's beats: one picked; LOAD: into the pattern edited) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -191,7 +193,7 @@ static const row_t LFO2_ROWS[] = {               /* (one for all the voices; SYN
 };
 static const row_t MATRIX_ROWS[] = {            /* (each route: a source onto one of the LFO's destinations) */
 #define MM_ROW(n, i) {n, {{"SRC", PO(mm_src[i]), MM_N - 1u, K_MMSRC}, {"DEST", PO(mm_dest[i]), DEST_N - 1u, K_LDEST}, \
-                      {"AMT", PO(mm_amt[i]), 127, K_BIP}, NOPRM}, LIT_ENV}
+                      {"AMT", PO(mm_amt[i]), 127, K_BIP}, {"TIME", PO(mm_time[i]), 127, K_MMTIME}}, LIT_ENV}
     MM_ROW("MOD 1", 0), MM_ROW("MOD 2", 1), MM_ROW("MOD 3", 2), MM_ROW("MOD 4", 3),
 #undef MM_ROW
 };
@@ -233,6 +235,7 @@ static const row_t DLY_ROWS[] = {
                {"MIX", PO(dly_mix), 127, K_NUM}, {"PING", PO(dly_ping), 1, K_ONOFF}}, LIT_M1},
     {"D.MOD", {{"WOW", PO(dly_wrate), 127, K_RATE}, {"DEPTH", PO(dly_wdepth), 127, K_NUM},
                {"SHIFT", PO(dly_shift), 24, K_SHIFT}, {"TONE", PO(dly_tone), 127, K_NUM}}, LIT_M1},
+    {"D.SYNC", {{"SYNC", PO(dly_sync), 1, K_ONOFF}, NOPRM, NOPRM, NOPRM}, LIT_M1},   /* (ON: TIME in the tempo) */
 };
 static const row_t REV_ROWS[] = {
     {"REVERB", {{"SIZE", PO(rev_size), 127, K_NUM}, {"DAMP", PO(rev_damp), 127, K_NUM},
@@ -257,6 +260,37 @@ static const row_t MIX_ROWS[] = {
     {"SPLIT", {{"KEY", PO(split), 127, K_SPLIT}, {"OCT1", PO(split_oct[0]), 4, K_SPOCT},   /* (below it OSC 1, from */
                {"OCT2", PO(split_oct[1]), 4, K_SPOCT}, {"LEARN", 0, 1, K_SLEARN}}, LIT_ALL},   /* it OSC 2) */
 };
+/* the KIT row's preset beats: 16 steps a lane (KICK, SNARE, HAT, CLAP), repeated over a longer pattern. A step: . none,
+ * x a hit, X an accent (the hat: open), f a flam (the snare's), 2 3 4 6 8 the hat hit so many times (a roll) */
+static const struct { const char *name, *lane[4]; } DPRE[] = {
+    /*                 KICK                SNARE               HAT                 CLAP */
+    {"HOUSE 1",  {"x...x...x...x...", "................", "..X...X...X...X.", "....x.......x..."}},
+    {"HOUSE 2",  {"x...x...x...x...", "..............x.", "xxXxxxXxxxXxxxXx", "....x.......x..."}},
+    {"DEEP HSE", {"x...x...x...x...", ".......x........", "..x...x...x...x.", "....x.......x..."}},
+    {"TECH HSE", {"x...x...x...x...", "...x......x.....", "x.Xxx.Xxx.Xxx.Xx", "....x.......x..."}},
+    {"TECHNO 1", {"x...x...x...x...", "................", "xxXxxxXxxxXxxxXx", "....x.......x..."}},
+    {"TECHNO 2", {"x...x...x...x..x", "..........x.....", "..X...X...X...X.", "....x.......x..."}},
+    {"DISCO",    {"x...x...x...x...", "....x.......x...", "x.X.x.X.x.X.x.X.", "................"}},
+    {"BOOM BAP", {"x......x..x.....", "....x.......x...", "x.x.x.x.x.x.x.x.", "................"}},
+    {"BOOMBAP2", {"x..x......x..x..", "....x..x....x...", "x.x.x.x.x.x.xxx.", "................"}},
+    {"LO-FI HH", {"x......x.x......", "....x.......x...", "x.xxx.xxx.xxx.x.", "................"}},
+    {"TRAP 1",   {"x......x..x.....", "........x.......", "x.x.x.x.x.x.4.x.", "........x......."}},
+    {"TRAP 2",   {"x.....x...x..x..", "........x.......", "x.x2x.x.x.x2x.6x", "........x......."}},
+    {"DRILL",    {"x.....x...x.....", "........x..x....", "x.x.x3x.x.x.x3x.", "................"}},
+    {"UKG 2STP", {"x.........x.....", "....x.......x...", "..x..xx...x..xx.", "....x.......x..."}},
+    {"UKG 4X4",  {"x...x...x...x...", "...x.......x....", "..X...X...X...X.", "....x.......x..."}},
+    {"DNB",      {"x.........x.....", "....x.......x...", "x.x.x.x.x.x.x.x.", "................"}},
+    {"JUNGLE",   {"x.x.......xx....", "....x..x.x..x..x", "x.x.x.x.x.x.x.x.", "................"}},
+    {"DUBSTEP",  {"x.........x.....", "........x.......", "..x...x...x...xx", "........x......."}},
+    {"BREAKS",   {"x.........x..x..", "....x..x.x..x...", "x.x.x.x.x.x.x.X.", "................"}},
+    {"ELECTRO",  {"x.....x...x.....", "....x.......x...", "xxxxxxxxxxxxxxxx", "....x.......x..."}},
+    {"DEMBOW",   {"x...x...x...x...", "...x..x....x..x.", "x.x.x.x.x.x.x.x.", "................"}},
+    {"DANCEHL",  {"x..x....x..x....", "....x.......x...", "x.xxx.xxx.xxx.xx", "......x.......x."}},
+    {"AFROBEAT", {"x.....x.x.....x.", "...x..x...x..x..", "x.xxx.xxx.xxx.xx", "....x.......x..."}},
+    {"AMAPIANO", {"x.......x.......", "...x...x..x...x.", "xxXxxxXxxxXxxxXx", "....x.......x..."}},
+    {"JERSEY",   {"x...x...x.x.x...", "....x.......x...", "..X...X...X...X.", "................"}},
+};
+#define DPRE_N (sizeof DPRE / sizeof DPRE[0])
 static const row_t DRUM_ROWS[] = {               /* (the drums' lanes of the pattern edited; the kit, for all of them) */
     {"STEP", {{"DRUM", 0, DRUMS - 1u, K_DRUM}, {"STEP", 0, 63, K_DCUR}, {"HIT", 0, 3, K_DHIT},
               {"CLEAR", 0, 1, K_DCLR}}, LIT_CURVE},
@@ -272,7 +306,8 @@ static const row_t DRUM_ROWS[] = {               /* (the drums' lanes of the pat
               {"DECAY", SO(dr_dec[3]), 127, K_DDEC}, {"FILTER", SO(dr_flt[3]), 127, K_DNUM}}, LIT_C | LIT_M1},
     {"BUS", {{"DRIVE", SO(dr_drive), 127, K_DNUM}, {"CRUSH", SO(dr_crush), 127, K_DNUM},
              {"DELAY", SO(dr_dly), 127, K_DNUM}, {"REVERB", SO(dr_rev), 127, K_DNUM}}, LIT_ALL},
-    {"KIT", {{"KIT", SO(dr_kit), DR_KITS - 1u, K_DKIT}, NOPRM, NOPRM, NOPRM}, LIT_ALL},
+    {"KIT", {{"KIT", SO(dr_kit), DR_KITS - 1u, K_DKIT}, {"PRESET", 0, DPRE_N - 1u, K_DPRE},   /* (a beat: picked, */
+             {"LOAD", 0, 1, K_DLOAD}, NOPRM}, LIT_ALL},  /* then LOADed) */
     {"EDIT", {{"PATT", 0, SEQ_PATS - 1u, K_SPAT}, {"LANE", 0, DRUMS, K_DLANE},   /* (the drums' copy and paste: */
               {"COPY", 0, 1, K_DCOPY}, {"PASTE", 0, 1, K_DPASTE}}, LIT_CURVE},  /* the notes stay) */
 };
@@ -358,6 +393,7 @@ enum { DR_STEP, DR_ROLL, DR_ROW, DR_BUS = DR_ROW + DRUMS, DR_KITR, DR_EDIT };   
 static uint8_t clip_drum[64][DRUMS], clip_roll[64];   /* (the clipboard: the drums of its steps, the hat's ratchets) */
 static uint8_t clip_lk[64][PLOCKS], clip_lkd[PLOCKS];   /* (and their locks; the lanes' parameters) */
 static uint8_t dr_lane;                         /* the EDIT row's LANE: 0 ALL, 1 .. 4 KICK, SNARE, HAT, CLAP */
+static uint8_t dr_pre;                          /* the one picked (not saved) */
 static uint8_t dclip_lane, dclip_len, dclip_pat;   /* the drums' own clipboard: 0 empty, else the LANE copied (ALL: */
 static uint8_t dclip[64][DRUMS], dclip_roll[64];   /* all four); its pattern's length, which; each step's drums, the */
                                                 /* hat's roll */
@@ -376,7 +412,7 @@ static int seq_kind(uint32_t k)                 /* a parameter of the sequencer'
     return k == K_SNOTE || k == K_STRIG || k == K_SSLIDE || k == K_SLEN || (k >= K_SPAT && k <= K_SINIT) ||
            k == K_SCHORD || k == K_SVEL || k == K_DHIT || k == K_DCLR || k == K_DNUM || k == K_DSEMI || k == K_DDEC ||
            k == K_SMUTE || k == K_SPCLR || k == K_DROLL || k == K_DRAMP || k == K_DLANE || k == K_DCOPY || k == K_DPASTE ||
-           k == K_DKIT || k == K_LKDEST || k == K_LKVAL;
+           k == K_DKIT || k == K_LKDEST || k == K_LKVAL || k == K_DLOAD;
 }
 static int loop_kind(uint32_t k) { return k >= K_LBARS && k <= K_LCLR; }   /* the looper's (not saved) */
 
@@ -432,6 +468,8 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_DHIT: dr_hit_ui = (uint8_t)drum_at(seq_ed(), dr_sel, dr_cursor); return &dr_hit_ui;
     case K_DCLR: case K_DCOPY: case K_DPASTE: ui_none = 0; return &ui_none;
     case K_DLANE: return &dr_lane;
+    case K_DPRE: return &dr_pre;
+    case K_DLOAD: ui_none = 0; return &ui_none;
     case K_DROLL: dr_roll_ui = (uint8_t)ratchet_at(seq_ed(), dr_cursor); return &dr_roll_ui;
     case K_DNUM: case K_DSEMI: case K_DDEC: case K_DRAMP: case K_SMUTE: return (uint8_t *)&seqs + p->off;   /* (the kit; the mutes) */
     case K_SLEARN: case K_SPCLR: case K_LCLR: ui_none = 0; return &ui_none;
@@ -546,7 +584,17 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_L2DEST: put(s, DEST_NAME[*v < DEST2_N ? *v : 0u]); break;
     case K_L2SYNC: put(s, L2SYNC_NAME[*v < L2SYNC_N ? *v : 0u]); break;
     case K_ONOFF: put(s, *v ? "ON" : "OFF"); break;
-    case K_DMS: put(num(s, (441u + (uint32_t)*v * (DLY_N - 1100u) / 127u) * 1000u / 44100u), "ms"); break;
+    case K_DMS:                                 /* (SYNC: a division of the tempo) */
+        if (edit.dly_sync) put(s, DSYNC_NAME[DSYNC_OF(*v)]);
+        else put(num(s, (441u + (uint32_t)*v * (DLY_N - 1100u) / 127u) * 1000u / 44100u), "ms");
+        break;
+    case K_MMTIME: {                            /* (a drum source's alone: back to nothing in that time) */
+        uint32_t ms = (16777216u / PR_ENV_ATT[*v & 127u]) * 160u / 441u;   /* (blocks of 16 frames) */
+        if (!MM_DRUM(v[(int)PO(mm_src[0]) - (int)PO(mm_time[0])])) put(s, "--");
+        else if (ms < 1000u) put(num(s, ms ? ms : 1u), "ms");
+        else { char *e = num(s, ms / 1000u); *e++ = '.'; put(num(e, ms / 100u % 10u), "s"); }
+        break;
+    }
     case K_PMS: put(num(s, (1u + (uint32_t)*v * (PRE_N - 2u) / 127u) * 1000u / 44100u), "ms"); break;
     case K_SHIFT: put(snum(s, (int32_t)*v - 12), "st"); break;
     case K_SPOCT: snum(s, (int32_t)*v - 2); break;
@@ -600,6 +648,8 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_DROLL: if (*v && *v < RATCHETS) num(s, RATCHET[*v]); else put(s, "OFF"); break;
     case K_DRAMP: if (*v < 64u) num(put(s, "FADE "), 64u - *v); else if (*v > 64u) num(put(s, "SWELL "), *v - 64u); else put(s, "EVEN"); break;
     case K_DKIT: put(s, DR_KIT_NAME[*v < DR_KITS ? *v : 0u]); break;
+    case K_DPRE: put(s, DPRE[*v < DPRE_N ? *v : 0u].name); break;
+    case K_DLOAD: put(s, "TURN"); break;
     case K_LKDEST: put(s, LK_NAME[*v < LK_N ? *v : 0u]); break;
     case K_LKVAL: if (*v) num(s, *v - 1u); else put(s, "--"); break;
     case K_MMSRC: put(s, MM_NAME[*v < MM_N ? *v : 0u]); break;
@@ -1885,6 +1935,27 @@ static void drum_copy(uint32_t paste)
     dirty |= D_GFX | D_ROWS;
 }
 
+static void drum_preset(void)                   /* the KIT row's LOAD: the beat picked into the pattern edited, all four */
+{                                               /* lanes, over all 64 steps (16 repeated); the notes, the length stay */
+    pattern_t *pt = seq_ed();
+    uint32_t k, d, i;
+    char msg[16];
+    ud_take("PRESET");
+    for (d = 0; d < DRUMS; d++)
+        for (k = 0; k < 64u; k++) {
+            uint32_t c = (uint8_t)DPRE[dr_pre % DPRE_N].lane[d][k % 16u], h = c == 'x' ? 1u : c == 'X' ? 2u : 0u, r = 0;
+            if (c == 'f' && d == 1u) h = 3u;
+            for (i = 1; i < RATCHETS && d == 2u; i++)
+                if (c == '0' + RATCHET[i]) { h = 1u; r = i; }
+            drum_put(pt, d, k, h);
+            if (d == 2u) ratchet_put(pt, k, r);
+        }
+    put(put(num(put(msg, "P"), seqs.cur % SEQ_PATS + 1u), " "), DPRE[dr_pre % DPRE_N].name);
+    pop("LOADED", msg);
+    seqs_dirty = 1;
+    dirty |= D_GFX | D_ROWS;
+}
+
 static void drum_clear(void)                    /* the DRUM page's CLEAR: the lane chosen, every step none (asks first) */
 {
     uint32_t k;
@@ -2668,8 +2739,9 @@ static int ui_input(uint32_t buttons)
             p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT ||
             p->kind == K_NTYPE || p->kind == K_ROUTE || p->kind == K_DRUM || p->kind == K_DHIT || p->kind == K_DCLR ||
             p->kind == K_DROLL || p->kind == K_DLANE || p->kind == K_DCOPY || p->kind == K_DPASTE || p->kind == K_SLEARN ||
+            p->kind == K_DPRE || p->kind == K_DLOAD ||
             p->kind == K_SMUTE || p->kind == K_SPCLR || p->kind == K_SPOCT || p->kind == K_DKIT || p->kind == K_LKDEST ||
-            p->kind == K_MMSRC || p->kind == K_MFX || loop_kind(p->kind)) {
+            p->kind == K_MMSRC || p->kind == K_MFX || loop_kind(p->kind) || (p->kind == K_DMS && edit.dly_sync)) {
             /* one step per two detents: no flicker */
             slow[i] += d;
             if (slow[i] > -2 && slow[i] < 2) continue;
@@ -2681,6 +2753,10 @@ static int ui_input(uint32_t buttons)
         last_turn[i] = fm1_ms;
         if (p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT) {
             if (seq_action(p->kind)) changed = 1;   /* (a turn either way does it) */
+            continue;
+        }
+        if (p->kind == K_DLOAD) {               /* the preset beat, loaded (a turn either way) */
+            drum_preset();
             continue;
         }
         if (p->kind == K_DCOPY || p->kind == K_DPASTE) {   /* the drums' lanes, copied, pasted (a turn either way) */
@@ -2709,6 +2785,11 @@ static int ui_input(uint32_t buttons)
         }
         v = pval(pg, p);
         x = (int32_t)*v + d;
+        if (p->kind == K_DMS && edit.dly_sync) {   /* SYNC: a division a step (the middle of its share of the knob) */
+            int32_t z = (int32_t)DSYNC_OF(*v) + d;
+            z = z < 0 ? 0 : z >= (int32_t)DSYNC_N ? (int32_t)DSYNC_N - 1 : z;
+            x = (z * 128 + 64) / (int32_t)DSYNC_N;
+        }
         {
             int32_t mn = p->kind == K_SLEN || p->kind == K_SONGLEN || p->kind == K_SEREP ? 1 : 0;
             x = x < mn ? mn : x > p->max ? p->max : x;
@@ -2723,7 +2804,7 @@ static int ui_input(uint32_t buttons)
         if (x == *v)
             continue;                           /* at the end of its range: nothing changed */
         if (!loop_kind(p->kind) && p->kind != K_CURSOR && p->kind != K_DCUR && p->kind != K_SROW &&
-            p->kind != K_SENTRY && p->kind != K_DRUM && p->kind != K_DLANE && PAGES[pg].osc != G)
+            p->kind != K_SENTRY && p->kind != K_DRUM && p->kind != K_DLANE && p->kind != K_DPRE && PAGES[pg].osc != G)
             ud_mark("EDIT");                    /* (the first change after a pause: UNDO's point) */
         *v = (uint8_t)x;
         if (p->kind != K_CURSOR && p->kind != K_DCUR) {   /* its name and value, large, for a moment */
@@ -2736,8 +2817,8 @@ static int ui_input(uint32_t buttons)
         if (p->kind == K_DROLL)                 /* the hat step's ratchet (on an empty step: a hit too) */
             hat_roll(dr_cursor, (uint32_t)x);
         if (p->kind == K_CURSOR || p->kind == K_SROW || p->kind == K_SENTRY || p->kind == K_DRUM || p->kind == K_DCUR ||
-            p->kind == K_DLANE) {
-            /* a cursor: not the sound */
+            p->kind == K_DLANE || p->kind == K_DPRE) {
+            /* a cursor: not the sound (PRESET: only picked, LOAD loads it) */
             dirty |= D_GFX | D_ROWS;
             continue;
         }

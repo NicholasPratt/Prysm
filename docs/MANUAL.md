@@ -349,7 +349,7 @@ envelopes already do. A route is off while its source is OFF or its amount is 0 
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| MOD 1 .. MOD 4 | SRC: the source | DEST: the destination | AMT: -64 .. +63 | |
+| MOD 1 .. MOD 4 | SRC: the source | DEST: the destination | AMT: -64 .. +63 | TIME: a drum source's fall (1 ms .. 10 s; others: --) |
 
 | Source | |
 | --- | --- |
@@ -359,10 +359,19 @@ envelopes already do. A route is off while its source is OFF or its amount is 0 
 | KEY | the note: 0 at middle C, up above it, down below (five octaves either way: the whole amount) |
 | WHEEL | the MIDI mod wheel (CC 1) |
 | RANDOM | a new value at each note, held while it plays |
+| KICK, SNARE, HAT, CLAP | that drum's hits: full on each hit, then evenly back to nothing over the route's TIME |
 
 The picture lists the four routes, source to destination, each amount a bar from the middle. Some ideas: VELO onto
 the CUTOFF (a harder note, brighter); KEY onto MOD1 (high notes less FM, so they stay clean); WHEEL onto the LFO's
 pitch depth for vibrato on demand; RANDOM onto the pitch, a little, for an old synth's drift.
+
+**The drums as sources.** A drum source follows that drum's hits, from the drum sequencer and from MIDI (channel 10,
+or the DRUM page's keys). It works even when the drum's LEVEL is 0, so a silent kick can still drive a route. A drum
+muted on the LIVE screen doesn't trigger it. On **AMP**, a negative amount **ducks**: the sound dips on each hit and
+comes back over TIME (sidechain pumping). A positive amount **gates**: the sound opens on each hit and closes over
+TIME, and a long TIME gives swells. The duck and gate act on the voices before the effects, so the delay and reverb
+tails carry on through them. Elsewhere the drum works like any envelope: KICK onto the CUTOFF opens the filter on
+every kick, and HAT onto MOD1 adds FM bite in time with the hats.
 
 ### MIX
 
@@ -429,6 +438,7 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 | CHORUS | CHORUS | rate | depth | mix | |
 | DELAY | DELAY | time (10 .. 735 ms) | feedback | mix | PING ON / OFF |
 | DELAY | D.MOD | wow rate | wow depth | shift (-12 .. +12 st) | tone |
+| DELAY | D.SYNC | SYNC ON / OFF: TIME in the tempo | | | |
 | REVERB | REVERB | size | damping | mix | pre-delay (up to 93 ms) |
 | REVERB | R.MOD | rate | depth | shimmer | |
 | MOD FX | MOD FX | TYPE: OFF, PHASER, FLANGER | rate | depth | mix |
@@ -438,6 +448,10 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 - **Chorus**: left and right swept against each other, for width. Full mix is half wet: the classic chorus.
 - **Delay**: **ping** sends the repeats from side to side. **Tone** darkens each repeat. Turning the time while it
   plays bends the repeats, like tape.
+- **Sync**: with SYNC on, TIME picks a note length of the tempo instead of ms: 1/32, 1/16T, 1/16, 1/8T, 1/16D, 1/8,
+  1/4T, 1/8D, 1/4, 1/2T, 1/4D, 1/2. The tempo is the arp's BPM, or the MIDI clock when CLOCK is MIDI, and the delay
+  follows it as it changes. A length longer than the delay's 735 ms (slow tempos) is halved until it fits, so it
+  stays in time. LFO 2 on DLYTIME steps through the lengths.
 - **Wow**: sweeps the delay time, so the repeats wobble in pitch.
 - **Shift**: each repeat is pitch-shifted: +12 makes the echoes climb an octave at a time, -5 makes them fall in
   fourths. (The first repeat is the note as played.)
@@ -575,7 +589,7 @@ step's hits, each as loud as it plays, or on the BUS row its settings.
 | ROLL | the step (the cursor) | the hat step's ROLL: OFF, 2, 3, 4, 6, 8 hits | RAMP: EVEN; down: FADE; up: SWELL | |
 | KICK, SNARE, HAT, CLAP | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
 | BUS | DRIVE | CRUSH: fewer bits and a lower rate still | DELAY send | REVERB send |
-| KIT | LO-FI, TR, BOOM (and any of your own) | | | |
+| KIT | LO-FI, TR, BOOM (and any of your own) | PRESET: a beat (below) | LOAD it (turn) | |
 | EDIT | the pattern: P1 .. P4 | LANE: ALL, KICK, SNARE, HAT, CLAP | COPY (turn) | PASTE (turn) |
 
 **Copying drum patterns** (EDIT row): pick the pattern with KNOB1 and the LANE with KNOB2, turn **COPY**, pick
@@ -585,6 +599,23 @@ steps past the length are left alone. With LANE on ALL, all four drums go to the
 it into another to move a part, such as the kick's beat onto the snare (a flam becomes an accent off the snare, and
 rolls stay on the hat). Copy one lane and paste with LANE on ALL to put it back in its own lane. The drum clipboard is
 separate from the SEQ page's, which copies notes and drums together.
+
+**Preset beats** (KIT row): turn **PRESET** to pick a beat (nothing changes yet), then turn **LOAD** to write it into
+the pattern you are editing (the header's P1 .. P4). A preset fills all four drum lanes: hits, accents (open hats),
+flams and hat rolls. Each is 16 steps, repeated over a longer pattern (32 steps: twice). The notes, the pattern's
+length, the kit, the levels and the tempo stay as they are. Loading while the sequencer plays swaps the beat at once.
+If you didn't want it, UNDO (PATCH screen) brings the drums back.
+
+| Style | Presets |
+| --- | --- |
+| House, techno | HOUSE 1, HOUSE 2, DEEP HSE, TECH HSE, TECHNO 1, TECHNO 2, DISCO |
+| Hip-hop, trap | BOOM BAP, BOOMBAP2, LO-FI HH, TRAP 1, TRAP 2 (hat rolls), DRILL |
+| UK, breaks | UKG 2STP, UKG 4X4, DNB, JUNGLE, DUBSTEP, BREAKS, ELECTRO, JERSEY |
+| Latin, Afro | DEMBOW (reggaeton), DANCEHL, AFROBEAT, AMAPIANO |
+
+Set the tempo to suit: around 120-128 BPM for house and techno, 130-140 for UK garage and Jersey club, 140 for trap,
+drill and dubstep (written half-time, snare on the third beat), 170-175 for DnB and jungle, 85-95 for boom bap and
+lo-fi, 90-110 for dembow, dancehall, afrobeats and amapiano.
 
 **On the DRUM page the keys are the drum machine's**, as on a TR (they play no notes here):
 

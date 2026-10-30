@@ -20,9 +20,10 @@
  *  12  + the noise and the routing (noise_type .. route: no noise, everything through the filter, as before)
  *  13  + the keyboard split (split, split_oct: off, as before)
  *  14  + the mod matrix, MOD FX, CRUSH (mm_src .. crush_rate: all off, as before)
- *  15  + the high-pass's resonance (hp_res: none, as before) */
+ *  15  + the high-pass's resonance (hp_res: none, as before)
+ *  16  + the delay in time, the matrix's drum envelopes (dly_sync, mm_time: off, as before) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 15u
+#define PATCH_VERSION 16u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
@@ -37,6 +38,7 @@
 #define PATCH_V12_SIZE 132u                     /* format 12's: everything before split */
 #define PATCH_V13_SIZE 135u                     /* format 13's: everything before mm_src */
 #define PATCH_V14_SIZE 155u                     /* format 14's: everything before hp_res */
+#define PATCH_V15_SIZE 156u                     /* format 15's: everything before dly_sync */
 #define PATCH_OLD_MAX PATCH_V9_SIZE
 #define PATCH_SEQ_AT PATCH_V6_SIZE              /* formats 7 .. 9: the pattern (seq_len, div, gate, pad, note[64], */
 #define PATCH_SEQ_N (PATCH_V7_SIZE - PATCH_V6_SIZE)   /* trig[64], slide[64]) here, the rest after it */
@@ -53,6 +55,7 @@ _Static_assert(__builtin_offsetof(patch_t, noise_type) == PATCH_V11_SIZE, "forma
 _Static_assert(__builtin_offsetof(patch_t, split) == PATCH_V12_SIZE, "format 12 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, mm_src) == PATCH_V13_SIZE, "format 13 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, hp_res) == PATCH_V14_SIZE, "format 14 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, dly_sync) == PATCH_V15_SIZE, "format 15 is a prefix of patch_t");
 
 /* patch p from n bytes of format version (a patch file, the plugin's state, a slot): 0 = done */
 static int patch_from(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version)
@@ -60,7 +63,7 @@ static int patch_from(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version
     static const uint16_t SIZE[PATCH_VERSION] = {0, PATCH_V1_SIZE, PATCH_V2_SIZE, PATCH_V3_SIZE, PATCH_V4_SIZE,
                                                  PATCH_V5_SIZE, PATCH_V6_SIZE, PATCH_V7_SIZE, PATCH_V8_SIZE,
                                                  PATCH_V9_SIZE, PATCH_V10_SIZE, PATCH_V11_SIZE, PATCH_V12_SIZE,
-                                                 PATCH_V13_SIZE, PATCH_V14_SIZE};
+                                                 PATCH_V13_SIZE, PATCH_V14_SIZE, PATCH_V15_SIZE};
     /* RATIO -> PITCH (0..48, 24 = in tune) and FINE: 0.5 .. 4 as near as they go, 5 and up as far: +24 */
     static const uint8_t R_SEMI[PR_RATIOS] = {12, 24, 31, 36, 43, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48};
     static const uint8_t R_FINE[PR_RATIOS] = {64, 64, 66, 64, 66, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64};
@@ -297,6 +300,7 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     old_size = 0;
     seqs_moved = 0;
     if (store_try(PATCH_VERSION, sizeof(patch_t), SEQS_VERSION, ~0u) == 0 ||
+        store_try(15u, PATCH_V15_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.4) */
         store_try(14u, PATCH_V14_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.4's dev builds) */
         store_try(13u, PATCH_V13_SIZE, 4u, SEQS_V4_SIZE) == 0 ||   /* (1.3 and the audit's) */
         store_try(13u, PATCH_V13_SIZE, 3u, SEQS_V3_SIZE) == 0 ||   /* (1.3) */

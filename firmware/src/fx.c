@@ -110,6 +110,7 @@ typedef struct {
     int32_t dly_mix, dly_fb, dly_tone;          /* Q15 */
     uint32_t dly_time;                          /* samples, Q8 (glided to by the ISR) */
     uint32_t dly_ping, dly_ratio;               /* ratio Q16 (65536: no shift) */
+    uint32_t dly_sync;                          /* 1: TIME a division of the tempo (fx_tick_q8) */
     uint32_t wow_inc;
     int32_t wow_depth;                          /* samples, Q16 */
     int32_t rev_mix, rev_decay, rev_damp, rev_shim;   /* Q15 */
@@ -150,6 +151,15 @@ static void fx_init(void)                       /* the plate's lines over rv_mem
 static int32_t cho_mix_of(uint32_t v) { return PR_CURVE_Q15[v & 127u] / 2; }   /* full = half wet: the classic chorus */
 static int32_t dly_fb_of(uint32_t v) { return (int32_t)(v & 127u) * 31000 / 127; }   /* up to 0.95 */
 static uint32_t dly_time_of(uint32_t v) { return (441u + (v & 127u) * (DLY_N - 1100u) / 127u) << 8; }   /* 10 .. 735 ms */
+static uint32_t fx_tick_q8;                     /* the tempo (engine_render): a clock tick, frames Q8 (0: not yet) */
+static uint32_t dly_synced(uint32_t v)          /* SYNC: TIME's division in time, halved until the line holds it */
+{
+    uint32_t t = fx_tick_q8 * DSYNC_TICKS[DSYNC_OF(v)], max = dly_time_of(127);
+    if (!fx_tick_q8) return dly_time_of(v);
+    while (t > max) t >>= 1;
+    return t;
+}
+static uint32_t dly_time_at(uint32_t v, uint32_t sync) { return sync ? dly_synced(v) : dly_time_of(v); }
 static int32_t rev_decay_of(uint32_t v) { return 6000 + (int32_t)(v & 127u) * 25500 / 127; }   /* 0.18 .. 0.96 */
 
 static void fx_set(const patch_t *p)
@@ -163,7 +173,8 @@ static void fx_set(const patch_t *p)
     fxp.dly_mix = PR_CURVE_Q15[p->dly_mix & 127u];
     fxp.dly_fb = dly_fb_of(p->dly_fb);
     fxp.dly_tone = 3000 + (int32_t)(p->dly_tone & 127u) * 29000 / 127;
-    fxp.dly_time = dly_time_of(p->dly_time);
+    fxp.dly_sync = p->dly_sync ? 1u : 0u;
+    fxp.dly_time = dly_time_at(p->dly_time, fxp.dly_sync);
     if (!dly_time_q8)
         dly_time_q8 = fxp.dly_time;             /* (the first time: no glide up from nothing) */
     fxp.dly_ping = p->dly_ping ? 1u : 0u;
@@ -251,7 +262,7 @@ static void modfx_render(int32_t *out, uint32_t n)
 static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t *dr)   /* g2: LFO 2, a value a block */
 {
     const fxp_t p = fxp;                        /* (read once: fx_set, in the main loop, cannot run during the ISR) */
-    uint32_t i, dest = eg.l2_dest, dtime = p.dly_time;
+    uint32_t i, dest = eg.l2_dest, dtime = p.dly_sync ? dly_synced(p.time_v) : p.dly_time;   /* (SYNC: the tempo now) */
     int32_t cmix = p.cho_mix, dmix = p.dly_mix, rmix = p.rev_mix, dfb = p.dly_fb, rdec = p.rev_decay;
     int32_t dsend = dr ? PR_CURVE_Q15[seqs.dr_dly & 127u] : 0, rsend = dr ? PR_CURVE_Q15[seqs.dr_rev & 127u] : 0;
     int32_t vd = lk_send[0] < 0 ? 32767 : PR_CURVE_Q15[lk_send[0] & 127], vr = lk_send[1] < 0 ? 32767 : PR_CURVE_Q15[lk_send[1] & 127];
@@ -264,7 +275,7 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
             switch (dest) {
             case DEST_CHORUS: cmix = cho_mix_of(knob_moved(p.cho_v, pz)); break;
             case DEST_DELAY: dmix = PR_CURVE_Q15[knob_moved(p.dly_v, pz)]; break;
-            case DEST_DLYTIME: dtime = dly_time_of(knob_moved(p.time_v, pz)); break;
+            case DEST_DLYTIME: dtime = dly_time_at(knob_moved(p.time_v, pz), p.dly_sync); break;
             case DEST_DLYFB: dfb = dly_fb_of(knob_moved(p.fb_v, pz)); break;
             case DEST_REVERB: rmix = PR_CURVE_Q15[knob_moved(p.rev_v, pz)]; break;
             default: rdec = rev_decay_of(knob_moved(p.size_v, pz)); break;

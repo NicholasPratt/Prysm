@@ -78,8 +78,18 @@ static const char *const DEST_NAME[DEST2_N] = {"OFF", "PITCH", "PITCH2", "WAVE1"
 #define DEST_LFO2_OK(d) ((d) < DEST2_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)  /* LFO 2's: those, and more */
 /* the mod matrix: MM_SLOTS routes, each a source onto one of the LFO's destinations (DEST_LFO_OK), by an amount */
 #define MM_SLOTS 4u
-enum { MM_OFF, MM_LFO, MM_LFO2, MM_MENV1, MM_MENV2, MM_VEL, MM_KEY, MM_WHEEL, MM_RAND, MM_N };
-static const char *const MM_NAME[MM_N] = {"OFF", "LFO", "LFO 2", "M.ENV 1", "M.ENV 2", "VELO", "KEY", "WHEEL", "RANDOM"};
+enum { MM_OFF, MM_LFO, MM_LFO2, MM_MENV1, MM_MENV2, MM_VEL, MM_KEY, MM_WHEEL, MM_RAND,
+       MM_KICK, MM_SNARE, MM_HAT, MM_CLAP,      /* (format 16: a drum's hits, each an envelope over the route's TIME) */
+       MM_N };
+static const char *const MM_NAME[MM_N] = {"OFF", "LFO", "LFO 2", "M.ENV 1", "M.ENV 2", "VELO", "KEY", "WHEEL", "RANDOM",
+                                          "KICK", "SNARE", "HAT", "CLAP"};
+#define MM_DRUM(s) ((s) >= MM_KICK && (s) < MM_N)
+/* the delay in time (SYNC): TIME picks one of these, shortest first; ticks of the arp's (or MIDI's) clock, 24 a beat */
+#define DSYNC_N 12u
+static const char *const DSYNC_NAME[DSYNC_N] = {"1/32", "1/16T", "1/16", "1/8T", "1/16D", "1/8", "1/4T", "1/8D", "1/4",
+                                               "1/2T", "1/4D", "1/2"};
+static const uint8_t DSYNC_TICKS[DSYNC_N] = {3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 36, 48};
+#define DSYNC_OF(v) (((v) & 127u) * DSYNC_N / 128u)   /* TIME's knob -> its division */
 /* MOD FX, before the chorus: a phaser (six all-passes, swept) or a flanger (a short line, swept, fed back) */
 enum { MFX_OFF, MFX_PHASER, MFX_FLANGER, MFX_N };
 static const char *const MFX_NAME[MFX_N] = {"OFF", "PHASER", "FLANGER"};
@@ -183,6 +193,9 @@ typedef struct {
     uint8_t crush_rate;                         /* 0 = as they are; up: a lower rate (a sample held 1 .. 32 frames) */
     /* (added in patch format 15: the high-pass's resonance) */
     uint8_t hp_res;                             /* 0 = none (as before); up: a peak at HPF's cutoff, to +16 dB */
+    /* (added in patch format 16: the delay in time, the matrix's drum envelopes) */
+    uint8_t dly_sync;                           /* 1: TIME is a division of the tempo (DSYNC_NAME), not ms */
+    uint8_t mm_time[MM_SLOTS];                  /* a drum source's envelope: its fall, 1 ms .. 10 s */
 } patch_t;
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
@@ -352,6 +365,7 @@ static const patch_t PATCH_INIT = {
     .mfx_type = MFX_OFF, .mfx_rate = 40, .mfx_depth = 80, .mfx_manual = 64, .mfx_fb = 80, .mfx_mix = 64,
     .crush_bits = 0, .crush_rate = 0,
     .hp_res = 0,
+    .dly_sync = 0, .mm_time = {70, 70, 70, 70},
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -412,6 +426,7 @@ static volatile struct {
     uint8_t mm_n;                               /* the mod matrix: its routes in use (the first mm_n of these) */
     uint8_t mm_src[MM_SLOTS], mm_dest[MM_SLOTS];
     int32_t mm_amt[MM_SLOTS];                   /* Q15, signed (squared, as the LFO's) */
+    int32_t mm_dk[MM_SLOTS];                    /* a drum source's fall: a block's step (Q15; linear, all of it in TIME) */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -894,8 +909,17 @@ static void lfo_mods(int32_t l, lfo_mod_t *m)   /* l: the LFO now (faded in), -3
         mod_add(m, eg.lfo_dest[d], eg.lfo_amt[d], l, 0);
 }
 
-/* the mod matrix's routes into m, for voice v: its sources now (l the LFO, l2 LFO 2, me / me2 the mod envelopes) */
-static __attribute__((noinline)) void mm_mods(lfo_mod_t *m, uint32_t v, int32_t l, int32_t l2, int32_t me, int32_t me2)
+#define MAXBLK 32u                              /* blocks per render, at most (n <= 512) */
+/* the drums as the matrix's sources: each route's envelope, block by block this render (mm_drums), from the hits of
+ * its drum (a bit a block, dm_hits: the sequencer's, MIDI's, the keys'; a drum's level 0 still counts, LIVE's mute not) */
+static int16_t mm_dv[MM_SLOTS][MAXBLK];
+static int32_t mm_lv[MM_SLOTS];                 /* (each route's envelope now, Q15) */
+static uint32_t dm_hits[4];                     /* (DRUMS, below) */
+
+/* the mod matrix's routes into m, for voice v in block bi: its sources now (l the LFO, l2 LFO 2, me / me2 the mod
+ * envelopes) */
+static __attribute__((noinline)) void mm_mods(lfo_mod_t *m, uint32_t v, uint32_t bi, int32_t l, int32_t l2, int32_t me,
+                                              int32_t me2)
 {
     uint32_t r, n = eg.mm_n < MM_SLOTS ? eg.mm_n : MM_SLOTS;
     for (r = 0; r < n; r++) {
@@ -913,6 +937,7 @@ static __attribute__((noinline)) void mm_mods(lfo_mod_t *m, uint32_t v, int32_t 
             break;
         case MM_WHEEL: s = wheel15; break;
         case MM_RAND: s = voice[v].rnd; uni = 0; break;
+        case MM_KICK: case MM_SNARE: case MM_HAT: case MM_CLAP: s = mm_dv[r][bi]; break;
         default: continue;
         }
         mod_add(m, eg.mm_dest[r], eg.mm_amt[r], s, uni);
@@ -940,7 +965,6 @@ static int32_t menv_step(env_t *e, uint32_t gate, uint32_t k)   /* mod envelope 
     return l;
 }
 
-#define MAXBLK 32u                              /* blocks per render, at most (n <= 512) */
 #include "fx.c"                                 /* the effects: chorus, delay, reverb */
 
 static uint32_t part_of(uint32_t note)          /* the split's side a note is on: 0 below (osc 1), 1 from it (osc 2) */
@@ -1234,8 +1258,17 @@ static void drum_flam(uint32_t vel, uint32_t at)   /* (the ISR) a flam from fram
 #define DQ_N 16u
 static struct { uint16_t at; uint8_t sound, vel; } dq[DQ_N];
 static uint32_t dq_n;
+_Static_assert(sizeof dm_hits / sizeof dm_hits[0] == DRUMS && MAXBLK <= 32u, "a bit a block, for each drum");
+static void dm_hit(uint32_t sound, uint32_t at)   /* (the ISR) the matrix: sound's drum hit at frame at of this render */
+{
+    uint32_t d = sound == DR_FLAM_S ? 1u : DR_VOICE(sound);
+    if (!(live_mute >> d & 1u))
+        dm_hits[d] |= 1u << (at / BLK < MAXBLK ? at / BLK : MAXBLK - 1u);
+}
+
 static void drum_queue(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR) sound (DR_FLAM_S: a flam) from frame at */
 {
+    dm_hit(sound, at);
     if (dq_n < DQ_N) { dq[dq_n].at = (uint16_t)at; dq[dq_n].sound = (uint8_t)sound; dq[dq_n].vel = (uint8_t)vel; dq_n++; }
 }
 
@@ -1957,6 +1990,27 @@ static __attribute__((noinline)) void voice_filter_locks(uint32_t v, uint32_t co
 }
 
 /* ---- the audio ISR: add n stereo frames (L R) to out */
+static __attribute__((noinline)) void mm_drums(uint32_t nb)   /* (the ISR) the drum routes' envelopes this render */
+{
+    uint32_t r, b, d, n = eg.mm_n < MM_SLOTS ? eg.mm_n : MM_SLOTS;
+    for (d = 0; d <= DR_FLAM_S; d++)            /* (MIDI, the keys: drums_render plays them from the top) */
+        if (dr_midi[d]) dm_hit(d, 0);
+    for (r = 0; r < n; r++) {
+        uint32_t h;
+        int32_t lv = mm_lv[r], dk = eg.mm_dk[r];
+        if (!MM_DRUM(eg.mm_src[r]))
+            continue;
+        h = dm_hits[eg.mm_src[r] - MM_KICK];
+        for (b = 0; b < nb && b < MAXBLK; b++) {
+            if (h >> b & 1u) lv = 32767;        /* a hit: full at once, then down to nothing over TIME, evenly (a */
+            mm_dv[r][b] = (int16_t)lv;          /* sidechain's even recovery) */
+            lv = lv > dk ? lv - dk : 0;
+        }
+        mm_lv[r] = lv;
+    }
+    for (d = 0; d < DRUMS; d++) dm_hits[d] = 0;
+}
+
 static void engine_render(int32_t *out, uint32_t n)
 {
     uint32_t v, o, k, b, i, nb = n / BLK;
@@ -1966,9 +2020,12 @@ static void engine_render(int32_t *out, uint32_t n)
     uint32_t l2inc = eg.l2_inc;
     if (!engine_up)                             /* (zeroed voices: itrig 0 would start note 0 on every one, held) */
         return;
-    if (eg.l2_sync) {                           /* in time: a cycle is so many ticks of the arp's (or MIDI's) tempo */
-        uint32_t t = eg.arp_midi && mc_bpm10 && mc.period_q8 ? mc.period_q8 : eg.tick_q8, bq8;
-        t = t > 1000000u ? 1000000u : t;        /* (under ~28 BPM: as slow as that) */
+    {                                           /* the tempo: a tick of the arp's (or MIDI's) clock */
+        uint32_t t = eg.arp_midi && mc_bpm10 && mc.period_q8 ? mc.period_q8 : eg.tick_q8;
+        fx_tick_q8 = t > 1000000u ? 1000000u : t;   /* (under ~28 BPM: as slow as that) */
+    }
+    if (eg.l2_sync) {                           /* in time: a cycle is so many ticks of that tempo */
+        uint32_t t = fx_tick_q8, bq8;
         bq8 = (t * L2SYNC_TICKS[eg.l2_sync]) >> BLK_SHIFT;   /* blocks a cycle, Q8 */
         l2inc = (0xFFFFFFFFu / (bq8 ? bq8 : 1u)) << 8;
     }
@@ -1989,6 +2046,7 @@ static void engine_render(int32_t *out, uint32_t n)
         l2_ph = nx;
     }
     arp_run(nb);                                /* the arpeggiator: its notes for this render, block by block */
+    mm_drums(nb);                               /* (after the sequencer's hits: the matrix's drums) */
     for (v = 0; v < NV; v++) {
         if (voice[v].trig) {                    /* a note from the main loop: from the first block */
             voice[v].trig = 0;
@@ -2084,7 +2142,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 mod_add(&m, eg.me_dest[1], eg.me_amt[1], me2, 1);
             mod_add(&m, eg.l2_dest, eg.l2_amt, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
             if (eg.mm_n)                        /* the mod matrix */
-                mm_mods(&m, v, l, g2[bi], me, me2);
+                mm_mods(&m, v, bi, l, g2[bi], me, me2);
             m.pitch16[0] += bend16;             /* pitch bend: every note (and the comb's keytrack with it) */
             m.pitch16[1] += bend16;
             m.vmod = 32767;                     /* velocity: softer notes quieter (by its square), darker, less bright */
@@ -2537,6 +2595,7 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
             eg.mm_src[n] = patch.mm_src[k];
             eg.mm_dest[n] = patch.mm_dest[k];
             eg.mm_amt[n] = d < 0 ? -q : q;
+            eg.mm_dk[n] = (int32_t)(PR_ENV_ATT[patch.mm_time[k] & 127u] >> 9);
             n++;
         }
         eg.mm_n = (uint8_t)n;

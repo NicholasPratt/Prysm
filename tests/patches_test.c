@@ -357,6 +357,22 @@ int main(void)
         patches_load();
         CHECK(!seqs_moved && seqs.dr_ramp == 40 && seqs.pat[1].note[3] == 65 && patch_get(2, &a) == 0 && a.split == 60,
               "format 14: the bank, and the store's own sequencer from its own place");
+        {                                       /* 1.4's bank (format 15): kept, the new fields as new */
+            static uint8_t st[BANK_SIZE(PATCH_V15_SIZE)];
+            uint32_t v15 = 15u;
+            patch_t c15 = PATCH_INIT;
+            c15.hp_res = 66; c15.cut = 33; c15.mm_src[1] = MM_RAND;
+            memset(st, 0, sizeof st);
+            memcpy(st, &v15, 4);
+            st[4u + 5u] = 1;
+            memcpy(st + BANK_SIZE(0) + 5u * PATCH_V15_SIZE, &c15, PATCH_V15_SIZE);
+            store_save(st, sizeof st);
+            memset(&bank, 0, sizeof bank);
+            patches_load();
+            CHECK(bank.version == PATCH_VERSION && patch_get(5, &a) == 0 && a.hp_res == 66 && a.cut == 33 &&
+                  a.mm_src[1] == MM_RAND && a.dly_sync == 0 && a.mm_time[3] == PATCH_INIT.mm_time[3] && patch_get(4, &a) != 0,
+                  "1.4's bank (format 15): kept; SYNC off, the drum TIMEs as new");
+        }
         memcpy(seqstore[3], v4, sizeof v4);     /* a slot's sequencer saved by 1.3: converted as fetched */
         seqstore_n[3] = sizeof v4;
         CHECK(seqs_fetch(3) == 0 && seqs_next.version == SEQS_VERSION && seqs_next.dr_flt[2] == 15 &&
@@ -366,6 +382,9 @@ int main(void)
         c.hp_res = 99; c.crush_rate = 33;
         CHECK(patch_from(&got, (const uint8_t *)&c, PATCH_V14_SIZE, 14) == 0 && got.crush_rate == 33 && got.hp_res == 0,
               "a format 14 file converts (HP RES none)");
+        c.hp_res = 77; c.dly_sync = 1; c.mm_time[2] = 5;
+        CHECK(patch_from(&got, (const uint8_t *)&c, PATCH_V15_SIZE, 15) == 0 && got.hp_res == 77 && got.dly_sync == 0 &&
+              got.mm_time[2] == PATCH_INIT.mm_time[2], "a format 15 file (1.4) converts (SYNC off, the drum TIMEs as new)");
         CHECK(seqs_size(4) == SEQS_V4_SIZE && seqs_size(SEQS_VERSION) == sizeof seqs && !seqs_size(SEQS_VERSION + 1u),
               "the sizes of the versions");
     }
