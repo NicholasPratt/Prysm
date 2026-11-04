@@ -24,6 +24,7 @@
  * The file stands alone (stdint, the tables) so tests/engine_test.c runs it on a computer. */
 #include "prysm_tables.h"
 #include "prysm_drums.h"
+#include "prysm_trans.h"                    /* the attack transients (tools/gen_transients.py) */
 
 #define NV 4u                                   /* voices */
 #define NOSC 2u                                 /* oscillators per voice */
@@ -196,6 +197,12 @@ typedef struct {
     /* (added in patch format 16: the delay in time, the matrix's drum envelopes) */
     uint8_t dly_sync;                           /* 1: TIME is a division of the tempo (DSYNC_NAME), not ms */
     uint8_t mm_time[MM_SLOTS];                  /* a drum source's envelope: its fall, 1 ms .. 10 s */
+    /* (added in patch format 17: the attack transients, an oscillator each: a short sample at each note's start, on
+     * its own envelope (its shape, DECAY), after the amp and past the filter, as the D-50's PCM attacks) */
+    uint8_t trn_type[NOSC];                     /* 0 = off, else 1 .. TR_N (TR_NAME) */
+    uint8_t trn_lvl[NOSC];                      /* its level */
+    uint8_t trn_tune[NOSC];                     /* 0..48 = -24 .. +24 semitones (24: a pitched one at the note's) */
+    uint8_t trn_dec[NOSC];                      /* 127 = as it was made; down: faded out sooner (-60 dB in 1 ms .. 10 s) */
 } patch_t;
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
@@ -366,6 +373,7 @@ static const patch_t PATCH_INIT = {
     .crush_bits = 0, .crush_rate = 0,
     .hp_res = 0,
     .dly_sync = 0, .mm_time = {70, 70, 70, 70},
+    .trn_type = {0, 0}, .trn_lvl = {100, 100}, .trn_tune = {24, 24}, .trn_dec = {127, 127},
 };
 
 /* ---- derived from the patch by engine_set(), read by the ISR */
@@ -427,6 +435,10 @@ static volatile struct {
     uint8_t mm_src[MM_SLOTS], mm_dest[MM_SLOTS];
     int32_t mm_amt[MM_SLOTS];                   /* Q15, signed (squared, as the LFO's) */
     int32_t mm_dk[MM_SLOTS];                    /* a drum source's fall: a block's step (Q15; linear, all of it in TIME) */
+    uint8_t t_type[NOSC];                       /* the transients: 0 off, else TR_SOUND's index + 1 */
+    int32_t t_lvl[NOSC];                        /* Q15 */
+    int32_t t_tune16[NOSC];                     /* 1/16 semitones */
+    uint32_t t_dk[NOSC];                        /* DECAY's fade: a block's step (Q16, exponential; 0: none) */
 } eg;
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
@@ -497,6 +509,8 @@ static struct {
     uint8_t ilk[LK_N], lk[LK_N];
     int32_t rnd;                                /* the mod matrix's RANDOM: the note's own, -32767..32767 */
     noise_t ns;                                 /* its noise */
+    uint32_t t_ph[NOSC];                        /* the transients: where each is in its sample (Q16) */
+    int32_t t_g[NOSC];                          /* its level now (Q15; 0: done, or none) */
     uint32_t n_inc;                             /* DIGI, S&H: the note's step (RATE in it) */
 } voice[NV];
 
@@ -1016,6 +1030,15 @@ static void voice_start(uint32_t v)
     voice[v].lfo_fade = 0;                      /* the delay: it fades in from the note */
     voice[v].menv[0].st = voice[v].menv[1].st = 1;
     voice[v].rnd = lfo_random(&mm_rng);
+    for (o = 0; o < NOSC; o++) {                /* the transients from their start, at the note's velocity */
+        int32_t g = eg.t_type[o] ? eg.t_lvl[o] : 0;
+        if (g && voice[v].vel < 127u && eg.vel_amp) {   /* (softer quieter, as the amp: by velocity's square) */
+            int32_t vf = (int32_t)voice[v].vel * 258;
+            g = (g * (32767 - ((eg.vel_amp * (32767 - ((vf * vf) >> 15))) >> 15))) >> 15;
+        }
+        voice[v].t_ph[o] = 0;
+        voice[v].t_g[o] = g;
+    }
 }
 
 /* ---- which voice a new note takes: the same note, else a silent voice, else the quietest release, else the oldest
@@ -2011,6 +2034,32 @@ static __attribute__((noinline)) void mm_drums(uint32_t nb)   /* (the ISR) the d
     for (d = 0; d < DRUMS; d++) dm_hits[d] = 0;
 }
 
+/* (the ISR) voice v's transient o over a block, into out (both channels): its sample from where it is, read at its
+ * rate (pitched ones: the note's, p16 the voice's pitch moves, 1/16 semitones), linearly interpolated, faded by DECAY */
+static __attribute__((noinline)) void trn_block(uint32_t v, uint32_t o, int32_t *out, int32_t p16)
+{
+    const tr_sound_t *s = &TR_SOUND[eg.t_type[o] - 1u];   /* (1 .. TR_N: the caller's; the TYPE may change midway, */
+                                                /*  so where it is is checked against this one's length) */
+    uint32_t i, ph = voice[v].t_ph[o], end = (uint32_t)(s->n - 1u) << 16;
+    int32_t r16 = eg.t_tune16[o] + (s->track ? p16 : 0);
+    uint32_t inc = rate_moved(s->inc, r16);
+    int32_t g = voice[v].t_g[o], g1 = g - (int32_t)(((int64_t)g * eg.t_dk[o]) >> 16), dg = (g1 - g) >> BLK_SHIFT;
+    for (i = 0; i < BLK; i++, g += dg) {
+        uint32_t k = ph >> 16;
+        int32_t a, b, x;
+        if (ph >= end) { g1 = 0; break; }       /* (its end: done) */
+        a = TR_MU[(uint8_t)s->d[k]];
+        b = TR_MU[(uint8_t)s->d[k + 1u]];
+        x = a + (((b - a) * (int32_t)((ph & 0xFFFFu) >> 1)) >> 15);
+        x = (((x * g) >> 15) * VOICE_GAIN) >> 15;
+        out[2u * i] += x;
+        out[2u * i + 1u] += x;
+        ph += inc;
+    }
+    voice[v].t_ph[o] = ph;
+    voice[v].t_g[o] = g1 > 8 ? g1 : 0;
+}
+
 static void engine_render(int32_t *out, uint32_t n)
 {
     uint32_t v, o, k, b, i, nb = n / BLK;
@@ -2421,6 +2470,14 @@ static void engine_render(int32_t *out, uint32_t n)
                 }
                 voice[v].cw = (uint16_t)cw;
             }
+            for (o = 0; o < NOSC; o++)          /* the transients: past the filter and the amp, on their own */
+                if (voice[v].t_g[o]) {
+                    if (!eg.t_type[o])          /* (its TYPE turned OFF while it played: done) */
+                        voice[v].t_g[o] = 0;
+                    else if (voice[v].omask >> o & 1u && !(live_mute >> (LM_OSC1 + o) & 1u))
+                        trn_block(v, o, out + 2u * b, (int32_t)(voice[v].note + voice[v].shift - 60) * 16 +
+                                                          m.pitch16[o] + (voice[v].glide_q8 >> 8));
+                }
             voice[v].amp_q15 = a_to;
         }
     }
@@ -2635,6 +2692,12 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
     eg.n_g = 300 + (int32_t)((PR_CURVE_Q15[patch.noise_col & 127u] * (32767 - 300)) >> 15);   /* ~70 Hz .. open */
     eg.n_thr = (2u + (uint32_t)PR_CURVE_Q15[patch.noise_col & 127u] * 2000u / 32767u) * 97391u;   /* 2 .. 2000 a second */
     eg.n_lvl = PR_CURVE_Q15[patch.noise_lvl & 127u];
+    for (k = 0; k < NOSC; k++) {                /* the transients */
+        eg.t_type[k] = patch.trn_type[k] <= TR_N ? patch.trn_type[k] : 0u;
+        eg.t_lvl[k] = PR_CURVE_Q15[patch.trn_lvl[k] & 127u];
+        eg.t_tune16[k] = ((int32_t)(patch.trn_tune[k] <= 48u ? patch.trn_tune[k] : 24u) - 24) * 16;
+        eg.t_dk[k] = (patch.trn_dec[k] & 127u) >= 127u ? 0u : PR_ENV_EXP[patch.trn_dec[k] & 127u];
+    }
     eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
     eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
     eg.a_sus = (int32_t)((patch.amp_s & 127u) * (uint32_t)(ENV_FULL / 127));

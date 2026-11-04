@@ -87,7 +87,7 @@ cutoff). The value drifts **blue** as you turn it up and **red** as you turn it 
 | **PRESETS** | the filter's cutoff, from any page (shown large for a moment) |
 | **SELECT** | the row (the tabs along the bottom) |
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
-| **EDIT** | OSC 1 (press again: OSC 2, then NOISE) |
+| **EDIT** | OSC 1 (press again: OSC 2, then TRANS, then NOISE) |
 | **ENV** | AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2) |
 | **SELECT** (the button) | FILTER |
 | **LFO** | LFO (press again: LFO 2, then MATRIX) |
@@ -164,10 +164,35 @@ you hold it.
 
 **MIX row.** The modulators' amounts (how much they change the next one) and the oscillator's own level.
 
+### TRANS
+
+An **attack transient** for each oscillator: a short sampled sound at the start of every note, laid over the
+oscillator, as the Roland D-50 put a sampled attack in front of a synthesised body. A hammer or a pluck in front of an
+FM tone, a breath before a pad, a click on a bass. **EDIT** three times (OSC 1, OSC 2, TRANS). Two rows, one for
+each oscillator; the picture shows both transients as they play at C4: the sound across, LEVEL its height, DECAY's
+fade over it, its length in milliseconds.
+
+| Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
+| --- | --- | --- | --- | --- |
+| OSC 1 | TYPE (OFF: none) | LEVEL | TUNE (-24 .. +24 st) | DECAY (FULL: as made) |
+| OSC 2 | TYPE | LEVEL | TUNE | DECAY |
+
+- A transient has **its own envelope**: the sound's own shape, faded sooner by **DECAY** (from FULL down). It does
+  not follow the amp envelope, so it is heard at once even on a pad with a slow attack, and it goes **past the filter**
+  (as the D-50's sampled attacks did). CRUSH, MOD FX and the effects still take it. A softer note's is quieter (AMP
+  velocity, as the amp's).
+- It plays once at the start of each note (a slide in the sequencer: no new one). The split's other
+  side and a LIVE mute of its oscillator silence it.
+- The **pitched** ones follow the key, made at C4: HAMMER, PLUCK, PICK, MALLET, KALIMB, BELL, GLASS, METAL, CHIFF,
+  FLUTE, BOW, BRASS, SLAP, BLIP, VOX. The others play at their own pitch on every key: ANVIL, BREATH, KNOCK, CLICK,
+  TICK, THUMP, ZAP, NOISE, SPIT. **TUNE** moves either.
+- All 24 are made from scratch by `tools/gen_transients.py` (physical and spectral models; no recordings), stored as
+  8-bit mu-law at 16 .. 32 kHz.
+
 ### NOISE
 
 A noise source in every voice, beside the two oscillators: it follows the amp envelope like them, and goes through the
-filter or past it (ROUTE). **EDIT** three times. The picture is the noise itself: its wave (a few milliseconds) above,
+filter or past it (ROUTE). **EDIT** four times. The picture is the noise itself: its wave (a few milliseconds) above,
 its spectrum below (24 bands, 60 Hz .. 15 kHz, the loudest at the top), so you see its colour change as you turn.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
@@ -695,12 +720,13 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 Press **SAVE** for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
 osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
 them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
-tabs SAVE, LOAD, SOUND, INIT, UNDO.
+tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM.
 
 | Control | Does |
 | --- | --- |
-| **SELECT** | SAVE, LOAD, SOUND, INIT or UNDO |
+| **SELECT** | SAVE, LOAD, SOUND, INIT, UNDO or RANDOM |
 | **KNOB1** | the slot |
+| **KNOB2**, **KNOB3** | RANDOM: AMOUNT, and what it changes |
 | **SAVE** | does it |
 | **HOME**, ALGORITHM or a page button | back |
 
@@ -720,6 +746,13 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO.
   after a pause (2 seconds: a sweep of turns is one change), or an action: a PASTE, a CLEAR, a LOAD, SOUND or INIT.
   The screen says what it will undo; press **SAVE**. Press SAVE again to redo. It is one step: the change before that
   is gone. It does not undo a save (the slot keeps what was saved), and the looper is apart from it.
+- **RANDOM** rolls the sound: each **SAVE** a new roll. **KNOB2** is the AMOUNT, 5 .. 100 % (100: NEW SOUND): a
+  little nudges the sound you have (its waves, types and destinations seldom switch, effects that are off stay off),
+  100 % rolls a new one. **KNOB3** picks what may change: ALL, OSC (waves, ratios, modes, levels, the noise, the
+  transients), FILTER, ENV, MOD (the LFOs, the mod envelopes' destinations, the matrix) or FX. Values stay in the
+  ranges that sound (a pitch LFO a vibrato, short attacks more often than long), and the sound is kept audible. The
+  arp, glide, velocity, the split, the VCA and the routing are never touched. Rolls in a row are **one UNDO**: UNDO
+  brings back the sound before the first. Like it: SAVE it to a slot.
 - The header shows the current slot on every page, with **\*** when there are unsaved changes.
 - When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.
 - Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.

@@ -1,0 +1,21 @@
+# the TRANS page (EDIT twice): OSC 1's MALLET played on C4; OSC 2's BELL, DECAY down, played; the amp's attack slow:
+# the transients still at once (tests/run_ui.sh; build/ui/tr.wav to listen to)
+100 btn 6
+120 btn 6
+200 shot
+300 enc 2 4
+400 shot
+500 keys 0x80
+800 keys 0
+900 enc 0 1
+950 enc 2 6
+1000 enc 5 -40
+1100 shot
+1200 keys 0x80
+1700 keys 0
+1800 btn 4
+1850 enc 2 100
+1900 shot
+2000 keys 0x80
+2600 keys 0
+2700 end

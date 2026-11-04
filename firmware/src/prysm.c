@@ -93,6 +93,7 @@ static int32_t cap_enc_take(uint32_t e)         /* the encoders as the UI takes 
     return d;
 }
 #define fm1_enc_take cap_enc_take
+#include "random.c"                             /* RANDOM: a sound rolled (the PATCH screen) */
 #include "ui.c"                                 /* the pages, the PATCH screen */
 #include "capture.c"                            /* performance capture: a take to film on a computer */
 #include "editor.c"                             /* the editor: parameters set over USB, changes reported back */

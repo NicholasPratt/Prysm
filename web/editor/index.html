@@ -105,6 +105,16 @@
   <button id="connect">Connect FM-1</button>
   <button id="save-file">Save patch</button>
   <button id="load-file">Load patch</button>
+  <select id="rnd-sec" title="What Randomise may change">
+    <option value="0">All</option><option value="1">Osc</option><option value="2">Filter</option>
+    <option value="3">Env</option><option value="4">Mod</option><option value="5">FX</option>
+  </select>
+  <select id="rnd-amt" title="How far: a nudge .. a new sound">
+    <option value="10">10 %</option><option value="30" selected>30 %</option><option value="60">60 %</option>
+    <option value="100">New</option>
+  </select>
+  <button id="random" title="Roll the sound (Undo brings it back)">Randomise</button>
+  <button id="undo" title="Undo the last change (again: redo)">Undo</button>
   <select id="send-slot" title="Store the sound in a slot of the FM-1">
     <option value="">Store on FM-1…</option>
     <option>1</option><option>2</option><option>3</option><option>4</option>

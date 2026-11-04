@@ -51,6 +51,21 @@ WEB int web_load_from(const uint8_t *p, uint32_t n, uint32_t version)   /* a sou
     edit = t;
     return web_load((const uint8_t *)&edit, sizeof edit, -1);
 }
+WEB void web_random(uint32_t pct, uint32_t sec, uint32_t seed)   /* RANDOM (random.c), as the PATCH screen's: UNDO's */
+{                                               /* step first (a roll at a time: the editor's own Undo is one step) */
+    ud_take(PA_RND_WHAT);
+    patch_random(&edit, pct, sec < RS_N ? sec : RS_ALL, seed);
+    engine_set(&edit);
+    dirty = D_ALL;
+}
+WEB int web_undo(void)                          /* the PATCH screen's UNDO (again: redo); 0 = nothing to undo */
+{
+    if (!ud_ok) return 0;
+    ud_swap();
+    engine_set(&edit);
+    dirty = D_ALL;
+    return 1;
+}
 WEB int32_t web_slot(void) { return cur_slot; }
 WEB int web_modified(void) { return modified(); }
 

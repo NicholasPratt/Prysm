@@ -22,14 +22,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 # ---- the firmware's knobs and default sound
 
-PAGES = {"OSC1": "OSC 1", "OSC2": "OSC 2", "NOISE": "NOISE", "FILTER": "FILTER", "AMP": "AMP", "FENV": "F.ENV", "MENV": "M.ENV 1",
+PAGES = {"OSC1": "OSC 1", "OSC2": "OSC 2", "TRANS": "TRANS", "NOISE": "NOISE", "FILTER": "FILTER", "AMP": "AMP", "FENV": "F.ENV", "MENV": "M.ENV 1",
          "MENV2": "M.ENV 2", "LFO": "LFO", "LFO2": "LFO 2", "MATRIX": "MATRIX",
          "MIX": "MIX", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "DRUM", "LOOP": "LOOP", "CHO": "CHORUS", "DLY": "DELAY",
          "REV": "REVERB", "MFX": "MOD FX", "CRUSH": "CRUSH", "SETUP": "SETUP", "PATCH": "PATCH", "SCOPE": "SCOPE", "LIVE": "LIVE"}   # (ui.c's order: PG_OSC1 .. PG_SETUP,
                                                 #  PG_PATCH, PG_SCOPE, PG_LIVE)
 PG = {p: i for i, p in enumerate(PAGES)}
 ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"],
-        "NOISE": ["NOISE"],
+        "TRANS": ["OSC 1", "OSC 2"], "NOISE": ["NOISE"],
         "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL", "VCA"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
         "MENV2": ["ENV", "DEST"], "LFO": ["LFO", "DEST"],
         "LFO2": ["LFO", "DEST"], "MATRIX": ["MOD 1", "MOD 2", "MOD 3", "MOD 4"],
@@ -228,7 +228,7 @@ class Scene:
             else:
                 if p != "SCOPE": self.back = p
                 self.page = "PATCH"
-        elif b == "EDIT": self.page = {"OSC1": "OSC2", "OSC2": "NOISE"}.get(p, "OSC1")
+        elif b == "EDIT": self.page = {"OSC1": "OSC2", "OSC2": "TRANS", "TRANS": "NOISE"}.get(p, "OSC1")
         elif b == "FX": self.page = {"CHO": "DLY", "DLY": "REV", "REV": "MFX", "MFX": "CRUSH"}.get(p, "CHO")
         elif b == "ENV": self.page = {"AMP": "FENV", "FENV": "MENV", "MENV": "MENV2"}.get(p, "AMP")
         elif b == "SELECT": self.page = "FILTER"
@@ -245,7 +245,7 @@ class Scene:
         return self.wait(gap)
 
     def go(self, page):                         # to a page by its button, as a player would
-        way = {"OSC1": "EDIT", "OSC2": "EDIT", "NOISE": "EDIT", "FILTER": "SELECT", "AMP": "ENV", "FENV": "ENV", "MENV": "ENV",
+        way = {"OSC1": "EDIT", "OSC2": "EDIT", "TRANS": "EDIT", "NOISE": "EDIT", "FILTER": "SELECT", "AMP": "ENV", "FENV": "ENV", "MENV": "ENV",
                "MENV2": "ENV", "LFO": "LFO", "LFO2": "LFO", "MATRIX": "LFO",
                "MIX": "GLO", "SETUP": "GLO", "ARP": "ARP", "SEQ": "SEQ", "DRUM": "SEQ", "LOOP": "SEQ", "CHO": "FX",
                "DLY": "FX", "REV": "FX", "MFX": "FX", "CRUSH": "FX",

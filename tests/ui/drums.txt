@@ -1,9 +1,10 @@
-# the NOISE page (EDIT twice): its types; the MIX page's ROUTE row; the DRUM page (SEQ twice): a beat entered on the
+# the NOISE page (EDIT three times): its types; the MIX page's ROUTE row; the DRUM page (SEQ twice): a beat entered on the
 # keys (white: steps, F# G# A#: the drum), an accent, playing; its ROLL row (rolls on the keys, RAMP), its KICK and BUS
 # rows; REC on the DRUM page: a bar's count-in, then the drum keys tapped in; the EDIT row: P1's drums copied, pasted
 # into P2 (tests/run_ui.sh)
 100 btn 6
 120 btn 6
+140 btn 6
 200 enc 4 90
 320 shot
 380 enc 2 2

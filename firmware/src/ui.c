@@ -91,7 +91,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_MMSRC, K_MFX, K_CBITS, K_CRATE,        /* (the mod matrix's source; MOD FX's type; CRUSH's bits, rate) */
        K_LBARS, K_LQUANT, K_LPLAY, K_LCLR,      /* (the LOOP page's: the looper's, not saved) */
        K_MMTIME,                                /* (a matrix route's drum envelope: its decay) */
-       K_DPRE, K_DLOAD };                       /* (the KIT row's beats: one picked; LOAD: into the pattern edited) */
+       K_DPRE, K_DLOAD,                         /* (the KIT row's beats: one picked; LOAD: into the pattern edited) */
+       K_TTYPE, K_TDEC };                       /* (a transient: its sound; DECAY, 127 FULL) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -148,6 +149,12 @@ static const row_t OSC_ROWS[] = {
 static const row_t NOISE_ROWS[] = {             /* (COLOUR: the tone, DIGI's and S&H's rate, CRACKLE's density) */
     {"NOISE", {{"TYPE", PO(noise_type), NOISE_N - 1u, K_NTYPE}, {"COLOUR", PO(noise_col), 127, K_NCOL},
                {"LEVEL", PO(noise_lvl), 127, K_NUM}, {"ROUTE", PO(route[2]), ROUTE_N - 1u, K_ROUTE}}, LIT_CURVE},
+};
+static const row_t TRANS_ROWS[] = {             /* (an oscillator's attack transient: its own envelope, after the amp) */
+    {"OSC 1", {{"TYPE", PO(trn_type[0]), TR_N, K_TTYPE}, {"LEVEL", PO(trn_lvl[0]), 127, K_NUM},
+               {"TUNE", PO(trn_tune[0]), 48, K_SEMI}, {"DECAY", PO(trn_dec[0]), 127, K_TDEC}}, LIT_C},
+    {"OSC 2", {{"TYPE", PO(trn_type[1]), TR_N, K_TTYPE}, {"LEVEL", PO(trn_lvl[1]), 127, K_NUM},
+               {"TUNE", PO(trn_tune[1]), 48, K_SEMI}, {"DECAY", PO(trn_dec[1]), 127, K_TDEC}}, LIT_M1},
 };
 static const row_t FILTER_ROWS[] = {
     {"FILTER", {{"CUT", PO(cut), 127, K_NUM}, {"RES", PO(res), 127, K_NUM},
@@ -318,10 +325,11 @@ static const row_t ARP_ROWS[] = {
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
-enum { PG_OSC1, PG_OSC2, PG_NOISE, PG_FILTER, PG_AMP, PG_FENV, PG_MENV, PG_MENV2, PG_LFO, PG_LFO2, PG_MATRIX, PG_MIX,
+enum { PG_OSC1, PG_OSC2, PG_TRANS, PG_NOISE, PG_FILTER, PG_AMP, PG_FENV, PG_MENV, PG_MENV2, PG_LFO, PG_LFO2, PG_MATRIX, PG_MIX,
        PG_ARP, PG_SEQ, PG_DRUM, PG_LOOP, PG_CHO, PG_DLY, PG_REV, PG_MFX, PG_CRUSH, PG_SETUP, PG_N };
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
+    {"TRANS", TRANS_ROWS, NROWS(TRANS_ROWS), 0},
     {"NOISE", NOISE_ROWS, NROWS(NOISE_ROWS), 0},
     {"FILTER", FILTER_ROWS, NROWS(FILTER_ROWS), 0}, {"AMP", AMP_ROWS, NROWS(AMP_ROWS), 0},
     {"F.ENV", FENV_ROWS, NROWS(FENV_ROWS), 0}, {"M.ENV 1", MENV_ROWS, NROWS(MENV_ROWS), 0},
@@ -630,6 +638,8 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     }
     case K_SVEL: if (*v) num(s, *v); else put(s, "AUTO"); break;   /* (AUTO: NOTE 100, ACCENT 127) */
     case K_NTYPE: put(s, NOISE_NAME[*v < NOISE_N ? *v : 0u]); break;
+    case K_TTYPE: put(s, TR_NAME[*v <= TR_N ? *v : 0u]); break;
+    case K_TDEC: if (*v >= 127u) put(s, "FULL"); else num(s, *v); break;
     case K_NCOL:                                /* (the tone; a rate from the note; a density) */
         if (NOISE_RATED(edit.noise_type)) put(snum(s, ((int32_t)*v - 64) * 3 / 4), "st");
         else if (edit.noise_type == NOISE_CRACKLE) num(s, 2u + (uint32_t)PR_CURVE_Q15[*v & 127u] * 2000u / 32767u);
@@ -1235,6 +1245,50 @@ static void gfx_mix(uint32_t lit)               /* the three sources' levels, ea
 #define NZ_N 2048u
 #define NZ_BANDS 24u
 #define NZ_WAVE 230u                            /* (the wave: 230 frames, 5 ms) */
+/* the TRANS page: a lane each oscillator (OSC 1 over OSC 2), its transient's sound as it plays at C4: the sample's
+ * peaks across, LEVEL its height, DECAY's fade over it; the row edited bright */
+static void gfx_trans(uint32_t lit)
+{
+    uint32_t o;
+    for (o = 0; o < NOSC; o++) {
+        int32_t y0 = 4 + (int32_t)o * 60, mid = y0 + 34, hh = 24, x;
+        uint32_t on = o ? lit & LIT_M1 : lit & LIT_C, ty = edit.trn_type[o] <= TR_N ? edit.trn_type[o] : 0u;
+        uint16_t c = on ? C_ACC : C_MID;
+        char t[24];
+        put(put(t, o ? "OSC 2  " : "OSC 1  "), TR_NAME[ty]);
+        cv_text(4, y0, &FONT_S, t, on ? C_BRIGHT : C_MID);
+        cv_hdots(8, 232, mid, 4);
+        if (!ty)
+            continue;
+        {
+            const tr_sound_t *sd = &TR_SOUND[ty - 1u];
+            uint32_t dk = (edit.trn_dec[o] & 127u) >= 127u ? 0u : PR_ENV_EXP[edit.trn_dec[o] & 127u];
+            uint32_t per = (sd->n + 223u) / 224u, j, ms = (uint32_t)sd->n * 1000u / (uint32_t)(((uint64_t)sd->inc * 44100u) >> 16);
+            /* blocks of the render a pixel lasts, Q8 (at C4: the sample's own rate) -> the fade a pixel, Q16 */
+            uint32_t bq8 = (per << 24) / (sd->inc * BLK), f = 65536u, step = 65536u;   /* (32 bits: per < 64, inc < 2^16) */
+            int32_t h = hh * (int32_t)PR_CURVE_Q15[edit.trn_lvl[o] & 127u] / 32767;
+            if (dk) {                           /* (1 - dk)^(blocks a pixel): squarings of the whole blocks, the rest */
+                uint32_t b = bq8 >> 8, q = 65536u - dk;
+                while (b) { if (b & 1u) step = (uint32_t)(((uint64_t)step * q) >> 16); q = (uint32_t)(((uint64_t)q * q) >> 16); b >>= 1; }
+            }
+            for (x = 0; x < 224 && (uint32_t)x * per < sd->n; x++) {
+                int32_t lo = 0, hi = 0;
+                for (j = (uint32_t)x * per; j < (uint32_t)(x + 1) * per && j < sd->n; j++) {
+                    int32_t s = TR_MU[(uint8_t)sd->d[j]];
+                    if (s < lo) lo = s;
+                    if (s > hi) hi = s;
+                }
+                lo = (int32_t)(((int64_t)lo * h * (int32_t)(f >> 1)) >> 30);
+                hi = (int32_t)(((int64_t)hi * h * (int32_t)(f >> 1)) >> 30);
+                cv_rect(8 + x, mid - hi, 1, hi - lo + 1, c);
+                f = (uint32_t)(((uint64_t)f * step) >> 16);
+            }
+            put(num(t, ms), " MS");
+            cv_text(236 - text_w(&FONT_S, t), y0, &FONT_S, t, C_FAINT);
+        }
+    }
+}
+
 static void gfx_noise(uint32_t lit)
 {
     static int16_t wave[NZ_WAVE];
@@ -1576,6 +1630,7 @@ static void draw_gfx(void)
     case PG_SETUP: gfx_setup(); break;
     case PG_SEQ: gfx_seq(lit); break;
     case PG_NOISE: gfx_noise(lit); break;
+    case PG_TRANS: gfx_trans(lit); break;
     case PG_DRUM: gfx_drum(lit); break;
     default: gfx_mix(lit);
     }
@@ -1607,9 +1662,13 @@ static void draw_pop(void)                      /* (into the picture's canvas) *
 }
 
 #define PG_PATCH PG_N                           /* (the PATCH screen: not in ALGORITHM's round, only SAVE leads here) */
-enum { PA_SAVE, PA_LOAD, PA_SOUND, PA_INIT, PA_UNDO, PA_N };   /* (LOAD: the sound and its sequencer; SOUND: the */
-static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "SOUND", "INIT", "UNDO"};   /* sound alone) */
+enum { PA_SAVE, PA_LOAD, PA_SOUND, PA_INIT, PA_UNDO, PA_RANDOM, PA_N };   /* (LOAD: the sound and its sequencer; */
+static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "SOUND", "INIT", "UNDO", "RANDOM"};   /* SOUND: alone) */
 static uint32_t pa_row;
+/* RANDOM (random.c): KNOB2 AMOUNT (5 .. 100 %), KNOB3 SECTION; SAVE rolls. The rolls in a row are one UNDO step: UNDO
+ * brings back the sound before the first (a run ends with another row, another screen, or a change elsewhere) */
+static uint32_t pa_rnd_pct = 30, pa_rnd_sec = RS_ALL, pa_rnd_run, pa_rnd_n;
+static const char PA_RND_WHAT[] = "RANDOM";
 
 /* ---- the header, the focus row, the tabs */
 static void draw_hdr(void)
@@ -1765,6 +1824,8 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
     cv_begin(240, FOC_H, C_BLACK);
     e = pa_row == PA_SAVE ? put(s, "SAVE TO SLOT ") : pa_row == PA_LOAD ? put(s, "LOAD SLOT ") :
         pa_row == PA_SOUND ? put(s, "SOUND OF SLOT ") : pa_row == PA_INIT ? put(s, "LOAD THE DEFAULT SOUND") :
+        pa_row == PA_RANDOM ? (pa_rnd_pct >= 100u ? put(put(s, "NEW SOUND: "), RS_NAME[pa_rnd_sec]) :
+                               put(num(put(put(put(s, "RANDOM "), RS_NAME[pa_rnd_sec]), " BY "), pa_rnd_pct), "%")) :
         !ud_ok ? put(s, "NOTHING TO UNDO") : put(put(s, ud_undone ? "REDO: " : "UNDO: "), ud_what);
     if (pa_row < PA_INIT) {
         e = put(e, n);
@@ -1775,7 +1836,8 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
     if (*m)                                     /* what happened, or what to do */
         cv_text((240 - text_w(&FONT_S, m)) / 2, 24, &FONT_S, m, C_BRIGHT);
     else {
-        const char *h = pa_row == PA_UNDO ? "SAVE DO IT" : "KNOB1 SLOT  SAVE DO IT";
+        const char *h = pa_row == PA_UNDO ? "SAVE DO IT" : pa_row == PA_RANDOM ? "K2 AMOUNT  K3 WHAT  SAVE ROLL" :
+                        "KNOB1 SLOT  SAVE DO IT";
         cv_text((240 - text_w(&FONT_S, h)) / 2, 24, &FONT_S, h, C_FAINT);
     }
     if (pa_armed) cv_frame(4, 20, 232, 24, C_BRIGHT);   /* (asking again: framed) */
@@ -2340,6 +2402,14 @@ static void ud_swap(void)                       /* UNDO: the snapshot and the st
 static int pa_do(void)                          /* the SAVE button on the PATCH screen; 1 = the sound changed */
 {
     patch_t p;
+    if (pa_row == PA_RANDOM) {                  /* the sound rolled (the first of a run: UNDO's point) */
+        if (!pa_rnd_run || !ud_ok || ud_undone || ud_what != PA_RND_WHAT) ud_take(PA_RND_WHAT);
+        pa_rnd_run = 1;
+        patch_random(&edit, pa_rnd_pct, pa_rnd_sec, fm1_ms ^ ++pa_rnd_n << 20);
+        pa_say("ROLLED: SAVE AGAIN, OR UNDO", 0);
+        return 1;
+    }
+    pa_rnd_run = 0;
     if (pa_row == PA_UNDO) {
         if (!ud_ok) { pa_say("NOTHING TO UNDO", 0); return 0; }
         ud_swap();
@@ -2404,12 +2474,20 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
         int32_t n = (int32_t)pa_row + d;
         pa_row = (uint32_t)(n < 0 ? 0 : n >= PA_N ? PA_N - 1 : n);
         pa_armed = 0;
+        pa_rnd_run = 0;
         pa_msg = "";
         dirty |= D_ALL;
     }
-    for (i = 0; i < 4u; i++)                    /* KNOB1: the slot (the others do nothing here) */
-        if ((d = fm1_enc_take(ENC_KNOB1 + i)) != 0 && i == 0) {
-            pa_slot = (uint32_t)(((int32_t)pa_slot + d % 8 + 8) % 8);
+    for (i = 0; i < 4u; i++)                    /* KNOB1: the slot; on RANDOM, KNOB2 AMOUNT, KNOB3 SECTION */
+        if ((d = fm1_enc_take(ENC_KNOB1 + i)) != 0 && (i == 0 || (pa_row == PA_RANDOM && i <= 2u))) {
+            if (i == 0) pa_slot = (uint32_t)(((int32_t)pa_slot + d % 8 + 8) % 8);
+            else if (i == 1) {
+                int32_t n = (int32_t)pa_rnd_pct + d * 5;
+                pa_rnd_pct = (uint32_t)(n < 5 ? 5 : n > 100 ? 100 : n);
+            } else {
+                int32_t n = (int32_t)pa_rnd_sec + d;
+                pa_rnd_sec = (uint32_t)(n < 0 ? 0 : n >= RS_N ? RS_N - 1 : n);
+            }
             pa_armed = 0;
             pa_msg = "";
             dirty |= D_ALL;
@@ -2596,6 +2674,7 @@ static void ui_page(uint32_t pg)
     if (pg == PG_PATCH && page != PG_PATCH) {   /* in: from where SAVE was pressed, the slot of the sound */
         pa_back = page;
         pa_armed = 0;
+        pa_rnd_run = 0;
         pa_msg = "";
         pa_row = PA_SAVE;
         if (cur_slot >= 0) pa_slot = (uint32_t)cur_slot;
@@ -2697,7 +2776,7 @@ static int ui_input(uint32_t buttons)
         return (int)changed;
     }
     if (buttons & (1u << BTN_EDIT))             /* EDIT: OSC 1, OSC 2, NOISE in turn */
-        ui_page(page == PG_OSC1 ? PG_OSC2 : page == PG_OSC2 ? PG_NOISE : PG_OSC1);
+        ui_page(page == PG_OSC1 ? PG_OSC2 : page == PG_OSC2 ? PG_TRANS : page == PG_TRANS ? PG_NOISE : PG_OSC1);
     if (buttons & (1u << BTN_FX))               /* FX: CHORUS, DELAY, REVERB, MOD FX, CRUSH in turn */
         ui_page(page >= PG_CHO && page < PG_CRUSH ? page + 1u : PG_CHO);
     if (buttons & (1u << BTN_ENV))              /* ENV: AMP, F.ENV, M.ENV 1, M.ENV 2 in turn */

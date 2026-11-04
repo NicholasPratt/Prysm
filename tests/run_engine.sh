@@ -29,3 +29,7 @@ cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/s
 build/engine/feat_test | grep -v ' ms  '
 cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/drummod_test tests/drummod_test.c
 build/engine/drummod_test | grep -v ' ms  '
+cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/random_test tests/random_test.c
+build/engine/random_test | grep -v ' ms  '
+cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/trans_test tests/trans_test.c
+build/engine/trans_test | grep -v ' ms  '

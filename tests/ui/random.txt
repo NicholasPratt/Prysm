@@ -1,0 +1,21 @@
+# the PATCH screen's RANDOM row: AMOUNT and SECTION, a roll, a second roll (one UNDO step), a NEW sound, UNDO (tests/run_ui.sh)
+100 btn 9
+200 enc 0 5
+300 shot
+400 enc 3 -2
+450 enc 4 1
+500 shot
+600 btn 9
+700 shot
+800 btn 9
+900 enc 0 -1
+1000 shot
+1100 btn 9
+1200 shot
+1300 enc 0 1
+1400 enc 3 20
+1450 enc 4 -1
+1500 shot
+1600 btn 9
+1700 shot
+1800 end
