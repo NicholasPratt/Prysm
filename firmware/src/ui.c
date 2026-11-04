@@ -37,6 +37,8 @@
 #define C_BOX RGB(56, 56, 56)                   /* frames */
 #define C_SEL RGB(40, 40, 40)                   /* the selected row's band */
 #define C_FILL RGB(34, 34, 34)                  /* under a curve */
+#define C_PART_A RGB(232, 150, 44)              /* the part edited, two parts playing: A amber, B teal (the letter, */
+#define C_PART_B RGB(44, 190, 176)              /*  the header's rule) */
 /* the accents: a prism's red, green and blue (the battery's bars); a value turned up drifts blue, down red, and
  * fades back to white (SHIFT_MS) */
 #define PR1_R 232u
@@ -92,7 +94,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_LBARS, K_LQUANT, K_LPLAY, K_LCLR,      /* (the LOOP page's: the looper's, not saved) */
        K_MMTIME,                                /* (a matrix route's drum envelope: its decay) */
        K_DPRE, K_DLOAD,                         /* (the KIT row's beats: one picked; LOAD: into the pattern edited) */
-       K_TTYPE, K_TDEC };                       /* (a transient: its sound; DECAY, 127 FULL) */
+       K_TTYPE, K_TDEC,                         /* (a transient: its sound; DECAY, 127 FULL) */
+       K_VMODE, K_MCHB };                       /* (the parts: the voices' mode; part B's MIDI channel, 0 none) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -234,6 +237,7 @@ static const row_t LOOP_ROWS[] = {              /* (the looper: REC on its page 
 static const row_t SETUP_ROWS[] = {
     {"MIDI", {{"IN", GO(midi_in), 16, K_MCHI}, {"OUT", GO(midi_out), 15, K_MCHO},
               {"CLOCK", GO(clock), 1, K_CLK}, {"BEND", GO(bend), 24, K_BEND}}, LIT_ALL},
+    {"PARTS", {{"B IN", GO(midi_b), 16, K_MCHB}, NOPRM, NOPRM, NOPRM}, LIT_ALL},
 };
 /* the effects, a page each (the FX button steps through them); lit: LIT_C the chorus, LIT_M1 the delay, LIT_M2 the
  * reverb */
@@ -270,6 +274,7 @@ static const row_t MIX_ROWS[] = {
     {"GLIDE", {{"TIME", PO(glide), 127, K_NUM}, {"MODE", PO(glide_mode), GLIDE_N - 1u, K_GLIDEM}, NOPRM, NOPRM}, LIT_ALL},
     {"SPLIT", {{"KEY", PO(split), 127, K_SPLIT}, {"OCT1", PO(split_oct[0]), 4, K_SPOCT},   /* (below it OSC 1, from */
                {"OCT2", PO(split_oct[1]), 4, K_SPOCT}, {"LEARN", 0, 1, K_SLEARN}}, LIT_ALL},   /* it OSC 2) */
+    {"PARTS", {{"MODE", PO(vmode), VM_N - 1u, K_VMODE}, NOPRM, NOPRM, NOPRM}, LIT_ALL},
 };
 /* the KIT row's preset beats: 16 steps a lane (KICK, SNARE, HAT, CLAP), repeated over a longer pattern. A step: . none,
  * x a hit, X an accent (the hat: open), f a flam (the snare's), 2 3 4 6 8 the hat hit so many times (a roll) */
@@ -428,6 +433,43 @@ static int seq_kind(uint32_t k)                 /* a parameter of the sequencer'
 }
 static int loop_kind(uint32_t k) { return k >= K_LBARS && k <= K_LCLR; }   /* the looper's (not saved) */
 
+/* ---- the part edited (the SELECT button: A, B in turn while the sound has two parts): the knobs of a part's own
+ * fields (engine.c: PART_OFF) turn part B's (edit.pb) while B is; the pictures draw it (pv, ue: ui_view) */
+static uint8_t ui_part;                         /* 0 A, 1 B (SINGLE: A, whatever this says) */
+static patch_t ui_bv;                           /* part B as a patch (part_b), for the pictures */
+static const patch_t *pv = &edit;               /* the part edited, as a patch */
+static int ui_two(void) { return edit.vmode != VM_SINGLE && edit.vmode < VM_N; }   /* the sound has two parts */
+static uint8_t prm_part = 2;                    /* (emu/params.c's walk: 0 part A's, 1 part B's bytes; 2 the part edited) */
+static int ui_b(void) { return prm_part < 2u ? prm_part : ui_part && ui_two(); }
+#define SEL_TWICE_MS 400u                       /* SELECT twice within this: FILTER */
+#define ue (ui_b() ? &eb : &eg)                 /* its derived values */
+static void ui_view(void)                       /* (before drawing, after input) */
+{
+    if (ui_b()) { part_b(&ui_bv, &edit); pv = &ui_bv; } else pv = &edit;
+    key_part = (uint8_t)ui_b();                 /* (DUAL: the keys play the part edited) */
+}
+static void ui_random(uint32_t pct, uint32_t sec, uint32_t seed)   /* RANDOM: the part edited's own fields (and */
+{                                               /* the shared ones: the oscillators, the effects ...) */
+    static patch_t q;
+    uint8_t a[PART_N];
+    uint32_t i;
+    if (!ui_b()) { patch_random(&edit, pct, sec, seed); return; }
+    part_b(&q, &edit);                          /* part B as a patch: rolled there, its own fields back into pb */
+    patch_random(&q, pct, sec, seed);
+    for (i = 0; i < PART_N; i++) a[i] = ((const uint8_t *)&edit)[PART_OFF[i]];
+    for (i = 0; i < PART_N; i++) q.pb[i] = ((const uint8_t *)&q)[PART_OFF[i]];
+    for (i = 0; i < PART_N; i++) ((uint8_t *)&q)[PART_OFF[i]] = a[i];   /* (part A's as they were) */
+    edit = q;
+}
+static uint8_t *part_byte(uint32_t off)         /* the sound's byte off, as the part edited has it */
+{
+    uint32_t i;
+    if (ui_b())
+        for (i = 0; i < PART_N; i++)
+            if (PART_OFF[i] == off) return &edit.pb[i];
+    return (uint8_t *)&edit + off;
+}
+
 /* the RATIO row's MOD1, MOD2 when that modulator is in MIX or RING: heard, so a pitch (semitones), not a ratio */
 static const prm_t PITCH_PRM[2] = {{"PIT1", 0, 48, K_MPIT}, {"PIT2", 1, 48, K_MPIT}};
 static const prm_t *prm_alt(uint32_t pg, uint32_t r, uint32_t i)   /* knob i's other parameter (0: none) */
@@ -443,7 +485,7 @@ static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's p
 static const char *prm_label(const prm_t *p)     /* its label (the noise's COLOUR: what it is for the type) */
 {
     if (p->kind == K_NCOL)
-        return NOISE_RATED(edit.noise_type) ? "RATE" : edit.noise_type == NOISE_CRACKLE ? "DENSE" : p->label;
+        return NOISE_RATED(pv->noise_type) ? "RATE" : pv->noise_type == NOISE_CRACKLE ? "DENSE" : p->label;
     return p->label;
 }
 
@@ -495,6 +537,8 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_MFINE: return &edit.mfine[PAGES[pg].osc == 2u][p->off & 1u];
     default: break;
     }
+    if (!PAGES[pg].osc)                         /* (a part's own field: the part edited's) */
+        return part_byte(p->off);
     if (PAGES[pg].osc == G)
         return (uint8_t *)&gset + p->off;
     base = PAGES[pg].osc ? (PAGES[pg].osc - 1u) * (uint32_t)sizeof edit.osc[0] : 0u;
@@ -520,6 +564,8 @@ static int32_t prm_byte(uint32_t pg, const prm_t *p)   /* the byte of the sound 
     if (p->kind == K_NONE || seq_kind(p->kind) || PAGES[pg].osc == G)
         return -1;
     v = pval(pg, p);
+    if (v >= edit.pb && v < edit.pb + PART_N)  /* (part B's: as its part A field, the knob's own) */
+        return PART_OFF[v - edit.pb];
     return v >= (const uint8_t *)&edit && v < (const uint8_t *)&edit + sizeof edit ? (int32_t)(v - (const uint8_t *)&edit) : -1;
 }
 /* the sound's parameters in page order, each once: the n-th (n >= 0), or the one turning byte off (off >= 0); its page,
@@ -644,9 +690,11 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_NTYPE: put(s, NOISE_NAME[*v < NOISE_N ? *v : 0u]); break;
     case K_TTYPE: put(s, TR_NAME[*v <= TR_N ? *v : 0u]); break;
     case K_TDEC: if (*v >= 127u) put(s, "FULL"); else num(s, *v); break;
+    case K_VMODE: put(s, VM_NAME[*v < VM_N ? *v : 0u]); break;
+    case K_MCHB: if (*v) num(s, *v); else put(s, "OFF"); break;
     case K_NCOL:                                /* (the tone; a rate from the note; a density) */
-        if (NOISE_RATED(edit.noise_type)) put(snum(s, ((int32_t)*v - 64) * 3 / 4), "st");
-        else if (edit.noise_type == NOISE_CRACKLE) num(s, 2u + (uint32_t)PR_CURVE_Q15[*v & 127u] * 2000u / 32767u);
+        if (NOISE_RATED(pv->noise_type)) put(snum(s, ((int32_t)*v - 64) * 3 / 4), "st");
+        else if (pv->noise_type == NOISE_CRACKLE) num(s, 2u + (uint32_t)PR_CURVE_Q15[*v & 127u] * 2000u / 32767u);
         else num(s, *v);
         break;
     case K_ROUTE: put(s, *v ? "DIRECT" : "FILTER"); break;
@@ -871,28 +919,28 @@ static void gfx_filter(uint32_t lit)
     /* the response: |H|^2 = 1 / ((1 - x^2)^2 + k^2 x^2), x = f / fc (LP 24: and 1 / (1 + x^4); the comb: its peaks),
      * over MIDI 16 .. 135, +24 .. -36 dB; with the high-pass, x^4 / ((1 - x^2)^2 + k^2 x^2), x = fc / f */
     const int32_t W = 164, top = 4, h = G_H - 12;   /* 2 px a dB */
-    uint64_t k12 = (uint64_t)(eg.f_k > 167772 ? eg.f_k : 167772) >> 12;   /* (self-oscillating: drawn at k 0.01) */
-    uint64_t hk12 = (uint64_t)eg.hp_k >> 12;
-    int32_t px, py = 0, fq = eg.flt_type >= FLT_COMBP ? eg.comb_p16 >> 2 : eg.f_cut, cx = (fq - 64) * (W - 1) / 476, hq = edit.hp_cut ? hp_q(edit.hp_cut) : 0;
+    uint64_t k12 = (uint64_t)(ue->f_k > 167772 ? ue->f_k : 167772) >> 12;   /* (self-oscillating: drawn at k 0.01) */
+    uint64_t hk12 = (uint64_t)ue->hp_k >> 12;
+    int32_t px, py = 0, fq = ue->flt_type >= FLT_COMBP ? ue->comb_p16 >> 2 : ue->f_cut, cx = (fq - 64) * (W - 1) / 476, hq = pv->hp_cut ? hp_q(pv->hp_cut) : 0;
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
     cv_hdots(0, W, top + 48, 4);                /* 0 dB, dotted; the octaves; the cutoff */
     for (px = 48; px < 476; px += 48)
         cv_vdots(px * (W - 1) / 476, top, top + h, 6);
     cv_vdots(cx, top, top + h, 2);
-    cv_text(4, top, &FONT_S, FLT_NAME[eg.flt_type < FLT_N ? eg.flt_type : 0u], C_FAINT);
+    cv_text(4, top, &FONT_S, FLT_NAME[ue->flt_type < FLT_N ? ue->flt_type : 0u], C_FAINT);
     for (px = 0; px < W; px++) {
         int32_t q = 64 + px * 476 / (W - 1), db, y;
-        uint64_t x2 = x2_at(q - eg.f_cut), den, one = 4096;
-        if (eg.flt_type >= FLT_COMBP) {         /* the comb: |H|^2 = in^2 / (1 + fb^2 - 2 fb cos(2 pi f / f0)) */
+        uint64_t x2 = x2_at(q - ue->f_cut), den, one = 4096;
+        if (ue->flt_type >= FLT_COMBP) {         /* the comb: |H|^2 = in^2 / (1 + fb^2 - 2 fb cos(2 pi f / f0)) */
             uint32_t ph = (uint32_t)x2_at((q - fq) / 2) << 20;   /* f / f0 (Q12) -> a phase */
-            int64_t fb = eg.comb_fb, cs = lfo_wave(LFO_SINE, ph + 0x40000000u, 0);
+            int64_t fb = ue->comb_fb, cs = lfo_wave(LFO_SINE, ph + 0x40000000u, 0);
             den = (uint64_t)((1LL << 30) + fb * fb - 2 * fb * cs);
-            db = ((lg2_q8((uint64_t)eg.comb_in * (uint64_t)eg.comb_in) - lg2_q8(den ? den : 1)) * 3083) / (1024 * 256);
+            db = ((lg2_q8((uint64_t)ue->comb_in * (uint64_t)ue->comb_in) - lg2_q8(den ? den : 1)) * 3083) / (1024 * 256);
         } else {
             den = (x2 > one ? (x2 - one) * (x2 - one) : (one - x2) * (one - x2)) + ((k12 * k12 * x2) >> 12);
             if (!den) den = 1;
             db = (-(lg2_q8(den) - 24 * 256) * 3083) / (1024 * 256);   /* -10 log10(den / 2^24) = -3.0103 log2(...) */
-            if (eg.flt_type == FLT_LP24)        /* its first stage: 1 / (1 + x^4) */
+            if (ue->flt_type == FLT_LP24)        /* its first stage: 1 / (1 + x^4) */
                 db -= ((lg2_q8(one * one + x2 * x2) - 24 * 256) * 3083) / (1024 * 256);
         }
         if (hq) {                               /* the high-pass: the low-pass's shape, mirrored (x = fc / f) */
@@ -907,11 +955,11 @@ static void gfx_filter(uint32_t lit)
         py = y;
     }
     cv_rect(0, G_H - 4, W, 1, C_BOX);           /* drive: a bar under the curve */
-    if (edit.drive)
-        cv_rect(0, G_H - 5, (int32_t)edit.drive * W / 127, 3, lit & LIT_CURVE ? C_BRIGHT : C_MID);
+    if (pv->drive)
+        cv_rect(0, G_H - 5, (int32_t)pv->drive * W / 127, 3, lit & LIT_CURVE ? C_BRIGHT : C_MID);
     cv_vdots(170, 2, G_H - 2, 2);               /* the response | the filter's envelope */
     cv_text(176, 0, &FONT_S, "ENV", C_FAINT);
-    cv_adsr(176, 20, 60, G_H - 26, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, lit & LIT_ENV ? C_ACC : C_MID);
+    cv_adsr(176, 20, 60, G_H - 26, pv->flt_a, pv->flt_d, pv->flt_s, pv->flt_r, lit & LIT_ENV ? C_ACC : C_MID);
 }
 
 /* mod envelope k over 2 s (the key held 1.5 s), simulated block by block with the engine's own steps; with LFO
@@ -920,23 +968,23 @@ static void gfx_menv(uint32_t lit, uint32_t k)
 {
     const int32_t x0 = 4, w = 232, top = 4, h = G_H - 10;
     const uint32_t blocks = 2000u * 44100u / 1000u / BLK, held = blocks * 3u / 4u;
-    uint32_t b, ph = 0, lfo = eg.me_dest[k] == DEST_LFORATE || eg.me_dest[k] == DEST_LFOAMT || eg.me_dest[k] == DEST_LFOSHAPE;
+    uint32_t b, ph = 0, lfo = (k ? &eg : ue)->me_dest[k] == DEST_LFORATE || (k ? &eg : ue)->me_dest[k] == DEST_LFOAMT || (k ? &eg : ue)->me_dest[k] == DEST_LFOSHAPE;
     uint32_t rng = 12345u;
     int32_t px = -1, pe = 0, pl = 0, sh = lfo_random(&rng);
     env_t e = {0, 1};
-    cv_text(x0 + 2, top, &FONT_S, DEST_NAME[eg.me_dest[k] < DEST2_N ? eg.me_dest[k] : 0u], C_FAINT);
+    cv_text(x0 + 2, top, &FONT_S, DEST_NAME[(k ? &eg : ue)->me_dest[k] < DEST2_N ? (k ? &eg : ue)->me_dest[k] : 0u], C_FAINT);
     for (b = 0; b < blocks; b++) {
         int32_t me = menv_step(&eg, &e, b < held, k) >> 9, x = (int32_t)(b * (uint32_t)w / blocks);
-        int32_t mx = (me * eg.me_amt[k]) >> 15, l, ye, yl;
+        int32_t mx = (me * (k ? &eg : ue)->me_amt[k]) >> 15, l, ye, yl;
         {
-            uint32_t nx = ph + rate_moved(eg.lfo_inc, eg.me_dest[k] == DEST_LFORATE ? (mx * 768) >> 15 : 0);
+            uint32_t nx = ph + rate_moved(ue->lfo_inc, (k ? &eg : ue)->me_dest[k] == DEST_LFORATE ? (mx * 768) >> 15 : 0);
             if (nx < ph) sh = lfo_random(&rng);  /* S&H: a new value each cycle */
             ph = nx;
         }
         if (x == px)
             continue;
-        l = lfo_morph(eg.lfo_wave, eg.me_dest[k] == DEST_LFOSHAPE ? mx : 0, ph, sh);
-        if (eg.me_dest[k] == DEST_LFOAMT) {
+        l = lfo_morph(ue->lfo_wave, (k ? &eg : ue)->me_dest[k] == DEST_LFOSHAPE ? mx : 0, ph, sh);
+        if ((k ? &eg : ue)->me_dest[k] == DEST_LFOAMT) {
             int32_t f = 32767 + mx;
             l = (l * (f < 0 ? 0 : f)) >> 15;
             l = clip15(l);
@@ -958,9 +1006,9 @@ static void gfx_menv(uint32_t lit, uint32_t k)
 static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at faster rates), the delay as a fade-in */
 {
     const int32_t x0 = 4, w = 232, mid = G_H / 2, amp = G_H / 2 - 8;
-    uint32_t l2 = lit & LIT_L2, wave = l2 ? edit.lfo2_wave : edit.lfo_wave;   /* (LFO 2: no delay, no retrig) */
-    uint32_t rate = l2 ? (edit.lfo2_sync ? 16u + edit.lfo2_sync * 10u : edit.lfo2_rate) : edit.lfo_rate;   /* (faster divisions: more cycles) */
-    int32_t fade_w = l2 ? 0 : (int32_t)edit.lfo_delay * 70 / 127, px, py = mid;
+    uint32_t l2 = lit & LIT_L2, wave = l2 ? edit.lfo2_wave : pv->lfo_wave;   /* (LFO 2: no delay, no retrig) */
+    uint32_t rate = l2 ? (edit.lfo2_sync ? 16u + edit.lfo2_sync * 10u : edit.lfo2_rate) : pv->lfo_rate;   /* (faster divisions: more cycles) */
+    int32_t fade_w = l2 ? 0 : (int32_t)pv->lfo_delay * 70 / 127, px, py = mid;
     uint32_t cycles = 1u + rate * 7u / 127u, rng = 12345u, wv = wave < LFO_N ? wave : 0u;
     int32_t sh = lfo_random(&rng);
     uint32_t last_ph = 0;
@@ -981,7 +1029,7 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
     if (fade_w)                                 /* the delay: where it has faded in */
         for (py = 2; py < (int32_t)G_H - 4; py += 3)
             cv_pset(x0 + fade_w, py, C_FAINT);
-    if (!l2 && edit.lfo_retrig)                 /* retrig: each note starts it here */
+    if (!l2 && pv->lfo_retrig)                 /* retrig: each note starts it here */
         cv_rect(x0, 2, 2, G_H - 6, lit & LIT_CURVE ? C_ACC : C_MID);
 }
 
@@ -1097,6 +1145,10 @@ static void gfx_setup(void)                     /* the MIDI setup, in words */
     if (gset.midi_in) e = num(put(e, "CH "), gset.midi_in); else e = put(e, "OMNI");
     put(num(put(e, "   OUT CH "), gset.midi_out + 1u), "");
     cv_text(8, 6, &FONT_S, s, C_MID);
+    if (gset.midi_b) {                          /* part B's channel: it plays B, IN plays A (two parts) */
+        num(put(s, "B "), gset.midi_b);
+        cv_text(236 - text_w(&FONT_S, s), 6, &FONT_S, s, C_PART_B);
+    }
     e = put(s, gset.clock ? "ARP CLOCK: MIDI " : "ARP CLOCK: ITS OWN");
     if (gset.clock) {
         uint32_t b = mc_bpm10;
@@ -1212,11 +1264,11 @@ static void gfx_seq(uint32_t lit)
 static void gfx_mix(uint32_t lit)               /* the three sources' levels, each into the filter (F) or past it (D) */
 {
     static const char *const NAME[NSRC] = {"OSC1", "OSC2", "NOISE"};
-    const uint8_t LVL[NSRC] = {edit.lvl1, edit.lvl2, edit.noise_lvl};
+    const uint8_t LVL[NSRC] = {edit.lvl1, edit.lvl2, pv->noise_lvl};
     char s[24], *e;
     uint32_t k;
     for (k = 0; k < NSRC; k++) {
-        int32_t y = 4 + (int32_t)k * 24, d = edit.route[k] == ROUTE_DIRECT;
+        int32_t y = 4 + (int32_t)k * 24, d = pv->route[k] == ROUTE_DIRECT;
         uint16_t c = lit & LIT_RT ? C_BRIGHT : C_MID;   /* (the ROUTE row: the routes lit) */
         cv_text(4, y, &FONT_S, NAME[k], LVL[k] ? C_MID : C_FAINT);
         cv_rect(54, y + 5, 140, 6, C_FILL);
@@ -1231,8 +1283,8 @@ static void gfx_mix(uint32_t lit)               /* the three sources' levels, ea
     cv_text(54, 74, &FONT_S, s, C_MID);
     cv_rect(4, 96, 232, 1, C_BOX);
     e = put(s, "GLIDE ");
-    if (edit.glide) put(e, edit.glide_mode == GLIDE_LEGATO ? "LEGATO" : "ALWAYS"); else put(e, "OFF");
-    cv_text(4, 102, &FONT_S, s, edit.glide ? C_MID : C_FAINT);
+    if (pv->glide) put(e, pv->glide_mode == GLIDE_LEGATO ? "LEGATO" : "ALWAYS"); else put(e, "OFF");
+    cv_text(4, 102, &FONT_S, s, pv->glide ? C_MID : C_FAINT);
     {                                           /* the split: OSC 1 below the key, OSC 2 from it */
         static const prm_t SP = {"KEY", 0, 127, K_SPLIT};
         char nt[8];
@@ -1299,13 +1351,13 @@ static void gfx_noise(uint32_t lit)
     static int32_t db[NZ_BANDS], top;
     static uint32_t made = 0xFFFFFFFFu;         /* (the type and colour wave and db were made for: the DFT is slow) */
     int32_t blk[BLK], i, py = 0;
-    uint32_t k, n, inc = 0, key = (uint32_t)eg.n_type << 8 | (edit.noise_col & 127u);
+    uint32_t k, n, inc = 0, key = (uint32_t)ue->n_type << 8 | (pv->noise_col & 127u);
     noise_t ns = {0x1234567u, 0, 0, 0, 0, 0, 0, 1};
     uint16_t c = lit & LIT_CURVE ? C_ACC : C_MID;
     char t[24];
-    if (NOISE_RATED(eg.n_type)) {               /* (at C4, as voice_tune and the render have it) */
-        inc = rate_moved(INC_C9[0] >> 5, ((int32_t)(edit.noise_col & 127u) - 64) * 12);
-        inc = (uint32_t)(((uint64_t)inc * (eg.n_type == NOISE_DIGI ? 93u : 16u)) >> 16);
+    if (NOISE_RATED(ue->n_type)) {               /* (at C4, as voice_tune and the render have it) */
+        inc = rate_moved(INC_C9[0] >> 5, ((int32_t)(pv->noise_col & 127u) - 64) * 12);
+        inc = (uint32_t)(((uint64_t)inc * (ue->n_type == NOISE_DIGI ? 93u : 16u)) >> 16);
     }
     if (key != made) {
         uint32_t ph[NZ_BANDS], f[NZ_BANDS];
@@ -1337,9 +1389,9 @@ static void gfx_noise(uint32_t lit)
             if (db[k] > top) top = db[k];
         }
     }
-    cv_text(4, 0, &FONT_S, NOISE_NAME[eg.n_type], C_FAINT);
-    put(t, edit.route[2] == ROUTE_DIRECT ? "-> DIRECT" : "-> FILTER");
-    cv_text(236 - text_w(&FONT_S, t), 0, &FONT_S, t, edit.noise_lvl ? C_MID : C_FAINT);
+    cv_text(4, 0, &FONT_S, NOISE_NAME[ue->n_type], C_FAINT);
+    put(t, pv->route[2] == ROUTE_DIRECT ? "-> DIRECT" : "-> FILTER");
+    cv_text(236 - text_w(&FONT_S, t), 0, &FONT_S, t, pv->noise_lvl ? C_MID : C_FAINT);
     cv_hdots(4, 236, 36, 4);
     for (i = 0; i < (int32_t)NZ_WAVE; i++) {
         int32_t y = 36 - wave[i] * 18 / 32767;
@@ -1606,7 +1658,7 @@ static void draw_gfx(void)
     case PG_OSC2: gfx_osc(1, lit); break;
     case PG_FILTER: gfx_filter(lit); break;
     case PG_AMP:                                /* the envelope; VCA OPEN: its floor, a line across */
-        cv_adsr(8, 6, 224, G_H - 14, edit.amp_a, edit.amp_d, edit.amp_s, edit.amp_r, C_ACC);
+        cv_adsr(8, 6, 224, G_H - 14, pv->amp_a, pv->amp_d, pv->amp_s, pv->amp_r, C_ACC);
         if (edit.vca) {
             int32_t y = 6 + (int32_t)(G_H - 14) - (int32_t)edit.vca * (int32_t)(G_H - 14) / 127;
             cv_rect(8, y, 224, lit & LIT_CURVE ? 2 : 1, lit & LIT_CURVE ? C_BRIGHT : C_MID);
@@ -1614,10 +1666,10 @@ static void draw_gfx(void)
         }
         break;
     case PG_FENV:                               /* the filter's envelope, and how far it moves the cutoff */
-        cv_adsr(8, 6, 224, G_H - 14, edit.flt_a, edit.flt_d, edit.flt_s, edit.flt_r, C_ACC);
+        cv_adsr(8, 6, 224, G_H - 14, pv->flt_a, pv->flt_d, pv->flt_s, pv->flt_r, C_ACC);
         {
             char t[16];
-            put(snum(put(t, "AMT "), ((int32_t)edit.fenv - 64) * 60 / 63), "st");
+            put(snum(put(t, "AMT "), ((int32_t)pv->fenv - 64) * 60 / 63), "st");
             cv_text(12, 6, &FONT_S, t, C_FAINT);
         }
         break;
@@ -1698,6 +1750,8 @@ static void draw_hdr(void)
     else e = put(e, "-");
     if (modified()) e = put(e, "*");
     cv_text(176 - text_w(&FONT_S, s), 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
+    if (ui_two())                               /* two parts: the one edited, its colour */
+        cv_text(176 - text_w(&FONT_S, s) - 13, 1, &FONT_S, ui_b() ? "B" : "A", ui_b() ? C_PART_B : C_PART_A);
     cv_batt(181, 5, fm1_batt(), 1);             /* the battery, before the CPU */
 #ifndef DINGHY_HOST
     cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak */
@@ -1706,7 +1760,8 @@ static void draw_hdr(void)
     cv_rect(203, 5, 33, 9, C_BOX);              /* the CPU: a bar, bright past 70 % */
     cv_rect(204, 6, 31, 7, C_BLACK);
     cv_rect(205, 7, (int32_t)(cpu > 100u ? 100u : cpu) * 29 / 100, 5, cpu > 70u ? C_BRIGHT : C_MID);
-    cv_rect(0, 19, 240, 1, C_BOX);              /* the rule under it */
+    cv_rect(0, 19, 240, 1, !ui_two() ? C_BOX : ui_b() ? C_PART_B : C_PART_A);   /* the rule under it (two parts: */
+                                                /*  the part's colour) */
     cv_blit(0, HDR_Y);
 }
 
@@ -1735,7 +1790,7 @@ static void draw_focus(void)                    /* the selected row: four labels
             int32_t bx = x + 6, bw = FOC_W - 12, by = 46;
             cv_rect(bx, by + 1, bw, 1, C_BOX);  /* the track */
             if (p->kind == K_BIP || p->kind == K_CENT || p->kind == K_DSEMI ||
-                (p->kind == K_NCOL && NOISE_RATED(edit.noise_type))) {   /* bipolar: from the middle */
+                (p->kind == K_NCOL && NOISE_RATED(pv->noise_type))) {   /* bipolar: from the middle */
                 int32_t c = p->kind == K_DSEMI ? 24 : 64, m = bx + bw / 2, d = ((int32_t)*v - c) * (bw / 2) / (c - 1);
                 cv_rect(m, by - 1, 1, 5, C_FAINT);
                 cv_rect(d < 0 ? m + d : m, by, d < 0 ? -d : d + 1, 3, C_BRIGHT);
@@ -2409,7 +2464,7 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
     if (pa_row == PA_RANDOM) {                  /* the sound rolled (the first of a run: UNDO's point) */
         if (!pa_rnd_run || !ud_ok || ud_undone || ud_what != PA_RND_WHAT) ud_take(PA_RND_WHAT);
         pa_rnd_run = 1;
-        patch_random(&edit, pa_rnd_pct, pa_rnd_sec, fm1_ms ^ ++pa_rnd_n << 20);
+        ui_random(pa_rnd_pct, pa_rnd_sec, fm1_ms ^ ++pa_rnd_n << 20);
         pa_say("ROLLED: SAVE AGAIN, OR UNDO", 0);
         return 1;
     }
@@ -2696,6 +2751,7 @@ static int ui_input(uint32_t buttons)
     static int32_t slow[4];
     int32_t d;
     uint32_t i, changed = 0;
+    ui_view();
     if (buttons & (1u << BTN_PLAY)) {           /* PLAY: the sequencer runs / stops, from anywhere */
         rec_end();                              /* (a key recording: its length as it is now) */
         if (!eg.seq_play && seq_rec && !gset.clock) {   /* REC armed: a bar's count-in, then recording */
@@ -2724,11 +2780,12 @@ static int ui_input(uint32_t buttons)
         live_input(buttons);
     if (page != PG_PATCH && (d = fm1_enc_take(ENC_PRESETS)) != 0) {   /* PRESETS: the cutoff, from any page */
         static uint32_t last_cut;
-        int32_t x = (int32_t)edit.cut + (fm1_ms - last_cut < 60u ? d * 3 : d);   /* (fast: x 3) */
+        uint8_t *cut = part_byte(PO(cut));      /* (the part edited's) */
+        int32_t x = (int32_t)*cut + (fm1_ms - last_cut < 60u ? d * 3 : d);   /* (fast: x 3) */
         last_cut = fm1_ms;
         x = x < 0 ? 0 : x > 127 ? 127 : x;
-        if (x != edit.cut) {
-            edit.cut = (uint8_t)x;
+        if (x != *cut) {
+            *cut = (uint8_t)x;
             changed = 1;
             {
                 char val[8];
@@ -2785,7 +2842,23 @@ static int ui_input(uint32_t buttons)
         ui_page(page >= PG_CHO && page < PG_CRUSH ? page + 1u : PG_CHO);
     if (buttons & (1u << BTN_ENV))              /* ENV: AMP, F.ENV, M.ENV 1, M.ENV 2 in turn */
         ui_page(page >= PG_AMP && page < PG_MENV2 ? page + 1u : PG_AMP);
-    if (buttons & (1u << BTN_SEL)) ui_page(PG_FILTER);   /* SELECT (the button): straight to FILTER */
+    if (buttons & (1u << BTN_SEL)) {            /* SELECT (the button): two parts, A and B in turn; twice quickly (or */
+        static uint32_t sel_at;                 /* one part): to FILTER */
+        static uint8_t sel_armed, sel_from;
+        if (!ui_two()) ui_page(PG_FILTER);
+        else if (sel_armed && fm1_ms - sel_at < SEL_TWICE_MS) {
+            sel_armed = 0;
+            ui_part = sel_from;                 /* (the first press undone) */
+            ui_page(PG_FILTER);
+        } else {
+            sel_armed = 1;
+            sel_at = fm1_ms;
+            sel_from = ui_part;
+            ui_part ^= 1u;
+            pop("PART", ui_part ? "B" : "A");
+            dirty |= D_ALL;
+        }
+    }
     if (buttons & (1u << BTN_LFO)) ui_page(page == PG_LFO ? PG_LFO2 : page == PG_LFO2 ? PG_MATRIX : PG_LFO);
     if (buttons & (1u << BTN_ARP)) {            /* ARP: its page; on its page, the arp on / off */
         if (page == PG_ARP) {
@@ -3117,6 +3190,7 @@ static void ui_init(int32_t slot, int32_t sslot)   /* the sound in that slot (th
 static void ui_draw(void)                       /* from the main loop: what changed, at most every UI_FRAME_MS */
 {
     static uint32_t last, last_hdr;
+    ui_view();                                  /* (the part edited: a sound loaded may have one part, or two) */
     if (fm1_ms - last_hdr >= 500u) {            /* the CPU and the battery in the header, twice a second */
         last_hdr = fm1_ms;
         dirty |= D_HDR | (page == PG_SETUP ? D_GFX : 0u);   /* (SETUP: the battery's reading too) */

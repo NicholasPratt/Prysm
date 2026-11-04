@@ -89,7 +89,7 @@ cutoff). The value drifts **blue** as you turn it up and **red** as you turn it 
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
 | **EDIT** | OSC 1 (press again: OSC 2, then TRANS, then NOISE) |
 | **ENV** | AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2) |
-| **SELECT** (the button) | FILTER |
+| **SELECT** (the button) | FILTER. A sound with two parts (MIX's PARTS row): part A, part B in turn; press it twice quickly for FILTER |
 | **LFO** | LFO (press again: LFO 2, then MATRIX) |
 | **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
@@ -406,6 +406,7 @@ every kick, and HAT onto MOD1 adds FM bite in time with the hats.
 | ROUTE | osc 1: FILTER / DIRECT | osc 2: FILTER / DIRECT | the noise: FILTER / DIRECT | the noise's level |
 | GLIDE | glide time (0 = off) | mode: ALWAYS / LEGATO | | |
 | SPLIT | the split key (OFF, or a note) | the low side's octave (-2 .. +2) | the high side's octave | LEARN |
+| PARTS | MODE: SINGLE / DUAL / SPLIT / LAYER | | | |
 
 **Routing.** Each source goes **through the filter** (its drive, the low-pass or the comb, the high-pass), or
 **DIRECT**: past it, straight to the amp (its envelope, VCA OPEN, the effects all still apply). Filter one
@@ -424,6 +425,23 @@ sides, four notes at a time. The filter, the envelopes, the LFOs and the effects
 plays on both sides. The sequencer, the arpeggiator and MIDI follow the split too, by each note's pitch. It is saved
 with the patch, the key and both octaves, so each patch has its own split (or none) and loading a patch brings its
 split with it; a change waits for SAVE like any other. The picture shows it under the levels (OSC1 < C4 < OSC2).
+
+**Parts.** A sound can be two synths in one. **Part A** is OSC 1 and **part B** is OSC 2, and each part has its own
+filter (and high-pass), amp and filter envelopes, LFO, M.ENV 1, velocity, glide and noise. The effects, LFO 2,
+M.ENV 2 and the MATRIX are shared. **MODE** says how the parts play:
+
+| MODE | Plays |
+| --- | --- |
+| **SINGLE** | one synth, as before the parts: every note on both oscillators, through part A's filter and envelopes (part B's own settings unused). Every older patch loads as SINGLE and sounds as it did |
+| **DUAL** | the part you are editing: the keys (and the arp, the sequencer) play it. The four voices are shared, so a part B note keeps sounding when you switch to A and play over it |
+| **SPLIT** | by the key: below the split key part A, from it part B (the SPLIT row's key and octaves) |
+| **LAYER** | every note on both parts at once, each through its own filter and envelopes: two notes at a time |
+
+With two parts, the **SELECT** button switches the part you are editing: the header shows **A** in amber or **B** in
+teal, with a thin rule of that colour under it. Every page then turns that part's own settings (the cutoff on
+PRESETS too); the oscillators, effects and shared modulators stay as they are. RANDOM rolls the part you are on.
+Press SELECT **twice quickly** for the FILTER page. In DUAL, LAYER and SPLIT each part takes its octave from the
+SPLIT row's OCT1 (part A) and OCT2 (part B). Part B's MIDI channel is on the SETUP page.
 
 ### ARP
 
@@ -707,11 +725,14 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | MIDI | IN: OMNI or 1 .. 16 | OUT: 1 .. 16 | CLOCK: INT / MIDI | BEND: OFF, +-1 .. +-24 semitones |
+| PARTS | B IN: OFF or 1 .. 16 | | | |
 
 - **IN**: the channel Prysm plays from (OMNI: all of them).
 - **OUT**: the channel the FM-1's keys send their notes on.
 - **CLOCK**: the arpeggiator's tempo: its own (**INT**, the BPM on the ARP page) or the **MIDI** clock.
 - **BEND**: how far a MIDI keyboard's pitch wheel bends every note, either way (2 at first; OFF ignores it).
+- **B IN**: part B's channel, for a sound in DUAL (MIX's PARTS row). Set, notes on it play part B and notes on IN play
+  part A, so a DAW can play both parts on two tracks. OFF: MIDI plays the part you are editing.
 
 ---
 

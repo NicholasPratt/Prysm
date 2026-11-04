@@ -33,11 +33,11 @@ ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE
         "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL", "VCA"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
         "MENV2": ["ENV", "DEST"], "LFO": ["LFO", "DEST"],
         "LFO2": ["LFO", "DEST"], "MATRIX": ["MOD 1", "MOD 2", "MOD 3", "MOD 4"],
-        "MIX": ["OSC", "ROUTE", "GLIDE", "SPLIT"], "ARP": ["ARP", "TIME"],
+        "MIX": ["OSC", "ROUTE", "GLIDE", "SPLIT", "PARTS"], "ARP": ["ARP", "TIME"],
         "SEQ": ["STEP", "CHORD", "LOCK", "PATTERN", "EDIT", "PARTS", "CLICK", "SONG", "ENTRY"],
         "DRUM": ["STEP", "ROLL", "KICK", "SNARE", "HAT", "CLAP", "BUS", "KIT", "EDIT"], "LOOP": ["LOOP"],
         "CHO": ["CHORUS"], "DLY": ["DELAY", "D.MOD"], "REV": ["REVERB", "R.MOD"], "MFX": ["MOD FX", "TONE"],
-        "CRUSH": ["CRUSH"], "SETUP": ["MIDI"],
+        "CRUSH": ["CRUSH"], "SETUP": ["MIDI", "PARTS"],
         "PATCH": ["SAVE", "LOAD", "SOUND", "INIT", "UNDO"], "SCOPE": [], "LIVE": ["PLAY", "K1", "K2", "K3", "K4"]}
 BTN = {"FX": 2, "SELECT": 3, "ENV": 4, "LFO": 5, "EDIT": 6, "GLO": 7, "HOME": 8, "SAVE": 9, "ARP": 10, "SEQ": 11,
        "PLAY": 12, "REC": 13}

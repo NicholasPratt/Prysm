@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-only
 # Screenshots of every page and row (tests/ui/pages.txt), of the PATCH screen (tests/ui/patches.txt), of the noise
-# and the drums (tests/ui/drums.txt), of the LIVE screen (tests/ui/live.txt), of 1.4's pages (tests/ui/new.txt), of RANDOM (tests/ui/random.txt), of TRANS (tests/ui/trans.txt)
+# and the drums (tests/ui/drums.txt), of the LIVE screen (tests/ui/live.txt), of 1.4's pages (tests/ui/new.txt), of RANDOM (tests/ui/random.txt), of TRANS (tests/ui/trans.txt), of the parts (tests/ui/parts.txt)
 # -> build/ui/*.png, and contact sheets build/ui/pages.png, build/ui/patches.png
 set -e
 cd "$(dirname "$0")/.."
@@ -22,10 +22,11 @@ build/ui/prysm build/ui/lv tests/ui/live.txt >/dev/null
 build/ui/prysm build/ui/nw tests/ui/new.txt >/dev/null
 build/ui/prysm build/ui/rn tests/ui/random.txt >/dev/null
 build/ui/prysm build/ui/tr tests/ui/trans.txt >/dev/null
+build/ui/prysm build/ui/pt tests/ui/parts.txt >/dev/null
 python3 - <<'PY'
 from pathlib import Path
 from PIL import Image
-for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp"), ("su", "setup"), ("pr", "presets"), ("sq", "seq"), ("en", "env"), ("dr", "drums"), ("lv", "live"), ("nw", "new"), ("rn", "random"), ("tr", "trans")):
+for prefix, sheet_name in (("ui", "pages"), ("pa", "patches"), ("sc", "scope"), ("ar", "arp"), ("su", "setup"), ("pr", "presets"), ("sq", "seq"), ("en", "env"), ("dr", "drums"), ("lv", "live"), ("nw", "new"), ("rn", "random"), ("tr", "trans"), ("pt", "parts")):
     shots = sorted(Path("build/ui").glob(prefix + "-*.ppm"), key=lambda p: int(p.stem.split("-")[1]))
     sheet = Image.new("RGB", (4 * 250, ((len(shots) + 3) // 4) * 250), (40, 40, 40))
     for i, p in enumerate(shots):
