@@ -286,7 +286,7 @@ four times).
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | ENV | attack | decay | sustain | release |
-| DEST | LOOP ON / OFF | destination | amount (bipolar) | |
+| DEST | LOOP ON / OFF | destination | amount (bipolar) | M.ENV 2: PART (BOTH / A / B) |
 
 With **LOOP ON** an envelope runs attack -> decay -> attack -> decay ... for as long as you hold the key, then
 releases: a sustain of 0 gives full up-and-down sweeps, a higher sustain a shallower cycle. Its destination can be
@@ -342,7 +342,7 @@ can run in time with the tempo.
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | LFO | wave (as the LFO's) | rate (0.05 .. 40 Hz) | sync: OFF, 4/1, 2/1, 1/1, 1/2, 1/4, 1/4T, 1/8, 1/8T, 1/16, 1/16T, 1/32 | |
-| DEST | destination | amount | | |
+| DEST | destination | amount | PART: BOTH / A / B | |
 
 **LFO 2** runs free, one for all the voices (so every note moves together). With **SYNC** on a division it ignores
 RATE and runs in time with the arp and sequencer's tempo (the BPM on the ARP page, or the MIDI clock when it follows
@@ -375,6 +375,7 @@ envelopes already do. A route is off while its source is OFF or its amount is 0 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | MOD 1 .. MOD 4 | SRC: the source | DEST: the destination | AMT: -64 .. +63 | TIME: a drum source's fall (1 ms .. 10 s; others: --) |
+| PARTS | MOD 1's part: BOTH / A / B | MOD 2's | MOD 3's | MOD 4's |
 
 | Source | |
 | --- | --- |
@@ -440,7 +441,14 @@ M.ENV 2 and the MATRIX are shared. **MODE** says how the parts play:
 With two parts, the **SELECT** button switches the part you are editing: the header shows **A** in amber or **B** in
 teal, with a thin rule of that colour under it. Every page then turns that part's own settings (the cutoff on
 PRESETS too); the oscillators, effects and shared modulators stay as they are. RANDOM rolls the part you are on.
-Press SELECT **twice quickly** for the FILTER page. In DUAL, LAYER and SPLIT each part takes its octave from the
+Press SELECT **twice quickly** for the FILTER page. On the pages a part has its own settings on, what you are editing
+is highlighted in the part's colour (muted amber or teal); text, and the shared pages, stay white.
+
+The shared modulators reach both parts, or one: LFO 2's and M.ENV 2's **PART** (on their DEST rows) and each matrix
+route's (the MATRIX page's PARTS row) is **BOTH**, **A** or **B**. A whole-band tremolo on part B alone, a filter sweep
+on A while B holds still. A modulator on one part shows that part's letter in its picture. LFO 2 on the effects
+(CHORUS, DELAY, REVERB, DLYTIME, DLYFDBK, REVSIZE) moves them for both, as the effects are shared. In SINGLE every
+modulator reaches the one synth, whatever its PART says. In DUAL, LAYER and SPLIT each part takes its octave from the
 SPLIT row's OCT1 (part A) and OCT2 (part B). Part B's MIDI channel is on the SETUP page.
 
 ### ARP

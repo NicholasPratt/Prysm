@@ -16,7 +16,7 @@ const PLUGIN = typeof window.prysm_hello === "function";
 const BTNS = [["OCT-", 0], ["OCT+", 1], ["EDIT", 6], ["ENV", 4], ["LFO", 5], ["GLO", 7], ["FX", 2],
               ["ARP", 10], ["SEQ", 11], ["SELECT", 3], ["HOME", 8], ["SAVE", 9], ["PLAY", 12], ["REC", 13]];
 const ENCS = [["SELECT", 0], ["ALGO", 1], ["KNOB1", 2], ["KNOB2", 3], ["KNOB3", 4], ["KNOB4", 5], ["PRESETS", 6]];
-const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58, 90, 92]);   // ui.c's K_ kinds shown as a list
+const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58, 90, 92, 94]);   // ui.c's K_ kinds shown as a list
 const LFO_ONLY_NOT = new Set([13, 14]);         // LFORATE, LFOAMT: the mod envelope's own, not the LFOs'
 const KEYMAP = "awsedftgyhujkolp;'";            // C4 (key 7) up
 const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];

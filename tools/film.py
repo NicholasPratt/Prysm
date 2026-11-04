@@ -32,7 +32,7 @@ ROWS = {"OSC1": ["WAVE", "WAVE2", "RATIO", "MODE", "ENV", "MIX"], "OSC2": ["WAVE
         "TRANS": ["OSC 1", "OSC 2"], "NOISE": ["NOISE"],
         "FILTER": ["FILTER", "TYPE", "COMB"], "AMP": ["ENV", "VEL", "VCA"], "FENV": ["ENV"], "MENV": ["ENV", "DEST"],
         "MENV2": ["ENV", "DEST"], "LFO": ["LFO", "DEST"],
-        "LFO2": ["LFO", "DEST"], "MATRIX": ["MOD 1", "MOD 2", "MOD 3", "MOD 4"],
+        "LFO2": ["LFO", "DEST"], "MATRIX": ["MOD 1", "MOD 2", "MOD 3", "MOD 4", "PARTS"],
         "MIX": ["OSC", "ROUTE", "GLIDE", "SPLIT", "PARTS"], "ARP": ["ARP", "TIME"],
         "SEQ": ["STEP", "CHORD", "LOCK", "PATTERN", "EDIT", "PARTS", "CLICK", "SONG", "ENTRY"],
         "DRUM": ["STEP", "ROLL", "KICK", "SNARE", "HAT", "CLAP", "BUS", "KIT", "EDIT"], "LOOP": ["LOOP"],

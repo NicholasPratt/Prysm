@@ -2,7 +2,8 @@
 /* The two parts (patch format 18), on a computer, through the app's own code: a format 17 sound reads as SINGLE with
  * part B as its part A; PATCH_INIT's part B is its part A; DUAL plays the part the keys are on, its oscillator alone
  * through its own amp; SPLIT picks the part by the note; LAYER plays every note on two voices, A and B, the arp's too,
- * and lets both go; part B's own LFO and filter are its own.
+ * and lets both go; part B's own LFO and filter are its own; a format 18 sound keeps its parts, its shared modulators on
+ * both; LFO 2, M.ENV 2 and a matrix route on one part move that part's voices alone (on both in SINGLE).
  *   tests/run_engine.sh runs it */
 #include <unistd.h>
 #include <sys/wait.h>
@@ -42,6 +43,21 @@ static void start(const patch_t *p)
     edit = *p;
     engine_init();
     engine_set(&edit);
+}
+static uint64_t heard(const patch_t *p, uint32_t part)   /* a note on that part (DUAL), its first 200 ms: a hash */
+{
+    uint64_t h = 1469598103934665603ull;
+    uint32_t n, i;
+    start(p);
+    key_part = (uint8_t)part;
+    engine_note_on_vel(60, 100);
+    for (n = 0; n < 8820u; n += BLK) {
+        memset(buf, 0, sizeof buf);
+        engine_render(buf, BLK);
+        for (i = 0; i < 2u * BLK; i++) { h ^= (uint32_t)buf[i]; h *= 1099511628211ull; }
+    }
+    key_part = 0;
+    return h;
 }
 static uint32_t sounding(uint32_t part)         /* voices gated on that part */
 {
@@ -169,6 +185,41 @@ int main(void)
     CHECK(eb2 * 8u < ea, "DUAL: B's filter shut darkens B alone (%llu vs A's %llu)", (unsigned long long)eb2,
           (unsigned long long)ea);
     key_part = 0;
+
+    p = PATCH_INIT;                             /* format 18: its parts kept, the shared modulators on both */
+    p.vmode = VM_LAYER; p.pb[0] = 11;
+    memcpy(old, &p, sizeof old);
+    {
+        uint8_t o18[PATCH_V18_SIZE];
+        memcpy(o18, &p, sizeof o18);
+        memset(&q, 0xAA, sizeof q);
+        CHECK(patch_from(&q, o18, PATCH_V18_SIZE, 18) == 0 && q.vmode == VM_LAYER && q.pb[0] == 11 &&
+              q.l2_part == PT_BOTH && q.me2_part == PT_BOTH && q.mm_part[3] == PT_BOTH,
+              "a format 18 sound keeps its parts, its shared modulators on both");
+    }
+    {                                           /* each shared modulator on one part: that part's sound alone moves */
+        static const char *const what[3] = {"LFO 2", "M.ENV 2", "a matrix route"};
+        uint32_t w, t;
+        for (w = 0; w < 3u; w++)
+            for (t = PT_A; t <= PT_B; t++) {
+                patch_t off = PATCH_INIT, on;
+                uint64_t a0, a1, b0, b1;
+                off.cho_mix = off.dly_mix = off.rev_mix = 0;
+                off.vmode = VM_DUAL;
+                on = off;
+                if (w == 0) { on.lfo2_dest = DEST_AMP; on.lfo2_amt = 127; on.lfo2_rate = 110; on.l2_part = (uint8_t)t; }
+                if (w == 1) { on.menv2_dest = DEST_CUTOFF; on.menv2_amt = 0; on.menv2_d = 40; on.me2_part = (uint8_t)t; }
+                if (w == 2) { on.mm_src[0] = MM_VEL; on.mm_dest[0] = DEST_PITCH; on.mm_amt[0] = 127; on.mm_part[0] = (uint8_t)t; }
+                a0 = heard(&off, 0); a1 = heard(&on, 0); b0 = heard(&off, 1); b1 = heard(&on, 1);
+                CHECK(t == PT_A ? a0 != a1 && b0 == b1 : a0 == a1 && b0 != b1, "%s on part %s: %s moves, %s as without it",
+                      what[w], t == PT_A ? "A" : "B", t == PT_A ? "A" : "B", t == PT_A ? "B" : "A");
+            }
+        p = PATCH_INIT;                         /* SINGLE: on every voice, whatever its PART says */
+        p.cho_mix = p.dly_mix = p.rev_mix = 0;
+        p.lfo2_dest = DEST_AMP; p.lfo2_amt = 127; p.lfo2_rate = 110;
+        q = p; q.l2_part = PT_B;
+        CHECK(heard(&p, 0) == heard(&q, 0), "SINGLE: LFO 2 on part B still on every voice");
+    }
     printf("%s\n", fails ? "FAILED" : "all ok");
     return fails != 0;
 }

@@ -103,6 +103,8 @@ static const char *const MFX_NAME[MFX_N] = {"OFF", "PHASER", "FLANGER"};
  *   SPLIT   the same, the part by the note: below the split part A, from it part B
  *   LAYER   every note on both parts: the voices in pairs (0, 1), (2, 3), the even one A, the odd one B */
 enum { VM_SINGLE, VM_DUAL, VM_SPLIT, VM_LAYER, VM_N };
+enum { PT_BOTH, PT_A, PT_B, PT_N };              /* a shared modulator's parts: the voices of both, of A's, of B's */
+static const char *const PT_NAME[PT_N] = {"BOTH", "A", "B"};
 static const char *const VM_NAME[VM_N] = {"SINGLE", "DUAL", "SPLIT", "LAYER"};
 #define PART_N 42u                              /* the fields each part has its own of (PART_OFF) */
 
@@ -217,6 +219,9 @@ typedef struct {
     /* (added in patch format 18: two parts) */
     uint8_t vmode;                              /* VM_SINGLE .. VM_LAYER */
     uint8_t pb[PART_N];                         /* part B's own of each PART_OFF field (part A's: the fields themselves) */
+    /* (added in patch format 19: the shared modulators' parts) */
+    uint8_t l2_part, me2_part;                  /* LFO 2, mod envelope 2: PT_BOTH, PT_A, PT_B (SINGLE: both, always) */
+    uint8_t mm_part[MM_SLOTS];                  /* each matrix route's */
 } patch_t;
 /* the fields a part has its own of: part B's in pb, in this order */
 #define PF(f) ((uint8_t)__builtin_offsetof(patch_t, f))
@@ -406,6 +411,7 @@ static const patch_t PATCH_INIT = {
     .pb = {92, 40, 88, 64, 0, 0, 75, 50, 65, 8, 70, 100, 60, LFO_SINE, 87, 0, 1, DEST_PITCH, DEST_CUTOFF, 64, 64,
            60, 70, 0, 60, 0, DEST_LFORATE, 64, 80, 40, 50, 0, GLIDE_ALWAYS, 0, FLT_LP12, 30, 0,
            NOISE_WHITE, 100, 0, ROUTE_FILTER, 0},
+    .l2_part = PT_BOTH, .me2_part = PT_BOTH, .mm_part = {PT_BOTH, PT_BOTH, PT_BOTH, PT_BOTH},
 };
 
 static void part_b(patch_t *q, const patch_t *p)   /* q: p as part B has it (B's own fields in A's places) */
@@ -486,6 +492,7 @@ typedef struct {
     int32_t t_tune16[NOSC];                     /* 1/16 semitones */
     uint32_t t_dk[NOSC];                        /* DECAY's fade: a block's step (Q16, exponential; 0: none) */
     uint8_t vmode;                              /* VM_SINGLE .. VM_LAYER */
+    uint8_t l2_parts, me2_parts, mm_parts[MM_SLOTS];   /* the parts each reaches: bit 0 A's voices, bit 1 B's */
 } eng_t;
 static volatile eng_t eg, eb;                   /* (eg: everything, part A's; eb: part B's own) */
 #define PE(v) (voice[v].part ? &eb : &eg)       /* a voice's part's */
@@ -1007,7 +1014,8 @@ static __attribute__((noinline)) void mm_mods(lfo_mod_t *m, uint32_t v, uint32_t
         case MM_KICK: case MM_SNARE: case MM_HAT: case MM_CLAP: s = mm_dv[r][bi]; break;
         default: continue;
         }
-        mod_add(m, eg.mm_dest[r], eg.mm_amt[r], s, uni);
+        if (eg.mm_parts[r] >> voice[v].part & 1u)   /* (its parts' voices alone) */
+            mod_add(m, eg.mm_dest[r], eg.mm_amt[r], s, uni);
     }
 }
 
@@ -2236,19 +2244,22 @@ static void engine_render(int32_t *out, uint32_t n)
             lfo_mod_t m;
             /* the mod envelope first (it may move the LFO's rate and depth) */
             /* LFO 2 this block: x2 its value times its amount (Q15), pz2 that over a knob's range */
-            int32_t x2 = (g2[bi] * eg.l2_amt) >> 15, pz2 = (x2 * 127) >> 15, me_amt = pe->me_amt[0];
-            if (eg.l2_dest == DEST_MENVAMT) {   /* (the mod envelope's amount: +- the whole of it) */
+            uint32_t l2on = eg.l2_parts >> voice[v].part & 1u, m2on = eg.me2_parts >> voice[v].part & 1u;
+            int32_t l2a = l2on ? eg.l2_amt : 0, ma2 = m2on ? eg.me_amt[1] : 0;   /* (LFO 2, M.ENV 2: its part's?) */
+            uint32_t l2d = l2on ? eg.l2_dest : DEST_OFF, md2 = m2on ? eg.me_dest[1] : DEST_OFF;
+            int32_t x2 = (g2[bi] * l2a) >> 15, pz2 = (x2 * 127) >> 15, me_amt = pe->me_amt[0];
+            if (l2d == DEST_MENVAMT) {   /* (the mod envelope's amount: +- the whole of it) */
                 me_amt += x2;
                 me_amt = clip15(me_amt);
             }
             int32_t me = menv_step(pe, &voice[v].menv[0], hold, 0) >> 9, me_x = (me * me_amt) >> 15;
-            int32_t me2 = menv_step(&eg, &voice[v].menv[1], hold, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
+            int32_t me2 = menv_step(&eg, &voice[v].menv[1], hold, 1) >> 9, me2_x = (me2 * ma2) >> 15;
             voice[v].rate16 = (((pe->me_dest[0] == DEST_LFORATE ? me_x : 0) +   /* +-4 octaves (each) */
-                                (eg.me_dest[1] == DEST_LFORATE ? me2_x : 0)) * 768) >> 15;
+                                (md2 == DEST_LFORATE ? me2_x : 0)) * 768) >> 15;
             /* the LFO: this voice's own, or the free-running one; its shape moved (LFOSHAPE); faded in; -> what it
              * does this block */
-            int32_t shp = (pe->me_dest[0] == DEST_LFOSHAPE ? me_x : 0) + (eg.me_dest[1] == DEST_LFOSHAPE ? me2_x : 0) +
-                          (eg.l2_dest == DEST_LFOSHAPE ? x2 : 0);
+            int32_t shp = (pe->me_dest[0] == DEST_LFOSHAPE ? me_x : 0) + (md2 == DEST_LFOSHAPE ? me2_x : 0) +
+                          (l2d == DEST_LFOSHAPE ? x2 : 0);
             if (pe->lfo_retrig) {
                 uint32_t nx = voice[v].lfo_ph + rate_moved(pe->lfo_inc, voice[v].rate16);
                 if (nx < voice[v].lfo_ph) voice[v].lfo_sh = lfo_random(&voice[v].lfo_rng);
@@ -2267,7 +2278,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 l = (l * (f < 0 ? 0 : f)) >> 15;
                 l = clip15(l);
             }
-            if (eg.me_dest[1] == DEST_LFOAMT) {
+            if (md2 == DEST_LFOAMT) {
                 int32_t f = 32767 + me2_x;
                 l = (l * (f < 0 ? 0 : f)) >> 15;
                 l = clip15(l);
@@ -2275,9 +2286,9 @@ static void engine_render(int32_t *out, uint32_t n)
             lfo_mods(pe, l, &m);
             if (DEST_LFO_OK(pe->me_dest[0]))     /* any of the LFO's destinations */
                 mod_add(&m, pe->me_dest[0], me_amt, me, 1);
-            if (DEST_LFO_OK(eg.me_dest[1]))
-                mod_add(&m, eg.me_dest[1], eg.me_amt[1], me2, 1);
-            mod_add(&m, eg.l2_dest, eg.l2_amt, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
+            if (DEST_LFO_OK(md2))
+                mod_add(&m, md2, ma2, me2, 1);
+            mod_add(&m, l2d, l2a, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
             if (eg.mm_n)                        /* the mod matrix */
                 mm_mods(&m, v, bi, l, g2[bi], me, me2);
             m.pitch16[0] += bend16;             /* pitch bend: every note (and the comb's keytrack with it) */
@@ -2307,7 +2318,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 uint32_t i2 = rate_moved(voice[v].inc[o][2], m.pitch16[o] + m.mpitch16 + m.mp16[1] + g16);
                 uint32_t m1 = eg.mode[o][0], m2 = eg.mode[o][1];
                 int32_t lvl = eg.lvl[o], am1, am2;
-                if (eg.l2_dest == DEST_LVL1 + o)   /* LFO 2 on the MIX page's level */
+                if (l2d == DEST_LVL1 + o)   /* LFO 2 on the MIX page's level */
                     lvl = (eg.lvl_osc[o] * PR_CURVE_Q15[knob_moved(eg.lvl_mix[o], pz2)]) >> 15;
                 int32_t e1_to, e2_to, e1, e2, d1, d2;
                 if (!(voice[v].omask >> o & 1u) || live_mute >> (LM_OSC1 + o) & 1u)
@@ -2385,7 +2396,7 @@ static void engine_render(int32_t *out, uint32_t n)
                     f_cut = q.cut; fk = q.fk; c_fb = q.c_fb; c_in = q.c_in; drive = q.drive; f_env = q.f_env;
                     kres = q.res; kdrv = q.drv;
                 }
-                switch (eg.l2_dest) {           /* LFO 2 on the filter's knobs */
+                switch (l2d) {           /* LFO 2 on the filter's knobs */
                 case DEST_RES:
                     fk = PR_RES_K[knob_moved(kres, pz2)];
                     if (comb) comb_of(knob_moved(kres, pz2), type, &c_fb, &c_in);
@@ -2663,6 +2674,10 @@ static uint32_t dest_b(uint32_t d)
     return d == DEST_WAVE1 ? DEST_WAVE2 : d == DEST_MWAVE1 ? DEST_MWAVE2 : d == DEST_MOD1 ? DEST_MOD2 :
            d == DEST_M1PITCH ? DEST_M2PITCH : d;
 }
+static uint8_t parts_of(uint32_t t)             /* a shared modulator's PT_ -> the parts' bits (SINGLE: every voice) */
+{
+    return (uint8_t)(patch.vmode == VM_SINGLE || patch.vmode >= VM_N ? 3u : t == PT_A ? 1u : t == PT_B ? 2u : 3u);
+}
 static void derive_part(volatile eng_t *e, const patch_t *p, uint32_t part)
 {
     uint32_t k;
@@ -2752,6 +2767,10 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
                 engine_tables(o, k);
     }
     eg.vmode = patch.vmode < VM_N ? patch.vmode : VM_SINGLE;
+    eg.l2_parts = parts_of(patch.l2_part);
+    eg.me2_parts = parts_of(patch.me2_part);
+    for (k = 0; k < MM_SLOTS; k++)
+        eg.mm_parts[k] = parts_of(patch.mm_part[k]);
     derive_part(&eg, &patch, 0);                /* part A's: from the patch; part B's: from its own fields */
     {
         static patch_t q;                       /* (static: off the main loop's stack) */

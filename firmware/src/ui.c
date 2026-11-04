@@ -30,15 +30,16 @@
  * Pages are tables (page_t -> row_t -> prm_t): a parameter is a field of patch_t, its range and how it shows. */
 
 /* the colours: white and greys on black, and two muted accents */
-#define C_ACC RGB(255, 255, 255)                /* what is being edited, where we are */
+#define C_ACC ui_acc()                          /* what is being edited, where we are: white (two parts, on a part's */
+                                                /*  page: its colour) */
 #define C_BRIGHT RGB(255, 255, 255)             /* what is being touched */
 #define C_MID RGB(150, 150, 150)                /* values, curves not being edited */
 #define C_FAINT RGB(72, 72, 72)                 /* guides, dotted lines, what is off */
 #define C_BOX RGB(56, 56, 56)                   /* frames */
 #define C_SEL RGB(40, 40, 40)                   /* the selected row's band */
 #define C_FILL RGB(34, 34, 34)                  /* under a curve */
-#define C_PART_A RGB(232, 150, 44)              /* the part edited, two parts playing: A amber, B teal (the letter, */
-#define C_PART_B RGB(44, 190, 176)              /*  the header's rule) */
+#define C_PART_A RGB(206, 150, 82)              /* the part edited, two parts playing: A amber, B teal, muted (the */
+#define C_PART_B RGB(84, 172, 160)              /*  letter, the header's rule, a part's page's highlights) */
 /* the accents: a prism's red, green and blue (the battery's bars); a value turned up drifts blue, down red, and
  * fades back to white (SHIFT_MS) */
 #define PR1_R 232u
@@ -95,7 +96,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_MMTIME,                                /* (a matrix route's drum envelope: its decay) */
        K_DPRE, K_DLOAD,                         /* (the KIT row's beats: one picked; LOAD: into the pattern edited) */
        K_TTYPE, K_TDEC,                         /* (a transient: its sound; DECAY, 127 FULL) */
-       K_VMODE, K_MCHB };                       /* (the parts: the voices' mode; part B's MIDI channel, 0 none) */
+       K_VMODE, K_MCHB,                         /* (the parts: the voices' mode; part B's MIDI channel, 0 none) */
+       K_PTGT };                                /* (a shared modulator's parts: BOTH, A, B) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -191,7 +193,7 @@ static const row_t MENV2_ROWS[] = {
     {"ENV", {{"A", PO(menv2_a), 127, K_NUM}, {"D", PO(menv2_d), 127, K_NUM},
              {"S", PO(menv2_s), 127, K_NUM}, {"R", PO(menv2_r), 127, K_NUM}}, LIT_ENV},
     {"DEST", {{"LOOP", PO(menv2_loop), 1, K_ONOFF}, {"DEST", PO(menv2_dest), DEST_N - 1u, K_DEST},
-              {"AMT", PO(menv2_amt), 127, K_BIP}, NOPRM}, LIT_CURVE},
+              {"AMT", PO(menv2_amt), 127, K_BIP}, {"PART", PO(me2_part), PT_N - 1u, K_PTGT}}, LIT_CURVE},
 };
 static const row_t LFO_ROWS[] = {
     {"LFO", {{"WAVE", PO(lfo_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo_rate), 127, K_RATE},
@@ -202,7 +204,8 @@ static const row_t LFO_ROWS[] = {
 static const row_t LFO2_ROWS[] = {               /* (one for all the voices; SYNC: the arp's tempo) */
     {"LFO", {{"WAVE", PO(lfo2_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo2_rate), 127, K_RATE},
               {"SYNC", PO(lfo2_sync), L2SYNC_N - 1u, K_L2SYNC}, NOPRM}, LIT_L2 | LIT_CURVE},
-    {"DEST", {{"DEST", PO(lfo2_dest), DEST2_N - 1u, K_L2DEST}, {"AMT", PO(lfo2_amt), 127, K_BIP}, NOPRM, NOPRM},
+    {"DEST", {{"DEST", PO(lfo2_dest), DEST2_N - 1u, K_L2DEST}, {"AMT", PO(lfo2_amt), 127, K_BIP},
+              {"PART", PO(l2_part), PT_N - 1u, K_PTGT}, NOPRM},
      LIT_L2 | LIT_ENV},
 };
 static const row_t MATRIX_ROWS[] = {            /* (each route: a source onto one of the LFO's destinations) */
@@ -210,6 +213,8 @@ static const row_t MATRIX_ROWS[] = {            /* (each route: a source onto on
                       {"AMT", PO(mm_amt[i]), 127, K_BIP}, {"TIME", PO(mm_time[i]), 127, K_MMTIME}}, LIT_ENV}
     MM_ROW("MOD 1", 0), MM_ROW("MOD 2", 1), MM_ROW("MOD 3", 2), MM_ROW("MOD 4", 3),
 #undef MM_ROW
+    {"PARTS", {{"MOD 1", PO(mm_part[0]), PT_N - 1u, K_PTGT}, {"MOD 2", PO(mm_part[1]), PT_N - 1u, K_PTGT},   /* (each */
+               {"MOD 3", PO(mm_part[2]), PT_N - 1u, K_PTGT}, {"MOD 4", PO(mm_part[3]), PT_N - 1u, K_PTGT}}, LIT_ENV},   /* route's) */
 };
 static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cursor, in the pattern edited) */
     {"STEP", {{"STEP", 0, 63, K_CURSOR}, {"NOTE", 0, 127, K_SNOTE},
@@ -443,6 +448,31 @@ static uint8_t prm_part = 2;                    /* (emu/params.c's walk: 0 part 
 static int ui_b(void) { return prm_part < 2u ? prm_part : ui_part && ui_two(); }
 #define SEL_TWICE_MS 400u                       /* SELECT twice within this: FILTER */
 #define ue (ui_b() ? &eb : &eg)                 /* its derived values */
+static int32_t cv_part_tag(int32_t x, int32_t y, uint32_t t)   /* a shared modulator's part (two parts, not BOTH): */
+{                                               /* its letter, its colour; the x after it */
+    if (!ui_two() || t == PT_BOTH || t >= PT_N) return x;
+    return cv_text(x, y, &FONT_S, PT_NAME[t], t == PT_B ? C_PART_B : C_PART_A);
+}
+static int page_parted(uint32_t pg)             /* a page with a part's own fields (SELECT changes what it edits) */
+{
+    static uint8_t known[PG_N], has[PG_N];
+    uint32_t r, k, i;
+    if (pg >= PG_N || PAGES[pg].osc) return 0;
+    if (!known[pg]) {
+        for (r = 0; r < PAGES[pg].n; r++)
+            for (k = 0; k < 4u; k++)
+                for (i = 0; i < PART_N; i++)
+                    if (PAGES[pg].rows[r].p[k].kind != K_NONE && !seq_kind(PAGES[pg].rows[r].p[k].kind) &&
+                        !loop_kind(PAGES[pg].rows[r].p[k].kind) && PAGES[pg].rows[r].p[k].off == PART_OFF[i])
+                        has[pg] = 1;            /* (the sequencer's offsets are in seqs_t: not the sound's) */
+        known[pg] = 1;
+    }
+    return has[pg];
+}
+static uint16_t ui_acc(void)
+{
+    return !ui_two() || !page_parted(page) ? RGB(255, 255, 255) : ui_b() ? C_PART_B : C_PART_A;
+}
 static void ui_view(void)                       /* (before drawing, after input) */
 {
     if (ui_b()) { part_b(&ui_bv, &edit); pv = &ui_bv; } else pv = &edit;
@@ -692,6 +722,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_TDEC: if (*v >= 127u) put(s, "FULL"); else num(s, *v); break;
     case K_VMODE: put(s, VM_NAME[*v < VM_N ? *v : 0u]); break;
     case K_MCHB: if (*v) num(s, *v); else put(s, "OFF"); break;
+    case K_PTGT: put(s, PT_NAME[*v < PT_N ? *v : 0u]); break;
     case K_NCOL:                                /* (the tone; a rate from the note; a density) */
         if (NOISE_RATED(pv->noise_type)) put(snum(s, ((int32_t)*v - 64) * 3 / 4), "st");
         else if (pv->noise_type == NOISE_CRACKLE) num(s, 2u + (uint32_t)PR_CURVE_Q15[*v & 127u] * 2000u / 32767u);
@@ -972,7 +1003,11 @@ static void gfx_menv(uint32_t lit, uint32_t k)
     uint32_t rng = 12345u;
     int32_t px = -1, pe = 0, pl = 0, sh = lfo_random(&rng);
     env_t e = {0, 1};
-    cv_text(x0 + 2, top, &FONT_S, DEST_NAME[(k ? &eg : ue)->me_dest[k] < DEST2_N ? (k ? &eg : ue)->me_dest[k] : 0u], C_FAINT);
+    {
+        int32_t x = cv_text(x0 + 2, top, &FONT_S, DEST_NAME[(k ? &eg : ue)->me_dest[k] < DEST2_N ? (k ? &eg : ue)->me_dest[k] : 0u],
+                            C_FAINT);
+        if (k) cv_part_tag(x + 6, top, edit.me2_part);   /* (M.ENV 2: its part, if one) */
+    }
     for (b = 0; b < blocks; b++) {
         int32_t me = menv_step(&eg, &e, b < held, k) >> 9, x = (int32_t)(b * (uint32_t)w / blocks);
         int32_t mx = (me * (k ? &eg : ue)->me_amt[k]) >> 15, l, ye, yl;
@@ -1031,6 +1066,7 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
             cv_pset(x0 + fade_w, py, C_FAINT);
     if (!l2 && pv->lfo_retrig)                 /* retrig: each note starts it here */
         cv_rect(x0, 2, 2, G_H - 6, lit & LIT_CURVE ? C_ACC : C_MID);
+    if (l2) cv_part_tag(x0 + 4, 2, edit.l2_part);   /* (LFO 2: its part, if one) */
 }
 
 static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a box each, a picture of it, its mix */
@@ -1518,6 +1554,7 @@ static void gfx_matrix(uint32_t lit)
         char t[8];
         num(t, r + 1u);
         cv_text(4, y + 4, &FONT_S, t, C_FAINT);
+        cv_part_tag(80, y + 4, edit.mm_part[r]);   /* (its part, if one: in the source's box) */
         cv_frame(18, y, 74, 24, r == sel ? C_MID : C_BOX);
         cv_text(22, y + 4, &FONT_S, MM_NAME[edit.mm_src[r] < MM_N ? edit.mm_src[r] : 0u], c);
         cv_line(94, y + 12, 104, y + 12, on ? C_MID : C_FAINT);   /* the arrow */

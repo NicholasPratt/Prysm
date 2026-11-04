@@ -1,5 +1,6 @@
 # the two parts: MIX's PARTS row MODE to DUAL (GLO); SELECT (the button) to part B: the teal B and rule; FILTER
-# (SELECT twice quickly) on part B, its cutoff down; a key on B (dark), SELECT to A, a key on A (bright); MODE LAYER
+# (SELECT twice quickly) on part B, its cutoff down; a key on B (dark), SELECT to A, a key on A (bright); AMP on A, on B (its highlights the part's colour), CHORUS (shared: white); MODE LAYER;
+# LFO 2 on part B (its tag), the MATRIX's PARTS row: MOD 1 on A, MOD 3 on B
 # (tests/run_ui.sh; build/ui/pt.wav to listen to)
 100 btn 7
 200 enc 0 4
@@ -17,9 +18,26 @@
 2400 shot
 2500 keys 0x80
 3000 keys 0
-3200 btn 7
-3300 enc 2 2
-3400 shot
-3500 keys 0x80
-4000 keys 0
-4200 end
+3200 btn 4
+3300 shot
+3400 btn 3
+3600 shot
+3700 btn 2
+3800 shot
+4000 btn 7
+4100 enc 2 2
+4200 shot
+4300 keys 0x80
+4800 keys 0
+5000 btn 5
+5100 btn 5
+5200 enc 0 1
+5300 enc 2 4
+5400 enc 4 4
+5500 shot
+5600 btn 5
+5700 enc 0 4
+5800 enc 2 2
+5900 enc 4 4
+6000 shot
+6200 end
