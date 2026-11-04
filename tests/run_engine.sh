@@ -33,3 +33,5 @@ cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/s
 build/engine/random_test | grep -v ' ms  '
 cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/trans_test tests/trans_test.c
 build/engine/trans_test | grep -v ' ms  '
+cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/part_test tests/part_test.c
+build/engine/part_test

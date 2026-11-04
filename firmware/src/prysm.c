@@ -69,18 +69,20 @@ static void app_audio(int32_t *out, uint32_t n)
 #endif
 }
 
-static void play(uint32_t note, uint32_t vel)   /* a key or MIDI: to the arpeggiator while it is on (and the looper) */
-{
+static void play_part(uint32_t note, uint32_t vel, uint32_t part)   /* a key or MIDI: to the arpeggiator while it is on */
+{                                               /* (and the looper); part (DUAL): 0 A, 1 B, 2 the one edited */
     loop_note(note, vel);
     if (eg.arp_on) arp_key_down(note, vel);
-    else engine_note_on_vel(note, vel);
+    else engine_note_on_part(note, vel, part);
 }
-static void stop(uint32_t note)
+static void stop_part(uint32_t note, uint32_t part)
 {
     loop_note(note, 0);
     if (eg.arp_on) arp_key_up(note);
-    else engine_note_off(note);
+    else engine_note_off_part(note, part);
 }
+static void play(uint32_t note, uint32_t vel) { play_part(note, vel, 2); }
+static void stop(uint32_t note) { stop_part(note, 2); }
 
 #define KEY0 53u                                /* key 0 = F3 */
 #include "patches.c"                            /* the 8 patch slots */
@@ -213,7 +215,8 @@ static void app_main(void)
     uint32_t prev = 0, k, t_change = 0, dirty = 0;
     uint8_t held[27] = {0};                     /* the note each key plays */
     uint32_t bend = 8192;                       /* the last MIDI pitch bend (the range may change under it) */
-    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; else an older, shorter record: before the LIVE */
+    if (settings_load(&gset, sizeof gset) != 0 &&   /* the settings; else an older, shorter record: before part B's */
+        settings_load(&gset, GSET_V5_SIZE) != 0 &&  /* channel, before the LIVE */
         settings_load(&gset, GSET_V4_SIZE) != 0 &&  /* knobs, before the sequencer's slot, before CLICK, before BEND; */
         settings_load(&gset, GSET_V3_SIZE) != 0 &&  /* the octave and the slot */
         settings_load(&gset, GSET_V2_SIZE) != 0 &&
@@ -224,6 +227,7 @@ static void app_main(void)
     if (gset.bend > 24u) gset.bend = 2;
     if (gset.oct < -2 || gset.oct > 2) gset.oct = 0;
     if (gset.midi_in > 16u) gset.midi_in = 0;
+    if (gset.midi_b > 16u) gset.midi_b = 0;
     if (gset.midi_out > 15u) gset.midi_out = 0;
     if (gset.clock > 1u) gset.clock = 0;
     if (gset.seq_slot < -1 || gset.seq_slot >= (int8_t)PATCH_SLOTS) gset.seq_slot = gset.slot;   /* (before 1.3: the sound's) */
@@ -295,6 +299,7 @@ static void app_main(void)
         }
 
         while (midi_get(&st, &d1, &d2)) {       /* USB-MIDI in, any channel */
+            uint32_t pt;
             if (st == 0xBFu && d1 == 119u) {    /* (tools/capture.py: a take starts or ends) */
                 if (d2) cap_start(keys); else cap_stop();
                 continue;
@@ -309,14 +314,18 @@ static void app_main(void)
 #if DINGHY_USB_LOG
             if (st == 0x9Fu && d1 == 0 && d2) { usblog_dump_start(); continue; }   /* DEBUG: tools/usblog.py */
 #endif
-            if (st < 0xF0u && gset.midi_in && (st & 0x0Fu) != gset.midi_in - 1u)
-                continue;                       /* (another channel than the SETUP page's) */
+            {
+                uint32_t on_b = st < 0xF0u && gset.midi_b && (st & 0x0Fu) == gset.midi_b - 1u;
+                if (st < 0xF0u && !on_b && gset.midi_in && (st & 0x0Fu) != gset.midi_in - 1u)
+                    continue;                   /* (another channel than the SETUP page's) */
+                pt = on_b ? 1u : gset.midi_b ? 0u : 2u;   /* (part B's channel set: it B, IN A; else the part edited) */
+            }
             if ((st & 0xF0u) == 0x90u && d2 && ui_split_key(d1)) { engine_set(&edit); continue; }   /* (LEARN) */
             if ((st & 0xF0u) == 0x90u && d2) {
                 if (ui_seq_key(d1, d2)) engine_set(&edit);
-                play(d1, d2);
+                play_part(d1, d2, pt);
             }
-            else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) { ui_seq_key_up(d1); stop(d1); }
+            else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) { ui_seq_key_up(d1); stop_part(d1, pt); }
             else if ((st & 0xF0u) == 0xE0u) bend = d1 | (uint32_t)d2 << 7;   /* pitch bend */
             else if ((st & 0xF0u) == 0xB0u && d1 == 1u) engine_wheel(d2);   /* the mod wheel (the mod matrix's WHEEL) */
         }

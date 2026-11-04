@@ -95,6 +95,17 @@ static const uint8_t DSYNC_TICKS[DSYNC_N] = {3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 
 enum { MFX_OFF, MFX_PHASER, MFX_FLANGER, MFX_N };
 static const char *const MFX_NAME[MFX_N] = {"OFF", "PHASER", "FLANGER"};
 
+/* two parts (patch format 18): part A is the patch's own fields, part B its own copy (pb) of those PART_OFF lists
+ * (the filter, the amp, the filter's envelope, the LFO, mod envelope 1, velocity, glide, the noise); osc 1 is part A's
+ * oscillator, osc 2 part B's. VMODE: how the voices play them:
+ *   SINGLE  as before the parts: a voice plays both oscillators through part A's filter, envelopes (B's own unused)
+ *   DUAL    a voice plays one part, its oscillator through its own filter: the keys the part edited (key_part)
+ *   SPLIT   the same, the part by the note: below the split part A, from it part B
+ *   LAYER   every note on both parts: the voices in pairs (0, 1), (2, 3), the even one A, the odd one B */
+enum { VM_SINGLE, VM_DUAL, VM_SPLIT, VM_LAYER, VM_N };
+static const char *const VM_NAME[VM_N] = {"SINGLE", "DUAL", "SPLIT", "LAYER"};
+#define PART_N 42u                              /* the fields each part has its own of (PART_OFF) */
+
 /* ---- the patch: what the pages edit (all small integers, 0..127 unless said) */
 typedef struct {
     struct {
@@ -203,7 +214,24 @@ typedef struct {
     uint8_t trn_lvl[NOSC];                      /* its level */
     uint8_t trn_tune[NOSC];                     /* 0..48 = -24 .. +24 semitones (24: a pitched one at the note's) */
     uint8_t trn_dec[NOSC];                      /* 127 = as it was made; down: faded out sooner (-60 dB in 1 ms .. 10 s) */
+    /* (added in patch format 18: two parts) */
+    uint8_t vmode;                              /* VM_SINGLE .. VM_LAYER */
+    uint8_t pb[PART_N];                         /* part B's own of each PART_OFF field (part A's: the fields themselves) */
 } patch_t;
+/* the fields a part has its own of: part B's in pb, in this order */
+#define PF(f) ((uint8_t)__builtin_offsetof(patch_t, f))
+static const uint8_t PART_OFF[PART_N] = {
+    PF(cut), PF(res), PF(fenv), PF(key), PF(drive), PF(flt_a), PF(flt_d), PF(flt_s), PF(flt_r),
+    PF(amp_a), PF(amp_d), PF(amp_s), PF(amp_r),
+    PF(lfo_wave), PF(lfo_rate), PF(lfo_delay), PF(lfo_retrig), PF(lfo_dest[0]), PF(lfo_dest[1]), PF(lfo_amt[0]),
+    PF(lfo_amt[1]),
+    PF(menv_a), PF(menv_d), PF(menv_s), PF(menv_r), PF(menv_loop), PF(menv_dest), PF(menv_amt),
+    PF(vel_amp), PF(vel_cut), PF(vel_mod), PF(glide), PF(glide_mode),
+    PF(hp_cut), PF(flt_type), PF(comb_damp), PF(comb_spread),
+    PF(noise_type), PF(noise_col), PF(noise_lvl), PF(route[2]), PF(hp_res)};
+#undef PF
+enum { PB_NOISE_COL = 38 };                     /* (pb's index of noise_col: voice_tune's) */
+_Static_assert(sizeof(patch_t) < 256u, "PART_OFF's offsets are bytes");
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
                "a mod envelope's a d s r loop dest amt are in a row (engine_set)");
@@ -374,10 +402,28 @@ static const patch_t PATCH_INIT = {
     .hp_res = 0,
     .dly_sync = 0, .mm_time = {70, 70, 70, 70},
     .trn_type = {0, 0}, .trn_lvl = {100, 100}, .trn_tune = {24, 24}, .trn_dec = {127, 127},
+    .vmode = VM_SINGLE,                         /* part B: as part A (tests/part_test.c checks it) */
+    .pb = {92, 40, 88, 64, 0, 0, 75, 50, 65, 8, 70, 100, 60, LFO_SINE, 87, 0, 1, DEST_PITCH, DEST_CUTOFF, 64, 64,
+           60, 70, 0, 60, 0, DEST_LFORATE, 64, 80, 40, 50, 0, GLIDE_ALWAYS, 0, FLT_LP12, 30, 0,
+           NOISE_WHITE, 100, 0, ROUTE_FILTER, 0},
 };
 
-/* ---- derived from the patch by engine_set(), read by the ISR */
-static volatile struct {
+static void part_b(patch_t *q, const patch_t *p)   /* q: p as part B has it (B's own fields in A's places) */
+{
+    uint32_t i;
+    *q = *p;
+    for (i = 0; i < PART_N; i++)
+        ((uint8_t *)q)[PART_OFF[i]] = p->pb[i];
+}
+static void part_fill_b(patch_t *p)              /* part B as part A is (an older patch: SINGLE, both alike) */
+{
+    uint32_t i;
+    for (i = 0; i < PART_N; i++)
+        p->pb[i] = ((const uint8_t *)p)[PART_OFF[i]];
+}
+
+/* ---- derived from the patch by engine_set(), read by the ISR (eb: part B's, its own fields only: derive_part) */
+typedef struct {
     uint32_t m_att[NOSC][2], m_rel[NOSC][2];    /* mod envelopes: attack step (Q24), release coefficient (Q16) */
     int32_t m_amt[NOSC][2];                     /* mod amounts, Q15 */
     uint8_t mode[NOSC][2];
@@ -439,7 +485,10 @@ static volatile struct {
     int32_t t_lvl[NOSC];                        /* Q15 */
     int32_t t_tune16[NOSC];                     /* 1/16 semitones */
     uint32_t t_dk[NOSC];                        /* DECAY's fade: a block's step (Q16, exponential; 0: none) */
-} eg;
+    uint8_t vmode;                              /* VM_SINGLE .. VM_LAYER */
+} eng_t;
+static volatile eng_t eg, eb;                   /* (eg: everything, part A's; eb: part B's own) */
+#define PE(v) (voice[v].part ? &eb : &eg)       /* a voice's part's */
 
 /* ---- the operators' waves: the morph of two neighbours, in RAM, double-buffered (engine_tables writes the one
  * the ISR is not reading, then swaps the pointer: a 32-bit store) */
@@ -509,6 +558,7 @@ static struct {
     uint8_t ilk[LK_N], lk[LK_N];
     int32_t rnd;                                /* the mod matrix's RANDOM: the note's own, -32767..32767 */
     noise_t ns;                                 /* its noise */
+    uint8_t part, ipart;                        /* its part (0 A, 1 B); the next note's (voice_pick) */
     uint32_t t_ph[NOSC];                        /* the transients: where each is in its sample (Q16) */
     int32_t t_g[NOSC];                          /* its level now (Q15; 0: done, or none) */
     uint32_t n_inc;                             /* DIGI, S&H: the note's step (RATE in it) */
@@ -520,6 +570,8 @@ static uint32_t ages;
 static volatile uint8_t engine_up;              /* engine_init has run: the ISR starts before it (platform.c) */
 static uint32_t lfo_ph, lfo_rng = 0x2545F491u;  /* the free-running LFO (retrig off) */
 static int32_t lfo_sh;
+static uint32_t lfob_ph, lfob_rng = 0x6A09E667u;  /* part B's free-running LFO (its own rate; not SINGLE) */
+static int32_t lfob_sh;
 static int32_t lfo_rate16;                      /* its rate moved by the newest note's mod envelope (last render) */
 static uint32_t l2_ph, l2_rng = 0x6C8E9CF5u;    /* LFO 2 (free-running, one for all) */
 static int32_t l2_sh;
@@ -651,14 +703,15 @@ static __attribute__((noinline)) void osc_block(int32_t *dst, const src_t *t, ui
  * NES's), clocked 93 times the note (so it plays the note), RATE moving it; S&H: white held for a step, the step 16
  * times the note's. CRACKLE: sparse clicks, each a random height, gone in a few frames. The levels are matched to
  * WHITE's RMS (tests/check_engine.py: within 2 dB; CRACKLE, sparse, is its peaks) */
-static void noise_block(noise_t *ns, int32_t *dst, int32_t lvl, uint32_t inc)   /* inc: its clock's step (Q16) */
+static void noise_block(const volatile eng_t *pe, noise_t *ns, int32_t *dst, int32_t lvl, uint32_t inc)   /* inc: its */
+                                                /* clock's step (Q16); pe: its part's settings */
 {
     uint32_t i, r = ns->rng ? ns->rng : 0x2545F491u;
-    int32_t lp = ns->lp, g = eg.n_g, x, b0 = ns->b0, b1 = ns->b1, b2 = ns->b2, hold = ns->hold;
+    int32_t lp = ns->lp, g = pe->n_g, x, b0 = ns->b0, b1 = ns->b1, b2 = ns->b2, hold = ns->hold;
 #define WHITE_NEXT() (r ^= r << 13, r ^= r >> 17, r ^= r << 5, ((int32_t)r >> 16) * 3 >> 2)   /* (xorshift: -24576 .. 24575) */
 #define TONE_OUT(v) do { int32_t y = clip15(v); lp += ((y - lp) * g) >> 15; \
                          dst[i] += (lp * lvl) >> 15; } while (0)   /* (the tone, then out) */
-    switch (eg.n_type) {                        /* (a loop each: no choice made a frame) */
+    switch (pe->n_type) {                        /* (a loop each: no choice made a frame) */
     case NOISE_PINK:                            /* (b2's 1.0527 as 1 + 1727 / 32768) */
         for (i = 0; i < BLK; i++) {
             x = WHITE_NEXT();
@@ -677,7 +730,7 @@ static void noise_block(noise_t *ns, int32_t *dst, int32_t lvl, uint32_t inc)   
         }
         break;
     case NOISE_DIGI: case NOISE_SH: {           /* clocked: so many steps a frame (Q16), held between; no tone */
-        uint32_t ph = ns->ph, l = ns->lfsr ? ns->lfsr : 1u, digi = eg.n_type == NOISE_DIGI;
+        uint32_t ph = ns->ph, l = ns->lfsr ? ns->lfsr : 1u, digi = pe->n_type == NOISE_DIGI;
         for (i = 0; i < BLK; i++) {
             uint32_t n;
             ph += inc;
@@ -700,7 +753,7 @@ static void noise_block(noise_t *ns, int32_t *dst, int32_t lvl, uint32_t inc)   
     case NOISE_CRACKLE:                         /* a click now and then: a random height, falling away */
         for (i = 0; i < BLK; i++) {
             x = WHITE_NEXT();
-            if ((r ^ 0x9E3779B9u) * 2654435761u < eg.n_thr)
+            if ((r ^ 0x9E3779B9u) * 2654435761u < pe->n_thr)
                 hold = (int32_t)(r << 9) >> 16; /* (another part of r: -32768 .. 32767) */
             else
                 hold -= hold >> 2;
@@ -914,13 +967,13 @@ static void mod_add(lfo_mod_t *m, uint32_t dest, int32_t a, int32_t s, int uni)
     }
 }
 
-static void lfo_mods(int32_t l, lfo_mod_t *m)   /* l: the LFO now (faded in), -32767..32767 */
-{
+static void lfo_mods(const volatile eng_t *pe, int32_t l, lfo_mod_t *m)   /* l: the LFO now (faded in), */
+{                                               /* -32767..32767; pe: its part's */
     uint32_t d;
     memset(m, 0, sizeof *m);
     m->amp = 32767;
     for (d = 0; d < 2u; d++)
-        mod_add(m, eg.lfo_dest[d], eg.lfo_amt[d], l, 0);
+        mod_add(m, pe->lfo_dest[d], pe->lfo_amt[d], l, 0);
 }
 
 #define MAXBLK 32u                              /* blocks per render, at most (n <= 512) */
@@ -971,10 +1024,10 @@ static uint32_t rate_moved(uint32_t inc, int32_t r16)   /* the LFO's phase step 
     return v > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)v;
 }
 
-static int32_t menv_step(env_t *e, uint32_t gate, uint32_t k)   /* mod envelope k; LOOP: the attack again after the decay */
-{
-    int32_t l = env_step(e, gate, eg.me_att[k], eg.me_dec[k], eg.me_sus[k], eg.me_rel[k]);
-    if (eg.me_loop[k] && gate && e->st == 2u && l - eg.me_sus[k] < ENV_FULL / 128)
+static int32_t menv_step(const volatile eng_t *x, env_t *e, uint32_t gate, uint32_t k)   /* mod envelope k (x: the */
+{                                               /* voice's part's for 0, eg for 1); LOOP: the attack again after the decay */
+    int32_t l = env_step(e, gate, x->me_att[k], x->me_dec[k], x->me_sus[k], x->me_rel[k]);
+    if (x->me_loop[k] && gate && e->st == 2u && l - x->me_sus[k] < ENV_FULL / 128)
         e->st = 1;
     return l;
 }
@@ -998,19 +1051,20 @@ static int voice_on(uint32_t v)                 /* it sounds: its envelope runs,
 
 static void voice_fresh(uint32_t v)             /* from silence: the phases from 0, the filter as the knobs are now */
 {
+    const volatile eng_t *pe = PE(v);
     uint32_t o;
     for (o = 0; o < NOSC; o++)
         voice[v].ph[o][0] = voice[v].ph[o][1] = voice[v].ph[o][2] = 0;
     voice[v].ic1 = voice[v].ic2 = voice[v].ic3 = voice[v].ic4 = 0;
-    voice[v].f_cs = eg.f_cut << 8;              /* the knob as it is now; the first block starts on its own */
-    voice[v].f_ks = (int32_t)eg.f_k;
+    voice[v].f_cs = pe->f_cut << 8;              /* the knob as it is now; the first block starts on its own */
+    voice[v].f_ks = (int32_t)pe->f_k;
     voice[v].fc[0] = -1;
     voice[v].hp1 = voice[v].hp2 = 0;
-    voice[v].hp_gs = eg.hp_g;
-    voice[v].hp_ks = eg.hp_k;
+    voice[v].hp_gs = pe->hp_g;
+    voice[v].hp_ks = pe->hp_k;
     voice[v].cd_q8 = 0;
     voice[v].clp = 0;
-    voice[v].cfb = eg.comb_fb; voice[v].cdk = eg.comb_dk; voice[v].cin = eg.comb_in;
+    voice[v].cfb = pe->comb_fb; voice[v].cdk = pe->comb_dk; voice[v].cin = pe->comb_in;
     voice[v].comb_live = 0;
 }
 
@@ -1032,9 +1086,9 @@ static void voice_start(uint32_t v)
     voice[v].rnd = lfo_random(&mm_rng);
     for (o = 0; o < NOSC; o++) {                /* the transients from their start, at the note's velocity */
         int32_t g = eg.t_type[o] ? eg.t_lvl[o] : 0;
-        if (g && voice[v].vel < 127u && eg.vel_amp) {   /* (softer quieter, as the amp: by velocity's square) */
+        if (g && voice[v].vel < 127u && PE(v)->vel_amp) {   /* (softer quieter, as the amp: by velocity's square) */
             int32_t vf = (int32_t)voice[v].vel * 258;
-            g = (g * (32767 - ((eg.vel_amp * (32767 - ((vf * vf) >> 15))) >> 15))) >> 15;
+            g = (g * (32767 - ((PE(v)->vel_amp * (32767 - ((vf * vf) >> 15))) >> 15))) >> 15;
         }
         voice[v].t_ph[o] = 0;
         voice[v].t_g[o] = g;
@@ -1043,26 +1097,30 @@ static void voice_start(uint32_t v)
 
 /* ---- which voice a new note takes: the same note, else a silent voice, else the quietest release, else the oldest
  * held; and where its glide starts (from the last note: always, or with LEGATO only while another note is held) */
-static uint32_t voice_pick(uint32_t note)
-{
-    uint32_t v, pick = 0, best = 0xFFFFFFFFu;
-    for (v = 0; v < NV; v++) {
+static volatile uint8_t key_part;               /* DUAL: the part the keys (and the arp, the sequencer) play */
+static uint32_t voice_pick(uint32_t note, uint32_t dual)   /* (and its ipart: the part the note is for; dual: */
+{                                               /* DUAL's, the caller's: key_part, or a MIDI channel's) */
+    uint32_t v, pick = 0, best = 0xFFFFFFFFu, m = eg.vmode;
+    uint32_t want = m == VM_DUAL ? dual & 1u : m == VM_SPLIT ? part_of(note) : 0u;
+    for (v = 0; v < NV; v += m == VM_LAYER ? 2u : 1u) {   /* (LAYER: the even ones; the odd follow, layer_follow) */
         uint32_t busy = voice[v].gate || voice[v].trig || voice[v].itrig != 0xFFu;
-        uint32_t score = voice[v].note == note && voice[v].gate ? 0u
+        uint32_t score = voice[v].note == note && voice[v].gate && (m != VM_DUAL || voice[v].part == want) ? 0u
                        : !voice[v].amp.st && !busy ? 1u
                        : !voice[v].gate && !busy ? 2u + ((uint32_t)voice[v].amp.lvl >> 8)
                        : 0x80000000u + voice[v].age;
         if (score < best) { best = score; pick = v; }
     }
+    voice[pick].ipart = (uint8_t)want;
     return pick;
 }
-static int32_t glide_from(uint32_t note)        /* the new note's slide (1/16 semitones Q8), then it is the last */
-{
+static int32_t glide_from(uint32_t note, uint32_t part)   /* the new note's slide (1/16 semitones Q8; part's GLIDE), */
+{                                               /* then it is the last */
+    const volatile eng_t *pe = part ? &eb : &eg;
     uint32_t v, held_any = 0;
     int32_t g = 0;
     for (v = 0; v < NV; v++)
         held_any |= voice[v].gate;
-    if (eg.glide_k && last_note >= 0 && (!eg.glide_legato || held_any))
+    if (pe->glide_k && last_note >= 0 && (!pe->glide_legato || held_any))
         g = (last_note - (int32_t)note) * 16 * 256;
     last_note = (int32_t)note;
     return g;
@@ -1132,10 +1190,10 @@ static void arp_step(uint32_t bi, const uint8_t *nt, const uint8_t *vl, uint32_t
     uint32_t vel, note, v;
     int32_t old = arp.v;
     note = arp_pick(nt, vl, n, arp.idx++, &vel, &arp.rng);
-    v = voice_pick(note);
+    v = voice_pick(note, key_part);
     voice[v].inote = (uint8_t)note;
     voice[v].ivel = (uint8_t)(vel ? vel : 1u);
-    voice[v].iglide = glide_from(note);         /* (the old note still held: LEGATO slides at a tie) */
+    voice[v].iglide = glide_from(note, voice[v].ipart);         /* (the old note still held: LEGATO slides at a tie) */
     voice[v].itrig = (uint8_t)bi;
     voice[v].age = ++ages;
     if (old >= 0 && (uint32_t)old != v) voice[old].ioff = (uint8_t)bi;
@@ -1591,10 +1649,11 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
             if (v >= 0) voice[v].ioff = (uint8_t)bi;
             v = -1;
             if (st != SEQ_REST) {
-                uint32_t w = voice_pick(note);
+                uint32_t w = voice_pick(note, key_part);
                 voice[w].inote = (uint8_t)note;
                 voice[w].ivel = (uint8_t)vel;
-                voice[w].iglide = l ? 0 : glide_from(note);   /* (a chord: its root glides, the rest land) */
+                voice[w].iglide = l ? 0 : glide_from(note, voice[w].ipart);   /* (a chord: its root glides, the */
+                                                /*  rest land) */
                 voice[w].ilk_m = (uint16_t)lm;
                 if (lm) memcpy(voice[w].ilk, lv, sizeof lv);
                 voice[w].itrig = (uint8_t)bi;
@@ -1840,7 +1899,7 @@ static void loop_block(uint32_t bi, uint32_t ticked)   /* a block of the looper;
         if (e->skip) { e->skip = 0; continue; }
         if (lp.v[e->note] >= 0) loop_voice_off(e->note, bi);
         if (e->vel) {                           /* (as the sequencer's notes start) */
-            uint32_t w = voice_pick(e->note);
+            uint32_t w = voice_pick(e->note, key_part);
             voice[w].inote = e->note;
             voice[w].ivel = e->vel;
             voice[w].iglide = 0;
@@ -2002,7 +2061,7 @@ static __attribute__((noinline)) void voice_filter_locks(uint32_t v, uint32_t co
     if (lm >> LK_RES & 1u) {
         q->res = lk[LK_RES] & 127u;
         q->fk = PR_RES_K[q->res];
-        if (comb) comb_of(q->res, eg.flt_type, &q->c_fb, &q->c_in);
+        if (comb) comb_of(q->res, PE(v)->flt_type, &q->c_fb, &q->c_in);
     }
     if (lm >> LK_FENV & 1u)
         q->f_env = ((int32_t)(lk[LK_FENV] & 127u) - 64) * 240 / 63;
@@ -2060,11 +2119,29 @@ static __attribute__((noinline)) void trn_block(uint32_t v, uint32_t o, int32_t 
     voice[v].t_g[o] = g1 > 8 ? g1 : 0;
 }
 
+static __attribute__((noinline)) void layer_follow(void)   /* LAYER: each odd voice (part B) plays its even one's */
+{                                               /* (part A's) notes, as the arp, sequencer, looper set them */
+    uint32_t v;
+    for (v = 0; v + 1u < NV; v += 2u) {
+        voice[v + 1u].inote = voice[v].inote;
+        voice[v + 1u].ivel = voice[v].ivel;
+        voice[v + 1u].iglide = voice[v].iglide;
+        voice[v + 1u].itrig = voice[v].itrig;
+        voice[v + 1u].ioff = voice[v].ioff;
+        voice[v + 1u].islide = voice[v].islide;
+        voice[v + 1u].ilk_m = voice[v].ilk_m;
+        memcpy((void *)voice[v + 1u].ilk, (const void *)voice[v].ilk, sizeof voice[v].ilk);
+        voice[v + 1u].age = voice[v].age;
+    }
+}
+
 static void engine_render(int32_t *out, uint32_t n)
 {
     uint32_t v, o, k, b, i, nb = n / BLK;
     uint32_t g_ph[MAXBLK];                      /* the free-running LFO, block by block, shared by the voices */
     int32_t g_sh[MAXBLK];
+    uint32_t gb_ph[MAXBLK];                     /* (part B's) */
+    int32_t gb_sh[MAXBLK];
     int32_t g2[MAXBLK];                         /* LFO 2, block by block: -32767..32767 */
     uint32_t l2inc = eg.l2_inc;
     if (!engine_up)                             /* (zeroed voices: itrig 0 would start note 0 on every one, held) */
@@ -2090,12 +2167,21 @@ static void engine_render(int32_t *out, uint32_t n)
         g_ph[b] = lfo_ph;
         g_sh[b] = lfo_sh;
         g2[b] = lfo_wave(eg.l2_wave, l2_ph, l2_sh);
+        if (eg.vmode != VM_SINGLE) {            /* (part B's: its own rate) */
+            nx = lfob_ph + eb.lfo_inc;
+            if (nx < lfob_ph) lfob_sh = lfo_random(&lfob_rng);
+            lfob_ph = nx;
+        }
+        gb_ph[b] = lfob_ph;
+        gb_sh[b] = lfob_sh;
         nx = l2_ph + l2inc;
         if (nx < l2_ph) l2_sh = lfo_random(&l2_rng);
         l2_ph = nx;
     }
     arp_run(nb);                                /* the arpeggiator: its notes for this render, block by block */
     mm_drums(nb);                               /* (after the sequencer's hits: the matrix's drums) */
+    if (eg.vmode == VM_LAYER)
+        layer_follow();
     for (v = 0; v < NV; v++) {
         if (voice[v].trig) {                    /* a note from the main loop: from the first block */
             voice[v].trig = 0;
@@ -2127,8 +2213,9 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].vel = voice[v].ivel;
                 voice_take_locks(v);
                 voice[v].glide_q8 = voice[v].iglide;
-                voice[v].gk = eg.glide_k;
+                voice[v].part = voice[v].ipart;   /* (DUAL's; the other modes: voice_tune's) */
                 voice_tune(v);
+                voice[v].gk = PE(v)->glide_k;
                 voice[v].gate = 1;
                 voice_start(v);
             }
@@ -2139,42 +2226,43 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].glide_q8 -= (int32_t)(((int64_t)voice[v].glide_q8 * voice[v].gk) >> 16);
                 if (voice[v].glide_q8 > -64 && voice[v].glide_q8 < 64) voice[v].glide_q8 = 0;
             }
+            const volatile eng_t *pe = PE(v);   /* (its part's filter, envelopes, LFO: SINGLE always A's) */
             uint32_t lm = voice[v].lk_m;        /* (the step's locks: these knobs the note's own) */
-            int32_t a_to = env_step(&voice[v].amp, gate, eg.a_att, lm >> LK_ADEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_ADEC]] : eg.a_dec,
-                                    eg.a_sus, lm >> LK_AREL & 1u ? PR_ENV_EXP[voice[v].lk[LK_AREL]] : eg.a_rel) >> 9;
+            int32_t a_to = env_step(&voice[v].amp, gate, pe->a_att, lm >> LK_ADEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_ADEC]] : pe->a_dec,
+                                    pe->a_sus, lm >> LK_AREL & 1u ? PR_ENV_EXP[voice[v].lk[LK_AREL]] : pe->a_rel) >> 9;
             uint32_t hold = gate || (eg.vca && voice[v].drone);   /* (a drone: its other envelopes held, as if down) */
             int32_t a, da, l, acc[BLK], dir[BLK], *dst;   /* (into the filter; DIRECT: past it, to the amp) */
             uint32_t direct = 0;
             lfo_mod_t m;
             /* the mod envelope first (it may move the LFO's rate and depth) */
             /* LFO 2 this block: x2 its value times its amount (Q15), pz2 that over a knob's range */
-            int32_t x2 = (g2[bi] * eg.l2_amt) >> 15, pz2 = (x2 * 127) >> 15, me_amt = eg.me_amt[0];
+            int32_t x2 = (g2[bi] * eg.l2_amt) >> 15, pz2 = (x2 * 127) >> 15, me_amt = pe->me_amt[0];
             if (eg.l2_dest == DEST_MENVAMT) {   /* (the mod envelope's amount: +- the whole of it) */
                 me_amt += x2;
                 me_amt = clip15(me_amt);
             }
-            int32_t me = menv_step(&voice[v].menv[0], hold, 0) >> 9, me_x = (me * me_amt) >> 15;
-            int32_t me2 = menv_step(&voice[v].menv[1], hold, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
-            voice[v].rate16 = (((eg.me_dest[0] == DEST_LFORATE ? me_x : 0) +   /* +-4 octaves (each) */
+            int32_t me = menv_step(pe, &voice[v].menv[0], hold, 0) >> 9, me_x = (me * me_amt) >> 15;
+            int32_t me2 = menv_step(&eg, &voice[v].menv[1], hold, 1) >> 9, me2_x = (me2 * eg.me_amt[1]) >> 15;
+            voice[v].rate16 = (((pe->me_dest[0] == DEST_LFORATE ? me_x : 0) +   /* +-4 octaves (each) */
                                 (eg.me_dest[1] == DEST_LFORATE ? me2_x : 0)) * 768) >> 15;
             /* the LFO: this voice's own, or the free-running one; its shape moved (LFOSHAPE); faded in; -> what it
              * does this block */
-            int32_t shp = (eg.me_dest[0] == DEST_LFOSHAPE ? me_x : 0) + (eg.me_dest[1] == DEST_LFOSHAPE ? me2_x : 0) +
+            int32_t shp = (pe->me_dest[0] == DEST_LFOSHAPE ? me_x : 0) + (eg.me_dest[1] == DEST_LFOSHAPE ? me2_x : 0) +
                           (eg.l2_dest == DEST_LFOSHAPE ? x2 : 0);
-            if (eg.lfo_retrig) {
-                uint32_t nx = voice[v].lfo_ph + rate_moved(eg.lfo_inc, voice[v].rate16);
+            if (pe->lfo_retrig) {
+                uint32_t nx = voice[v].lfo_ph + rate_moved(pe->lfo_inc, voice[v].rate16);
                 if (nx < voice[v].lfo_ph) voice[v].lfo_sh = lfo_random(&voice[v].lfo_rng);
                 voice[v].lfo_ph = nx;
                 ph = nx;
-                l = lfo_morph(eg.lfo_wave, shp, ph, voice[v].lfo_sh);
+                l = lfo_morph(pe->lfo_wave, shp, ph, voice[v].lfo_sh);
             } else {
-                ph = g_ph[bi];
-                l = lfo_morph(eg.lfo_wave, shp, ph, g_sh[bi]);
+                ph = voice[v].part ? gb_ph[bi] : g_ph[bi];
+                l = lfo_morph(pe->lfo_wave, shp, ph, voice[v].part ? gb_sh[bi] : g_sh[bi]);
             }
-            voice[v].lfo_fade += (int32_t)eg.lfo_fade;
+            voice[v].lfo_fade += (int32_t)pe->lfo_fade;
             if (voice[v].lfo_fade > ENV_FULL) voice[v].lfo_fade = ENV_FULL;
             l = (l * (voice[v].lfo_fade >> 9)) >> 15;
-            if (eg.me_dest[0] == DEST_LFOAMT) { /* the LFO's depth: x 0 .. 2 */
+            if (pe->me_dest[0] == DEST_LFOAMT) { /* the LFO's depth: x 0 .. 2 */
                 int32_t f = 32767 + me_x;
                 l = (l * (f < 0 ? 0 : f)) >> 15;
                 l = clip15(l);
@@ -2184,9 +2272,9 @@ static void engine_render(int32_t *out, uint32_t n)
                 l = (l * (f < 0 ? 0 : f)) >> 15;
                 l = clip15(l);
             }
-            lfo_mods(l, &m);
-            if (DEST_LFO_OK(eg.me_dest[0]))     /* any of the LFO's destinations */
-                mod_add(&m, eg.me_dest[0], me_amt, me, 1);
+            lfo_mods(pe, l, &m);
+            if (DEST_LFO_OK(pe->me_dest[0]))     /* any of the LFO's destinations */
+                mod_add(&m, pe->me_dest[0], me_amt, me, 1);
             if (DEST_LFO_OK(eg.me_dest[1]))
                 mod_add(&m, eg.me_dest[1], eg.me_amt[1], me2, 1);
             mod_add(&m, eg.l2_dest, eg.l2_amt, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
@@ -2197,11 +2285,11 @@ static void engine_render(int32_t *out, uint32_t n)
             m.vmod = 32767;                     /* velocity: softer notes quieter (by its square), darker, less bright */
             if (voice[v].vel < 127u) {          /* (127, the keys: exactly as without velocity) */
                 int32_t vel = voice[v].vel, vf = vel * 258, soft = 32767 - vf;   /* vf: 0 .. 32508 */
-                if (eg.vel_amp)                 /* (each only with a sensitivity: x 32767 / 32768 is not x 1) */
-                    m.amp = (m.amp * (32767 - ((eg.vel_amp * (32767 - ((vf * vf) >> 15))) >> 15))) >> 15;
-                m.cut -= eg.vel_cut * (127 - vel) / 127;
-                if (eg.vel_mod)
-                    m.vmod = 32767 - ((eg.vel_mod * soft) >> 15);
+                if (pe->vel_amp)                 /* (each only with a sensitivity: x 32767 / 32768 is not x 1) */
+                    m.amp = (m.amp * (32767 - ((pe->vel_amp * (32767 - ((vf * vf) >> 15))) >> 15))) >> 15;
+                m.cut -= pe->vel_cut * (127 - vel) / 127;
+                if (pe->vel_mod)
+                    m.vmod = 32767 - ((pe->vel_mod * soft) >> 15);
             }
             if (eg.vca)                         /* VCA OPEN: the envelope over a floor */
                 a_to = eg.vca + ((a_to * (32767 - eg.vca)) >> 15);
@@ -2271,25 +2359,25 @@ static void engine_render(int32_t *out, uint32_t n)
                     osc_block(dst, t, voice[v].ph[o], inc, m1, m2, lvl, e1, d1, e2, d2, !e2 && !e2_to);
                 }
             }
-            if (eg.n_lvl && !(live_mute >> LM_NOISE & 1u)) {   /* the noise (its clock follows the note: pitch, glide, */
+            if (pe->n_lvl && !(live_mute >> LM_NOISE & 1u)) {   /* the noise (its clock follows the note: pitch, glide, */
                                                 /* bend) */
-                uint32_t ni = NOISE_RATED(eg.n_type) ? rate_moved(voice[v].n_inc, m.pitch16[0] + (voice[v].glide_q8 >> 8)) : 0u;
-                noise_block(&voice[v].ns, eg.route[2] ? dir : acc, eg.n_lvl, eg.n_type == NOISE_DIGI ? (uint32_t)(((uint64_t)ni * 93u) >> 16)
+                uint32_t ni = NOISE_RATED(pe->n_type) ? rate_moved(voice[v].n_inc, m.pitch16[0] + (voice[v].glide_q8 >> 8)) : 0u;
+                noise_block(pe, &voice[v].ns, pe->route[2] ? dir : acc, pe->n_lvl, pe->n_type == NOISE_DIGI ? (uint32_t)(((uint64_t)ni * 93u) >> 16)
                                                                                : (uint32_t)(((uint64_t)ni * 16u) >> 16));
-                direct |= eg.route[2];
+                direct |= pe->route[2];
             }
             {                                   /* drive, the filter, the high-pass, the amp: the voice into both channels */
-                int32_t fe = env_step(&voice[v].flt, hold, eg.f_att, lm >> LK_FDEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_FDEC]]
-                                                                                    : eg.f_dec, eg.f_sus, eg.f_rel);
+                int32_t fe = env_step(&voice[v].flt, hold, pe->f_att, lm >> LK_FDEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_FDEC]]
+                                                                                    : pe->f_dec, pe->f_sus, pe->f_rel);
                 int32_t f[3], f2[3], a1, a2, a3, d1, d2, d3, b1 = 0, b2 = 0, b3 = 0, e1 = 0, e2 = 0, e3 = 0;
                 int32_t ic1 = voice[v].ic1, ic2 = voice[v].ic2, ic3 = voice[v].ic3, ic4 = voice[v].ic4, pk;
-                int32_t drive = eg.drive, hg, a0 = a, c;
-                int32_t fk = eg.f_k, hp_g = eg.hp_g, c_fb = eg.comb_fb, c_in = eg.comb_in, c_dk = eg.comb_dk;
-                int32_t f_env = eg.f_env, f_cut = eg.f_cut;
-                uint32_t kres = eg.res, kdrv = eg.drv;   /* (RES, DRIVE: the knobs, or the step's locks) */
+                int32_t drive = pe->drive, hg, a0 = a, c;
+                int32_t fk = pe->f_k, hp_g = pe->hp_g, c_fb = pe->comb_fb, c_in = pe->comb_in, c_dk = pe->comb_dk;
+                int32_t f_env = pe->f_env, f_cut = pe->f_cut;
+                uint32_t kres = pe->res, kdrv = pe->drv;   /* (RES, DRIVE: the knobs, or the step's locks) */
                 int32_t cfb = 0, cin = 0, cdk = 0, cd = 0, dd = 0, clp = voice[v].clp, ap_a = 0;
                 int32_t ax0 = 0, ax1 = 0, ax2 = 0, ax3 = 0, ay0 = 0, ay1 = 0, ay2 = 0, ay3 = 0;
-                uint32_t cw = voice[v].cw, type = eg.flt_type, comb = type >= FLT_COMBP, lp24 = type == FLT_LP24, self;
+                uint32_t cw = voice[v].cw, type = pe->flt_type, comb = type >= FLT_COMBP, lp24 = type == FLT_LP24, self;
                 int16_t *cb = comb_buf[v];
                 if (lm) {                       /* the step's locks on the filter's knobs (LFO 2 moves them from there) */
                     flk_t q = {f_cut, fk, c_fb, c_in, drive, f_env, kres, kdrv};
@@ -2303,8 +2391,8 @@ static void engine_render(int32_t *out, uint32_t n)
                     if (comb) comb_of(knob_moved(kres, pz2), type, &c_fb, &c_in);
                     break;
                 case DEST_DRIVE: drive = drive_of(knob_moved(kdrv, pz2)); break;
-                case DEST_HPF: hp_g = hp_g_of(knob_moved(eg.hp, pz2)); break;
-                case DEST_DAMP: c_dk = damp_of(knob_moved(eg.damp, pz2)); break;
+                case DEST_HPF: hp_g = hp_g_of(knob_moved(pe->hp, pz2)); break;
+                case DEST_DAMP: c_dk = damp_of(knob_moved(pe->damp, pz2)); break;
                 case DEST_FENV: f_env += (x2 * 240) >> 15; break;   /* +-60 semitones */
                 default: break;
                 }
@@ -2317,12 +2405,12 @@ static void engine_render(int32_t *out, uint32_t n)
                     ic1 = 2048;                 /* (nothing in it yet: a nudge, as an analog filter's noise; it grows */
                                                 /*  from there to its level, down to the lowest cutoffs) */
                 voice[v].hp_gs = hg = glide(voice[v].hp_gs, hp_g);
-                voice[v].hp_ks = glide(voice[v].hp_ks, eg.hp_k);
+                voice[v].hp_ks = glide(voice[v].hp_ks, pe->hp_k);
                 c = cut_at((uint32_t)(voice[v].note + voice[v].shift), fe, voice[v].f_cs + (m.cut << 8), f_env);
                 if (comb) {                     /* the comb: the cutoff (keytracked, the envelope, the mods) -> a delay */
-                    int32_t p16 = eg.comb_p16 + ((c - voice[v].f_cs) >> 6)   /* (its own CUT scale: in tune) */
-                                + ((((voice[v].glide_q8 >> 8) + m.pitch16[0]) * eg.f_key) >> 8);
-                    int32_t sp = eg.comb_spread + m.spread, d, per;
+                    int32_t p16 = pe->comb_p16 + ((c - voice[v].f_cs) >> 6)   /* (its own CUT scale: in tune) */
+                                + ((((voice[v].glide_q8 >> 8) + m.pitch16[0]) * pe->f_key) >> 8);
+                    int32_t sp = pe->comb_spread + m.spread, d, per;
                     uint32_t inc;
                     p16 = p16 < 16 * 16 ? 16 * 16 : p16 > 127 * 16 ? 127 * 16 : p16;   /* (MIDI 16 .. 127) */
                     inc = rate_moved(INC_C9[(p16 >> 4) % 12u] >> (10u - (uint32_t)(p16 >> 4) / 12u), p16 & 15) >> 8;
@@ -2513,14 +2601,18 @@ static uint32_t pitch_q16(uint32_t o)           /* the oscillator's tuning: fine
     return f;
 }
 
-static void voice_tune(uint32_t v)              /* the operators' phase steps for the voice's note (on its side of */
-{                                               /* the split: that oscillator alone, that side's octave) */
-    int32_t sd = (int32_t)part_of(voice[v].note), sh = patch.split ? ((int32_t)(patch.split_oct[sd] <= 4u ? patch.split_oct[sd] : 2u) - 2) * 12 : 0;
+static void voice_tune(uint32_t v)              /* the operators' phase steps for the voice's note; its part: SINGLE */
+{                                               /* A (on the split's side: that oscillator alone, that side's octave), */
+                                                /* SPLIT the side's, LAYER the voice's place, DUAL as given */
+    uint32_t m = eg.vmode;
+    int32_t sd = m == VM_DUAL ? (int32_t)voice[v].part : m == VM_LAYER ? (int32_t)(v & 1u) : (int32_t)part_of(voice[v].note);
+    int32_t sh = patch.split || m != VM_SINGLE ? ((int32_t)(patch.split_oct[sd] <= 4u ? patch.split_oct[sd] : 2u) - 2) * 12 : 0;
     int32_t nt = (int32_t)voice[v].note + sh;
     uint32_t base, o, k;
     if (nt < 0 || nt > 127) { sh = 0; nt = voice[v].note; }   /* (off the end: as played) */
     voice[v].shift = (int8_t)sh;
-    voice[v].omask = (uint8_t)(patch.split ? 1u << sd : 3u);
+    voice[v].part = (uint8_t)(m == VM_SINGLE ? 0 : sd);
+    voice[v].omask = (uint8_t)(m != VM_SINGLE ? 1u << sd : patch.split ? 1u << sd : 3u);
     base = INC_C9[(uint32_t)nt % 12u] >> (10u - (uint32_t)nt / 12u);
     for (o = 0; o < NOSC; o++) {
         uint64_t f = ((uint64_t)base * pitch_q16(o)) >> 16;
@@ -2536,7 +2628,8 @@ static void voice_tune(uint32_t v)              /* the operators' phase steps fo
             voice[v].inc[o][k] = inc > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)inc;   /* at most Nyquist */
         }
     }
-    voice[v].n_inc = rate_moved(base, ((int32_t)(patch.noise_col & 127u) - 64) * 12);   /* DIGI, S&H: +-48 semitones */
+    voice[v].n_inc = rate_moved(base, ((int32_t)((voice[v].part ? patch.pb[PB_NOISE_COL] : patch.noise_col) & 127u) - 64) *
+                                      12);   /* DIGI, S&H: +-48 semitones (its part's RATE) */
 }
 
 static void engine_tables(uint32_t o, uint32_t k)   /* operator k of oscillator o: morph its two waves into RAM */
@@ -2563,6 +2656,79 @@ static void engine_tables(uint32_t o, uint32_t k)   /* operator k of oscillator 
     }
 }
 
+/* a part's own derived values (the PART_OFF fields), from p (part B: part_b's copy); part B's destinations that are
+ * osc 1's are its own oscillator's, osc 2's */
+static uint32_t dest_b(uint32_t d)
+{
+    return d == DEST_WAVE1 ? DEST_WAVE2 : d == DEST_MWAVE1 ? DEST_MWAVE2 : d == DEST_MOD1 ? DEST_MOD2 :
+           d == DEST_M1PITCH ? DEST_M2PITCH : d;
+}
+static void derive_part(volatile eng_t *e, const patch_t *p, uint32_t part)
+{
+    uint32_t k;
+    e->f_att = PR_ENV_ATT[p->flt_a & 127u];
+    e->f_dec = PR_ENV_EXP[p->flt_d & 127u];
+    e->f_sus = (int32_t)((p->flt_s & 127u) * (uint32_t)(ENV_FULL / 127));
+    e->f_rel = PR_ENV_EXP[p->flt_r & 127u];
+    e->f_cut = 64 + (int32_t)(p->cut & 127u) * ((int32_t)PR_FILT_N - 1 - 64) / 127;   /* MIDI 16 .. 135.75 */
+    e->f_env = ((int32_t)(p->fenv & 127u) - 64) * 240 / 63;                       /* +-60 semitones */
+    e->f_key = (int32_t)(p->key & 127u) * 256 / 127;
+    e->f_k = PR_RES_K[p->res & 127u];
+    e->drive = drive_of(p->drive);
+    e->hp_g = hp_g_of(p->hp_cut);
+    e->hp_k = hp_k_of(p->hp_res);
+    e->res = p->res & 127u;
+    e->drv = p->drive & 127u;
+    e->hp = p->hp_cut & 127u;
+    e->damp = p->comb_damp & 127u;
+    e->flt_type = p->flt_type < FLT_N ? p->flt_type : FLT_LP12;
+    {
+        int32_t fb, in;
+        comb_of(p->res, e->flt_type, &fb, &in);
+        e->comb_fb = fb;
+        e->comb_in = in;
+    }
+    e->comb_p16 = 12 * 16 + (int32_t)(p->cut & 127u) * 12;
+    e->comb_spread = p->comb_spread & 127u;
+    e->comb_dk = damp_of(p->comb_damp);
+    e->a_att = PR_ENV_ATT[p->amp_a & 127u];
+    e->a_dec = PR_ENV_EXP[p->amp_d & 127u];
+    e->a_sus = (int32_t)((p->amp_s & 127u) * (uint32_t)(ENV_FULL / 127));
+    e->a_rel = PR_ENV_EXP[p->amp_r & 127u];
+    e->lfo_inc = PR_LFO_INC[p->lfo_rate & 127u];
+    e->lfo_fade = p->lfo_delay ? PR_ENV_ATT[p->lfo_delay & 127u] : (uint32_t)ENV_FULL;
+    e->lfo_wave = p->lfo_wave < LFO_N ? p->lfo_wave : LFO_SINE;
+    e->lfo_retrig = p->lfo_retrig ? 1u : 0u;
+    for (k = 0; k < 2u; k++) {
+        int32_t d = (int32_t)(p->lfo_amt[k] & 127u) - 64, mag = d < 0 ? -d : d;   /* 0..64 */
+        int32_t q = PR_CURVE_Q15[mag * 127 / 64];
+        e->lfo_dest[k] = DEST_LFO_OK(p->lfo_dest[k]) ? (uint8_t)(part ? dest_b(p->lfo_dest[k]) : p->lfo_dest[k]) : DEST_OFF;   /* (not itself) */
+        e->lfo_amt[k] = e->lfo_dest[k] == DEST_OFF ? 0 : d < 0 ? -q : q;
+    }
+    {                                           /* mod envelope 1 */
+        const uint8_t *m = &p->menv_a;          /* (a d s r loop dest amt, in a row) */
+        int32_t d = (int32_t)(m[6] & 127u) - 64, mag = d < 0 ? -d : d, q = PR_CURVE_Q15[mag * 127 / 64];
+        e->me_att[0] = PR_ENV_ATT[m[0] & 127u];
+        e->me_dec[0] = PR_ENV_EXP[m[1] & 127u];
+        e->me_sus[0] = (int32_t)((m[2] & 127u) * (uint32_t)(ENV_FULL / 127));
+        e->me_rel[0] = PR_ENV_EXP[m[3] & 127u];
+        e->me_loop[0] = m[4] ? 1u : 0u;
+        e->me_dest[0] = m[5] < DEST_N ? (uint8_t)(part ? dest_b(m[5]) : m[5]) : DEST_OFF;
+        e->me_amt[0] = e->me_dest[0] == DEST_OFF ? 0 : d < 0 ? -q : q;
+    }
+    e->vel_amp = (int32_t)(p->vel_amp & 127u) * 32767 / 127;
+    e->vel_mod = (int32_t)(p->vel_mod & 127u) * 32767 / 127;
+    e->vel_cut = (int32_t)(p->vel_cut & 127u) * 144 / 127;
+    e->glide_k = p->glide ? PR_ENV_EXP[p->glide & 127u] : 0u;
+    e->glide_legato = p->glide_mode == GLIDE_LEGATO;
+    for (k = 0; k < NSRC; k++)                  /* the routing; the noise */
+        e->route[k] = p->route[k] == ROUTE_DIRECT;
+    e->n_type = p->noise_type < NOISE_N ? p->noise_type : NOISE_WHITE;
+    e->n_g = 300 + (int32_t)((PR_CURVE_Q15[p->noise_col & 127u] * (32767 - 300)) >> 15);   /* ~70 Hz .. open */
+    e->n_thr = (2u + (uint32_t)PR_CURVE_Q15[p->noise_col & 127u] * 2000u / 32767u) * 97391u;   /* 2 .. 2000 a second */
+    e->n_lvl = PR_CURVE_Q15[p->noise_lvl & 127u];
+}
+
 static void engine_set(const patch_t *p)        /* a new patch (or one parameter of it): everything derived again */
 {
     uint32_t o, k, v, waves[NOSC][NOP];
@@ -2585,44 +2751,16 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
             if (waves[o][k])
                 engine_tables(o, k);
     }
-    eg.f_att = PR_ENV_ATT[patch.flt_a & 127u];
-    eg.f_dec = PR_ENV_EXP[patch.flt_d & 127u];
-    eg.f_sus = (int32_t)((patch.flt_s & 127u) * (uint32_t)(ENV_FULL / 127));
-    eg.f_rel = PR_ENV_EXP[patch.flt_r & 127u];
-    eg.f_cut = 64 + (int32_t)(patch.cut & 127u) * ((int32_t)PR_FILT_N - 1 - 64) / 127;   /* MIDI 16 .. 135.75 */
-    eg.f_env = ((int32_t)(patch.fenv & 127u) - 64) * 240 / 63;                       /* +-60 semitones */
-    eg.f_key = (int32_t)(patch.key & 127u) * 256 / 127;
-    eg.f_k = PR_RES_K[patch.res & 127u];
-    eg.drive = drive_of(patch.drive);
-    eg.hp_g = hp_g_of(patch.hp_cut);
-    eg.hp_k = hp_k_of(patch.hp_res);
-    eg.res = patch.res & 127u;
-    eg.drv = patch.drive & 127u;
-    eg.hp = patch.hp_cut & 127u;
-    eg.damp = patch.comb_damp & 127u;
-    eg.flt_type = patch.flt_type < FLT_N ? patch.flt_type : FLT_LP12;
+    eg.vmode = patch.vmode < VM_N ? patch.vmode : VM_SINGLE;
+    derive_part(&eg, &patch, 0);                /* part A's: from the patch; part B's: from its own fields */
     {
-        int32_t fb, in;
-        comb_of(patch.res, eg.flt_type, &fb, &in);
-        eg.comb_fb = fb;
-        eg.comb_in = in;
+        static patch_t q;                       /* (static: off the main loop's stack) */
+        part_b(&q, &patch);
+        derive_part(&eb, &q, 1);
     }
-    eg.comb_p16 = 12 * 16 + (int32_t)(patch.cut & 127u) * 12;
-    eg.comb_spread = patch.comb_spread & 127u;
-    eg.comb_dk = damp_of(patch.comb_damp);
     for (o = 0; o < NOSC; o++)
         for (k = 0; k < NOP; k++)
             eg.pos[o][k] = patch.osc[o].pos[k] & 127u;
-    eg.lfo_inc = PR_LFO_INC[patch.lfo_rate & 127u];
-    eg.lfo_fade = patch.lfo_delay ? PR_ENV_ATT[patch.lfo_delay & 127u] : (uint32_t)ENV_FULL;
-    eg.lfo_wave = patch.lfo_wave < LFO_N ? patch.lfo_wave : LFO_SINE;
-    eg.lfo_retrig = patch.lfo_retrig ? 1u : 0u;
-    for (k = 0; k < 2u; k++) {
-        int32_t d = (int32_t)(patch.lfo_amt[k] & 127u) - 64, mag = d < 0 ? -d : d;   /* 0..64 */
-        int32_t q = PR_CURVE_Q15[mag * 127 / 64];
-        eg.lfo_dest[k] = DEST_LFO_OK(patch.lfo_dest[k]) ? patch.lfo_dest[k] : DEST_OFF;   /* (not itself) */
-        eg.lfo_amt[k] = eg.lfo_dest[k] == DEST_OFF ? 0 : d < 0 ? -q : q;
-    }
     {                                           /* LFO 2 */
         int32_t d = (int32_t)(patch.lfo2_amt & 127u) - 64, mag = d < 0 ? -d : d, q = PR_CURVE_Q15[mag * 127 / 64];
         eg.l2_wave = patch.lfo2_wave < LFO_N ? patch.lfo2_wave : LFO_SINE;
@@ -2631,7 +2769,7 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.l2_dest = DEST_LFO2_OK(patch.lfo2_dest) ? patch.lfo2_dest : DEST_OFF;
         eg.l2_amt = eg.l2_dest == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
-    for (k = 0; k < 2u; k++) {                  /* the mod envelopes */
+    for (k = 1; k < 2u; k++) {                  /* mod envelope 2 (1: the parts', derive_part) */
         const uint8_t *e = k ? &patch.menv2_a : &patch.menv_a;   /* (a d s r loop dest amt, in a row in both) */
         int32_t d = (int32_t)(e[6] & 127u) - 64, mag = d < 0 ? -d : d, q = PR_CURVE_Q15[mag * 127 / 64];
         eg.me_att[k] = PR_ENV_ATT[e[0] & 127u];
@@ -2657,11 +2795,6 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         }
         eg.mm_n = (uint8_t)n;
     }
-    eg.vel_amp = (int32_t)(patch.vel_amp & 127u) * 32767 / 127;
-    eg.vel_mod = (int32_t)(patch.vel_mod & 127u) * 32767 / 127;
-    eg.vel_cut = (int32_t)(patch.vel_cut & 127u) * 144 / 127;
-    eg.glide_k = patch.glide ? PR_ENV_EXP[patch.glide & 127u] : 0u;
-    eg.glide_legato = patch.glide_mode == GLIDE_LEGATO;
     {
         uint32_t bpm = 40u + (patch.arp_bpm <= 200u ? patch.arp_bpm : 80u);
         uint32_t spb = DIV_SPB[patch.arp_div < DIV_N ? patch.arp_div : DIV_16];
@@ -2686,22 +2819,12 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.seq_gate = 1638 + (int32_t)(seqs.gate & 127u) * (32768 - 1638) / 127;
     }
     fx_set(&patch);
-    for (k = 0; k < NSRC; k++)                  /* the routing; the noise */
-        eg.route[k] = patch.route[k] == ROUTE_DIRECT;
-    eg.n_type = patch.noise_type < NOISE_N ? patch.noise_type : NOISE_WHITE;
-    eg.n_g = 300 + (int32_t)((PR_CURVE_Q15[patch.noise_col & 127u] * (32767 - 300)) >> 15);   /* ~70 Hz .. open */
-    eg.n_thr = (2u + (uint32_t)PR_CURVE_Q15[patch.noise_col & 127u] * 2000u / 32767u) * 97391u;   /* 2 .. 2000 a second */
-    eg.n_lvl = PR_CURVE_Q15[patch.noise_lvl & 127u];
     for (k = 0; k < NOSC; k++) {                /* the transients */
         eg.t_type[k] = patch.trn_type[k] <= TR_N ? patch.trn_type[k] : 0u;
         eg.t_lvl[k] = PR_CURVE_Q15[patch.trn_lvl[k] & 127u];
         eg.t_tune16[k] = ((int32_t)(patch.trn_tune[k] <= 48u ? patch.trn_tune[k] : 24u) - 24) * 16;
         eg.t_dk[k] = (patch.trn_dec[k] & 127u) >= 127u ? 0u : PR_ENV_EXP[patch.trn_dec[k] & 127u];
     }
-    eg.a_att = PR_ENV_ATT[patch.amp_a & 127u];
-    eg.a_dec = PR_ENV_EXP[patch.amp_d & 127u];
-    eg.a_sus = (int32_t)((patch.amp_s & 127u) * (uint32_t)(ENV_FULL / 127));
-    eg.a_rel = PR_ENV_EXP[patch.amp_r & 127u];
     {                                           /* VCA OPEN */
         int32_t vca = (int32_t)(patch.vca & 127u) * 32767 / 127;
         if (vca && !eg.vca) {                   /* opened: the oscillators drone where they were (if nothing sounds) */
@@ -2750,31 +2873,45 @@ static void engine_init(void)
 }
 
 /* ---- notes (main loop) */
-static void engine_note_on_vel(uint32_t note, uint32_t vel)   /* vel 1 .. 127 */
-{
+static void engine_note_on_part(uint32_t note, uint32_t vel, uint32_t part)   /* vel 1 .. 127; part (DUAL): 0 A, */
+{                                               /* 1 B, 2 the one the keys are on (key_part) */
     uint32_t pick;
     if (note > 127u)
         return;
-    pick = voice_pick(note);
-    voice[pick].glide_q8 = glide_from(note);
-    voice[pick].gk = eg.glide_k;
+    pick = voice_pick(note, part > 1u ? key_part : part);
+    voice[pick].part = voice[pick].ipart;       /* (LAYER's odd ones: voice_tune's) */
+    voice[pick].glide_q8 = glide_from(note, voice[pick].ipart);
+    voice[pick].gk = (voice[pick].ipart ? &eb : &eg)->glide_k;
     voice[pick].note = (uint8_t)note;
     voice[pick].vel = (uint8_t)(vel < 1u ? 1u : vel > 127u ? 127u : vel);
     voice[pick].age = ++ages;
     voice_tune(pick);                           /* the pitch before the gate: the ISR may run between */
     voice[pick].gate = 1;
     voice[pick].trig = 1;
+    if (eg.vmode == VM_LAYER && pick + 1u < NV) {   /* (its partner: part B) */
+        uint32_t w = pick + 1u;
+        voice[w].glide_q8 = voice[pick].glide_q8;
+        voice[w].note = voice[pick].note;
+        voice[w].vel = voice[pick].vel;
+        voice[w].age = voice[pick].age;
+        voice_tune(w);
+        voice[w].gk = eb.glide_k;
+        voice[w].gate = 1;
+        voice[w].trig = 1;
+    }
 }
 
+static void engine_note_on_vel(uint32_t note, uint32_t vel) { engine_note_on_part(note, vel, 2); }
 static void engine_note_on(uint32_t note) { engine_note_on_vel(note, 127); }   /* the keys: full velocity */
 
-static void engine_note_off(uint32_t note)
+static void engine_note_off_part(uint32_t note, uint32_t part)   /* part (DUAL): that part's alone; 2 any */
 {
     uint32_t v;
     for (v = 0; v < NV; v++)
-        if (voice[v].note == note)
+        if (voice[v].note == note && (part > 1u || eg.vmode != VM_DUAL || voice[v].part == part))
             voice[v].gate = 0;
 }
+static void engine_note_off(uint32_t note) { engine_note_off_part(note, 2); }
 
 static int engine_quiet(void)                   /* nothing sounds, not even a release; no arp or sequence playing */
 {

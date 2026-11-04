@@ -110,11 +110,15 @@ typedef struct {
     int8_t seq_slot;                            /* whose sequencer plays: a slot, -1 the store's own (patches.c) */
     uint8_t pad;
     uint16_t knob[4];                           /* the LIVE screen's KNOB1 .. KNOB4: the byte of patch_t each turns */
+    uint8_t midi_b;                             /* part B's MIDI channel: 0 none (MIDI plays the part edited), 1 .. 16 */
+    uint8_t pad2;                               /*  (then IN plays part A) */
 } gset_t;
 #define GSET_V1_SIZE 5u                         /* (before bend) */
 #define GSET_V2_SIZE 6u                         /* (before click) */
 #define GSET_V3_SIZE 8u                         /* (before seq_slot: the sound's slot's then) */
 #define GSET_V4_SIZE 9u                         /* (before the knobs: LV_KNOBS then) */
+#define GSET_V5_SIZE 18u                        /* (before midi_b: one part then) */
+_Static_assert(__builtin_offsetof(gset_t, midi_b) == GSET_V5_SIZE, "the settings before part B's channel");
 #define LV_KNOBS {__builtin_offsetof(patch_t, cut), __builtin_offsetof(patch_t, res), __builtin_offsetof(patch_t, dly_mix), \
                   __builtin_offsetof(patch_t, rev_mix)}
 static gset_t gset = {0, -1, 0, 0, 0, 2, 0, 80, -2, 0, LV_KNOBS};
@@ -922,7 +926,7 @@ static void gfx_menv(uint32_t lit, uint32_t k)
     env_t e = {0, 1};
     cv_text(x0 + 2, top, &FONT_S, DEST_NAME[eg.me_dest[k] < DEST2_N ? eg.me_dest[k] : 0u], C_FAINT);
     for (b = 0; b < blocks; b++) {
-        int32_t me = menv_step(&e, b < held, k) >> 9, x = (int32_t)(b * (uint32_t)w / blocks);
+        int32_t me = menv_step(&eg, &e, b < held, k) >> 9, x = (int32_t)(b * (uint32_t)w / blocks);
         int32_t mx = (me * eg.me_amt[k]) >> 15, l, ye, yl;
         {
             uint32_t nx = ph + rate_moved(eg.lfo_inc, eg.me_dest[k] == DEST_LFORATE ? (mx * 768) >> 15 : 0);
@@ -1314,7 +1318,7 @@ static void gfx_noise(uint32_t lit)
         }
         for (n = 0; n < NZ_N; n += BLK) {
             memset(blk, 0, sizeof blk);
-            noise_block(&ns, blk, 32767, inc);
+            noise_block(&eg, &ns, blk, 32767, inc);
             for (i = 0; i < (int32_t)BLK; i++) {
                 int32_t at = (int32_t)n + i, s = clip15(blk[i]);
                 int32_t x = (s * (at < (int32_t)NZ_N / 2 ? at : (int32_t)NZ_N - at)) >> 10;   /* (a triangle window) */
