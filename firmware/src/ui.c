@@ -97,7 +97,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_DPRE, K_DLOAD,                         /* (the KIT row's beats: one picked; LOAD: into the pattern edited) */
        K_TTYPE, K_TDEC,                         /* (a transient: its sound; DECAY, 127 FULL) */
        K_VMODE, K_MCHB,                         /* (the parts: the voices' mode; part B's MIDI channel, 0 none) */
-       K_PTGT };                                /* (a shared modulator's parts: BOTH, A, B) */
+       K_PTGT,                                  /* (a shared modulator's parts: BOTH, A, B) */
+       K_SLPART };                              /* (the SEQ page's PART row: the step's lane off's part, A or B) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -221,6 +222,8 @@ static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cu
               {"TRIG", 0, SEQ_TRIGS - 1u, K_STRIG}, {"SLIDE", 0, 1, K_SSLIDE}}, LIT_CURVE},
     {"CHORD", {{"N2", 0, 128, K_SCHORD}, {"N3", 1, 128, K_SCHORD},   /* (the step's other notes: 0 none, else note + 1) */
                {"N4", 2, 128, K_SCHORD}, {"VEL", 0, 127, K_SVEL}}, LIT_CURVE},
+    {"PART", {{"NOTE", 0, 1, K_SLPART}, {"N2", 1, 1, K_SLPART},   /* (the step's notes' parts, in DUAL: A, B) */
+              {"N3", 2, 1, K_SLPART}, {"N4", 3, 1, K_SLPART}}, LIT_CURVE},
     {"LOCK", {{"LANE1", 0, LK_N - 1u, K_LKDEST}, {"VAL1", 0, 128, K_LKVAL},   /* (the pattern's lock lanes: their */
               {"LANE2", 1, LK_N - 1u, K_LKDEST}, {"VAL2", 1, 128, K_LKVAL}}, LIT_CURVE},   /* knob; the step's value) */
     {"PATTERN", {{"PATT", 0, SEQ_PATS - 1u, K_SPAT}, {"LENGTH", 0, 64, K_SLEN},
@@ -400,10 +403,11 @@ static uint8_t seqs_dirty;                      /* the patterns changed: the app
 static uint8_t ui_none;                         /* (an action's knob: no value of its own) */
 static uint8_t split_learn;                     /* the MIX page's LEARN: the next key sets the split (not played) */
 static uint8_t clip_rows, clip_len;             /* the clipboard: 0 empty, 1 a row of 16, 4 a whole pattern (its length) */
-static uint8_t clip_note[64], clip_trig[64], clip_slide[64], clip_vel[64];
+static uint8_t clip_note[64], clip_trig[64], clip_slide[64], clip_vel[64], clip_lpart[64];
+static uint8_t lpart_ui;                         /* the PART row's knob: the lane's part, from the step */
 static uint8_t clip_xnote[64][SEQ_LANES - 1u], clip_xvel[64][SEQ_LANES - 1u];
 static uint8_t chord_ui[SEQ_LANES - 1u];        /* the CHORD row's knobs: lane l's note + 1 (0: none), from the step */
-enum { SR_STEP, SR_CHORD, SR_LOCK, SR_PATTERN, SR_EDIT, SR_PARTS, SR_CLICK, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
+enum { SR_STEP, SR_CHORD, SR_PART, SR_LOCK, SR_PATTERN, SR_EDIT, SR_PARTS, SR_CLICK, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
 static uint32_t seq_arm, seq_arm_at;            /* a CLEAR ALL or INIT asked once: its kind, when (turn again to do it) */
 static pattern_t *seq_ed(void) { return &seqs.pat[seqs.cur % SEQ_PATS]; }   /* the pattern edited */
 static uint8_t dr_sel;                          /* the DRUM page: the lane (KICK, SNARE, HAT, CLAP) */
@@ -432,7 +436,7 @@ static void rec_end(void);
 static int seq_kind(uint32_t k)                 /* a parameter of the sequencer's own (seqs), not of the sound */
 {
     return k == K_SNOTE || k == K_STRIG || k == K_SSLIDE || k == K_SLEN || (k >= K_SPAT && k <= K_SINIT) ||
-           k == K_SCHORD || k == K_SVEL || k == K_DHIT || k == K_DCLR || k == K_DNUM || k == K_DSEMI || k == K_DDEC ||
+           k == K_SCHORD || k == K_SVEL || k == K_SLPART || k == K_DHIT || k == K_DCLR || k == K_DNUM || k == K_DSEMI || k == K_DDEC ||
            k == K_SMUTE || k == K_SPCLR || k == K_DROLL || k == K_DRAMP || k == K_DLANE || k == K_DCOPY || k == K_DPASTE ||
            k == K_DKIT || k == K_LKDEST || k == K_LKVAL || k == K_DLOAD;
 }
@@ -541,6 +545,7 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_SVEL: return &seq_ed()->vel[seq_cursor % 64u];
     case K_CLICK: return &gset.click;
     case K_CLKLVL: return &gset.click_lvl;
+    case K_SLPART: lpart_ui = (uint8_t)(seq_ed()->lpart[seq_cursor % 64u] >> (p->off & 3u) & 1u); return &lpart_ui;
     case K_SCHORD: {                            /* lane off + 1 of the step: its note + 1, or 0 (none, or a tie) */
         const pattern_t *pt = seq_ed();
         uint32_t l = p->off % (SEQ_LANES - 1u), x = pt->xnote[seq_cursor % 64u][l];
@@ -723,6 +728,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_VMODE: put(s, VM_NAME[*v < VM_N ? *v : 0u]); break;
     case K_MCHB: if (*v) num(s, *v); else put(s, "OFF"); break;
     case K_PTGT: put(s, PT_NAME[*v < PT_N ? *v : 0u]); break;
+    case K_SLPART: put(s, *v ? "B" : "A"); break;
     case K_NCOL:                                /* (the tone; a rate from the note; a density) */
         if (NOISE_RATED(pv->noise_type)) put(snum(s, ((int32_t)*v - 64) * 3 / 4), "st");
         else if (pv->noise_type == NOISE_CRACKLE) num(s, 2u + (uint32_t)PR_CURVE_Q15[*v & 127u] * 2000u / 32767u);
@@ -1279,6 +1285,12 @@ static void gfx_seq(uint32_t lit)
                 if ((st = seq_lane(pt, k, l, &nn, &nv)) != SEQ_REST)
                     cv_rect(x + 2, y + 3 + (int32_t)(l - 1u) * 5, st == SEQ_TIE ? 4 : 8, 2,
                             tr == SEQ_REST || tr == SEQ_TIE ? C_MID : C_BLACK);
+        }
+        if (edit.vmode == VM_DUAL) {            /* DUAL: a note on part B, a mark in the other corner, B's colour */
+            uint32_t l, nn, nv, b = 0;
+            for (l = 0; l < SEQ_LANES; l++)
+                if (pt->lpart[k] >> l & 1u && seq_lane(pt, k, l, &nn, &nv) != SEQ_REST) b = 1;
+            if (b) cv_rect(x + 1, y + 17, 3, 4, C_PART_B);
         }
         if (lk_on(pt, k))                       /* a lock: a mark in its corner */
             cv_rect(x + 8, y + 17, 3, 4, tr == SEQ_REST || tr == SEQ_TIE ? C_BRIGHT : C_BLACK);
@@ -1968,7 +1980,7 @@ static int seq_action(uint32_t kind)
     if (kind == K_SCOPY) {
         for (k = 0; k < n; k++) {
             clip_note[k] = pt->note[a + k]; clip_trig[k] = pt->trig[a + k]; clip_slide[k] = pt->slide[a + k];
-            clip_vel[k] = pt->vel[a + k];
+            clip_vel[k] = pt->vel[a + k]; clip_lpart[k] = pt->lpart[a + k];
             memcpy(clip_xnote[k], pt->xnote[a + k], SEQ_LANES - 1u);
             memcpy(clip_xvel[k], pt->xvel[a + k], SEQ_LANES - 1u);
             for (d = 0; d < DRUMS; d++) clip_drum[k][d] = (uint8_t)drum_at(pt, d, a + k);
@@ -1985,7 +1997,7 @@ static int seq_action(uint32_t kind)
         for (k = 0; k < n; k++) {               /* (a row into ALL: into every row) */
             uint32_t c = clip_rows == 1u ? k % 16u : k;
             pt->note[a + k] = clip_note[c]; pt->trig[a + k] = clip_trig[c]; pt->slide[a + k] = clip_slide[c];
-            pt->vel[a + k] = clip_vel[c];
+            pt->vel[a + k] = clip_vel[c]; pt->lpart[a + k] = clip_lpart[c];
             memcpy(pt->xnote[a + k], clip_xnote[c], SEQ_LANES - 1u);
             memcpy(pt->xvel[a + k], clip_xvel[c], SEQ_LANES - 1u);
             for (d = 0; d < DRUMS; d++) drum_put(pt, d, a + k, clip_drum[c][d]);
@@ -2016,16 +2028,19 @@ static int seq_action(uint32_t kind)
     return kind == K_SINIT;
 }
 
-static void part_clear(uint32_t part)           /* PARTS' CLR1, CLR2: that part's notes (part_of: its side of the split; */
-{                                               /* no split: all of them are part 1's) in the EDIT row's ROW, or ALL */
+static void part_clear(uint32_t part)           /* PARTS' CLR1, CLR2: that part's notes (DUAL: their PART; else part_of: */
+{                                               /* its side of the split; no split: all of them are part 1's) in the EDIT */
+                                                /* row's ROW, or ALL */
     pattern_t *pt = seq_ed();
     uint32_t a = seq_row < 4u ? seq_row * 16u : 0u, n = seq_row < 4u ? 16u : 64u, k, l, nn, nv, sd = part - 1u, gone = 0;
     char msg[16];
-    if (sd && !edit.split) { pop("CLR2", "SPLIT OFF"); return; }
+    uint32_t dual = edit.vmode == VM_DUAL;
+    if (sd && !edit.split && !dual) { pop("CLR2", "SPLIT OFF"); return; }
     ud_take("CLEAR");
     for (k = a; k < a + n; k++)
         for (l = 0; l < SEQ_LANES; l++) {       /* (the drums stay; the other part's notes too) */
-            if (seq_lane(pt, k, l, &nn, &nv) == SEQ_REST || (edit.split && part_of(nn) != sd))
+            if (seq_lane(pt, k, l, &nn, &nv) == SEQ_REST ||
+                (dual ? (pt->lpart[k] >> l & 1u) != sd : edit.split && part_of(nn) != sd))
                 continue;
             if (!l) { pt->trig[k] = SEQ_REST; pt->slide[k] = 0; pt->vel[k] = 0; }
             else { pt->xnote[k][l - 1u] = 0; pt->xvel[k][l - 1u] = 0; }
@@ -3025,9 +3040,16 @@ static int ui_input(uint32_t buttons)
             seq_ed()->lk[p->off % PLOCKS][seq_cursor % 64u] = (uint8_t)x;
         if (p->kind == K_DKIT)                  /* a kit: heard at once, the lane's drum */
             engine_drum(dr_sel == 3u ? DR_CLAP_S : dr_sel, 106u);
+        if (p->kind == K_SLPART) {              /* a note's part: its lane's bit */
+            pattern_t *pt = seq_ed();
+            uint32_t l = p->off & 3u, k = seq_cursor % 64u;
+            pt->lpart[k] = (uint8_t)((pt->lpart[k] & ~(1u << l)) | (x & 1u) << l);
+        }
         if (p->kind == K_SCHORD) {              /* a chord's note: into its lane (0: none) */
             pattern_t *pt = seq_ed();
             uint32_t l = p->off % (SEQ_LANES - 1u), k = seq_cursor % 64u;
+            if (x && !pt->xvel[k][l])            /* (a new note: on the part edited) */
+                pt->lpart[k] = (uint8_t)((pt->lpart[k] & ~(2u << l)) | (uint32_t)ui_b() << (l + 1u));
             pt->xnote[k][l] = (uint8_t)(x ? x - 1 : 0);
             pt->xvel[k][l] = (uint8_t)(x ? pt->xvel[k][l] ? pt->xvel[k][l] : SEQ_VEL : 0u);
         }
@@ -3068,9 +3090,11 @@ static uint8_t rec_parts;                       /* (bit l: that lane's key's par
 static uint8_t entry_n;                         /* step entry: the chord's keys still down, */
 static uint32_t entry_down[4];                  /* which (a bit a note) */
 
+static uint8_t key_rec_part;                     /* (the note being recorded's part: the keys', or its MIDI channel's) */
 static void lane_set(pattern_t *pt, uint32_t k, uint32_t l, uint32_t note, uint32_t vel, uint32_t tie)
-{                                               /* lane l of step k: a note (vel 0: lane 0's AUTO), or a tie */
-    k %= 64u;
+{                                               /* lane l of step k: a note (vel 0: lane 0's AUTO), or a tie; its part */
+    k %= 64u;                                   /* key_rec_part */
+    pt->lpart[k] = (uint8_t)((pt->lpart[k] & ~(1u << l)) | (key_rec_part & 1u) << l);
     if (!l) {
         pt->note[k] = (uint8_t)note;
         if (tie) pt->trig[k] = SEQ_TIE;
@@ -3110,7 +3134,7 @@ static int rec_down(uint32_t note, uint32_t vel)   /* 1: recorded */
     rec[i].at = at;
     rec[i].ord = ord;
     rec_lanes |= (uint8_t)(1u << pick);
-    rec_parts = (uint8_t)((rec_parts & ~(1u << pick)) | part_of(note) << pick);
+    rec_parts = (uint8_t)((rec_parts & ~(1u << pick)) | (edit.vmode == VM_DUAL ? key_rec_part & 1u : part_of(note)) << pick);
     engine_seq_mute(rec_lanes, rec_parts);
     seqs_dirty = 1;
     return 1;
@@ -3147,10 +3171,11 @@ static void rec_end(void)                       /* REC off or the sequencer stop
     memset(entry_down, 0, sizeof entry_down);
 }
 
-static int ui_seq_key(uint32_t note, uint32_t vel)   /* a key or MIDI note down; 1: the patterns changed */
-{
+static int ui_seq_key(uint32_t note, uint32_t vel, uint32_t part)   /* a key or MIDI note down; 1: the patterns */
+{                                               /* changed; part: 0 A, 1 B, 2 the part edited */
     pattern_t *pt = seq_ed();
     uint32_t c = seq_cursor % 64u, l, nn, nv;
+    key_rec_part = (uint8_t)(part > 1u ? (uint32_t)ui_b() : part);
     if (!seq_rec || note > 127u)
         return 0;
     if (eg.seq_play)

@@ -180,11 +180,11 @@ int main(void)
     loop_cmd(LPC_REC);
     run(BLK, 0);
     CHECK(lp.state == LP_ARMED && lp.rec, "the looper: REC, armed");
-    loop_note(60, 100);
+    loop_note(60, 100, 2);
     engine_note_on(60);
     run(4000, 0);
     CHECK(lp.state == LP_REC && lp.run, "... a note: recording");
-    loop_note(60, 0);
+    loop_note(60, 0, 2);
     engine_note_off(60);
     run(4u * 4u * STEP_F + 2000u, 0);           /* (past the bar's end: the loop goes round) */
     CHECK(lp.n == 2u && lp.ev[0].note == 60 && lp.ev[0].vel == 100 && !lp.ev[1].vel && lp.ev[1].t > lp.ev[0].t,

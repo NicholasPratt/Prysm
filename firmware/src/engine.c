@@ -269,6 +269,8 @@ typedef struct {
                                                  * into RATCHET (0: one hit) */
     uint8_t lk_dest[2], pad5[2];                /* (SEQS_VERSION 5) the lock lanes (PLOCKS): their parameter (LK_OFF ..) */
     uint8_t lk[2][64];                          /* each step's lock: 0 none, else the value + 1 */
+    uint8_t lpart[64];                          /* (SEQS_VERSION 6) step k's lanes' parts: bit l, lane l's note on part B */
+                                                /* (heard in DUAL; SPLIT, the others: by the note, part_of) */
 } pattern_t;
 #define DRUMS 4u                                /* kick, snare, hat, clap */
 #define PLOCKS 2u
@@ -305,7 +307,7 @@ typedef struct {
                                                 /* they swell into it */
     uint8_t dr_kit;                             /* (SEQS_VERSION 5) the kit's sounds: DR_KITS's (prysm_drums.h) */
 } seqs_t;
-#define SEQS_VERSION 5u
+#define SEQS_VERSION 6u
 #define RATCHETS 6u
 static const uint8_t RATCHET[RATCHETS] = {1, 2, 3, 4, 6, 8};   /* a ratchet's hits (3, 6: triplets) */
 static seqs_t seqs;
@@ -1634,10 +1636,11 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
     for (l = 0; l < SEQ_LANES; l++) {
         uint32_t note, vel, nn, nv, st = seq_lane(p, k, l, &note, &vel), tie_next = seq_lane(pn, kn, l, &nn, &nv) == SEQ_TIE;
         int32_t v = seq.v[l];
-        if (seq.rec_mute >> l & 1u && (!patch.split || part_of(note) == (seq.rec_part >> l & 1u)))
+        uint32_t dual = eg.vmode == VM_DUAL, sp = dual ? p->lpart[k] >> l & 1u : part_of(note);   /* (its part) */
+        if (seq.rec_mute >> l & 1u && ((!dual && !patch.split) || sp == (seq.rec_part >> l & 1u)))
             st = SEQ_REST, tie_next = 0;        /* (a key is recording into this lane: it plays itself; the other */
                                                 /*  part's notes in it play on) */
-        if (st != SEQ_REST && seqs.part_mute[part_of(note)])   /* (its part muted) */
+        if (st != SEQ_REST && seqs.part_mute[sp])   /* (its part muted) */
             st = SEQ_REST, tie_next = 0;
         if (accent && st == SEQ_NOTE)
             vel = 127u;
@@ -1657,7 +1660,7 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
             if (v >= 0) voice[v].ioff = (uint8_t)bi;
             v = -1;
             if (st != SEQ_REST) {
-                uint32_t w = voice_pick(note, key_part);
+                uint32_t w = voice_pick(note, sp);   /* (DUAL: the lane's part) */
                 voice[w].inote = (uint8_t)note;
                 voice[w].ivel = (uint8_t)vel;
                 voice[w].iglide = l ? 0 : glide_from(note, voice[w].ipart);   /* (a chord: its root glides, the */
@@ -1767,12 +1770,12 @@ static volatile struct { uint8_t note[16], vel[16]; uint32_t w; } lq;   /* (the 
 static uint32_t lq_r;
 static volatile uint8_t lp_cmd, lp_bars = 2, lp_quant;   /* (the main loop's: loop_cmd; BARS 1 2 4 8; QUANT) */
 
-static void loop_note(uint32_t note, uint32_t vel)   /* (the main loop) a note on (vel) or off (0), if recording */
-{
-    uint32_t w = lq.w;
+static void loop_note(uint32_t note, uint32_t vel, uint32_t part)   /* (the main loop) a note on (vel) or off (0), if */
+{                                               /* recording; part (DUAL): 0 A, 1 B, 2 the one edited: a note on's */
+    uint32_t w = lq.w;                          /* velocity's top bit, part B */
     if (!lp.rec || w - lq_r >= 16u) return;
     lq.note[w % 16u] = (uint8_t)(note & 127u);
-    lq.vel[w % 16u] = (uint8_t)vel;
+    lq.vel[w % 16u] = (uint8_t)(vel ? (vel & 127u) | ((part > 1u ? key_part : part) & 1u) << 7 : 0u);
     lq.w = w + 1u;
 }
 static void loop_cmd(uint32_t c)                /* (the main loop) LPC_REC .. LPC_CLEAR, taken at the next render */
@@ -1907,9 +1910,9 @@ static void loop_block(uint32_t bi, uint32_t ticked)   /* a block of the looper;
         if (e->skip) { e->skip = 0; continue; }
         if (lp.v[e->note] >= 0) loop_voice_off(e->note, bi);
         if (e->vel) {                           /* (as the sequencer's notes start) */
-            uint32_t w = voice_pick(e->note, key_part);
+            uint32_t w = voice_pick(e->note, e->vel >> 7);   /* (DUAL: the part it was played on) */
             voice[w].inote = e->note;
-            voice[w].ivel = e->vel;
+            voice[w].ivel = (uint8_t)(e->vel & 127u);
             voice[w].iglide = 0;
             voice[w].ilk_m = 0;
             voice[w].itrig = (uint8_t)bi;

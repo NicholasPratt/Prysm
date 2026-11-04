@@ -221,7 +221,7 @@ function showTab(n) {
   lastPatch = lastSeqs = null;                             // (draw every value afresh)
 }
 const rowIndex = (pg, r) => {                   // the row's place on the FM-1 (the SEQ page: only its SONG row has a knob of the sound)
-  if (pg.name === "SEQ") return ["STEP", "CHORD", "PATTERN", "EDIT", "CLICK", "SONG", "ENTRY"].indexOf(r.name);
+  if (pg.name === "SEQ") return ["STEP", "CHORD", "PART", "LOCK", "PATTERN", "EDIT", "PARTS", "CLICK", "SONG", "ENTRY"].indexOf(r.name);
   if (r.name.startsWith("B ")) return pg.rows.findIndex((x) => x.name === r.name.slice(2));   // (part B's: its row's)
   return pg.rows.indexOf(r);
 };

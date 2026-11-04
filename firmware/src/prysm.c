@@ -71,13 +71,13 @@ static void app_audio(int32_t *out, uint32_t n)
 
 static void play_part(uint32_t note, uint32_t vel, uint32_t part)   /* a key or MIDI: to the arpeggiator while it is on */
 {                                               /* (and the looper); part (DUAL): 0 A, 1 B, 2 the one edited */
-    loop_note(note, vel);
+    loop_note(note, vel, part);
     if (eg.arp_on) arp_key_down(note, vel);
     else engine_note_on_part(note, vel, part);
 }
 static void stop_part(uint32_t note, uint32_t part)
 {
-    loop_note(note, 0);
+    loop_note(note, 0, part);
     if (eg.arp_on) arp_key_up(note);
     else engine_note_off_part(note, part);
 }
@@ -273,7 +273,7 @@ static void app_main(void)
             }
             if (down >> k & 1u) {
                 held[k] = (uint8_t)(base + k);
-                if (ui_seq_key(held[k], 127)) engine_set(&edit);   /* (REC: into the pattern, and heard) */
+                if (ui_seq_key(held[k], 127, 2)) engine_set(&edit);   /* (REC: into the pattern, and heard) */
                 play(held[k], 127);
                 midi_send(0x90u | gset.midi_out, held[k], 100);
             }
@@ -322,7 +322,7 @@ static void app_main(void)
             }
             if ((st & 0xF0u) == 0x90u && d2 && ui_split_key(d1)) { engine_set(&edit); continue; }   /* (LEARN) */
             if ((st & 0xF0u) == 0x90u && d2) {
-                if (ui_seq_key(d1, d2)) engine_set(&edit);
+                if (ui_seq_key(d1, d2, pt)) engine_set(&edit);
                 play_part(d1, d2, pt);
             }
             else if ((st & 0xF0u) == 0x80u || (st & 0xF0u) == 0x90u) { ui_seq_key_up(d1); stop_part(d1, pt); }

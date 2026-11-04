@@ -3,7 +3,8 @@
  * part B as its part A; PATCH_INIT's part B is its part A; DUAL plays the part the keys are on, its oscillator alone
  * through its own amp; SPLIT picks the part by the note; LAYER plays every note on two voices, A and B, the arp's too,
  * and lets both go; part B's own LFO and filter are its own; a format 18 sound keeps its parts, its shared modulators on
- * both; LFO 2, M.ENV 2 and a matrix route on one part move that part's voices alone (on both in SINGLE).
+ * both; LFO 2, M.ENV 2 and a matrix route on one part move that part's voices alone (on both in SINGLE); the
+ * sequencer's lanes play their own parts (MUTE2 rests B's); a version 5 sequencer reads; the looper keeps a note's part.
  *   tests/run_engine.sh runs it */
 #include <unistd.h>
 #include <sys/wait.h>
@@ -58,6 +59,12 @@ static uint64_t heard(const patch_t *p, uint32_t part)   /* a note on that part 
     }
     key_part = 0;
     return h;
+}
+static void two_lanes(void)                     /* pattern 1's first step: C4 on part B (lane 0), E4 on part A (lane 1) */
+{
+    seqs.pat[0].note[0] = 60; seqs.pat[0].trig[0] = SEQ_NOTE;
+    seqs.pat[0].xnote[0][0] = 64; seqs.pat[0].xvel[0][0] = 100;
+    seqs.pat[0].lpart[0] = 1u;
 }
 static uint32_t sounding(uint32_t part)         /* voices gated on that part */
 {
@@ -219,6 +226,94 @@ int main(void)
         p.lfo2_dest = DEST_AMP; p.lfo2_amt = 127; p.lfo2_rate = 110;
         q = p; q.l2_part = PT_B;
         CHECK(heard(&p, 0) == heard(&q, 0), "SINGLE: LFO 2 on part B still on every voice");
+    }
+
+    {                                           /* the sequencer: each lane's note on its part (DUAL) */
+        uint32_t v, a_ok = 0, b_ok = 0, n;
+        p = PATCH_INIT;
+        p.vmode = VM_DUAL;
+        start(&p);
+        seqs_init();
+        two_lanes();
+        key_part = 0;
+        engine_seq_play(1);
+        for (n = 0; n < 40u && !(a_ok && b_ok); n++) {
+            run(BLK);
+            for (v = 0; v < NV; v++)
+                if (voice[v].gate) {
+                    if (voice[v].note == 60 && voice[v].part == 1u) b_ok = 1;
+                    if (voice[v].note == 64 && voice[v].part == 0u) a_ok = 1;
+                }
+        }
+        engine_seq_play(0);
+        CHECK(a_ok && b_ok, "DUAL: the sequencer plays each lane's note on its part (keys on A)");
+        start(&p);
+        two_lanes();
+        seqs.part_mute[1] = 1;
+        engine_seq_play(1);
+        for (n = 0, b_ok = a_ok = 0; n < 40u; n++) {
+            run(BLK);
+            for (v = 0; v < NV; v++) if (voice[v].gate) { b_ok |= voice[v].note == 60; a_ok |= voice[v].note == 64; }
+        }
+        engine_seq_play(0);
+        seqs.part_mute[1] = 0;
+        CHECK(a_ok && !b_ok, "  MUTE2: part B's notes rest, A's play");
+    }
+    {                                           /* step entry: a key's note on the part edited; a MIDI channel's on its */
+        p = PATCH_INIT;
+        p.vmode = VM_DUAL;
+        start(&p);
+        seqs_init();
+        seq_rec = 1; page = PG_SEQ; seq_cursor = 3; ui_part = 1;
+        ui_seq_key(60, 100, 2);                 /* (the keys: part B, edited) */
+        ui_seq_key(64, 100, 0);                 /* (IN's channel: part A) */
+        CHECK(seqs.pat[0].note[3] == 60 && (seqs.pat[0].lpart[3] & 3u) == 1u,
+              "step entry: a key's note on the part edited (B), IN's on A");
+        seq_rec = 0; ui_part = 0; page = 0;
+        memset(entry_down, 0, sizeof entry_down); entry_n = 0;
+    }
+    {                                           /* a version 5 sequencer: its notes, every lane on part A */
+        static uint8_t old5[SEQS_V5_SIZE];
+        static seqs_t got;
+        uint32_t i;
+        two_lanes();
+        memcpy(old5, &seqs, 4u);
+        for (i = 0; i < SEQ_PATS; i++) {
+            memset(&seqs.pat[i].lpart, 0xFF, sizeof seqs.pat[i].lpart);
+            memcpy(old5 + 4u + i * SEQS_V5_PAT, &seqs.pat[i], SEQS_V5_PAT);
+        }
+        memcpy(old5 + 4u + SEQ_PATS * SEQS_V5_PAT, (uint8_t *)&seqs + __builtin_offsetof(seqs_t, div),
+               sizeof(seqs_t) - __builtin_offsetof(seqs_t, div));
+        seqs.song_len = 7;
+        memcpy(old5 + 4u + SEQ_PATS * SEQS_V5_PAT + (__builtin_offsetof(seqs_t, song_len) - __builtin_offsetof(seqs_t, div)),
+               &seqs.song_len, 1);
+        CHECK(seqs_size(5) == SEQS_V5_SIZE && seqs_conv(&got, old5, 5) == 0 && got.pat[0].note[0] == 60 &&
+              got.pat[0].xnote[0][0] == 64 && got.pat[0].lpart[0] == 0 && got.song_len == 7 &&
+              got.version == SEQS_VERSION, "a version 5 sequencer reads: its notes, its song, every lane on part A");
+    }
+    {                                           /* the looper: a note recorded on part B plays back on B */
+        uint32_t v, b_ok = 0, n;
+        p = PATCH_INIT;
+        p.vmode = VM_DUAL;
+        start(&p);
+        lp_bars = 1;
+        loop_cmd(LPC_REC);
+        run(BLK);
+        loop_note(62, 100, 1);
+        engine_note_on_part(62, 100, 1);
+        run(4000);
+        loop_note(62, 0, 1);
+        engine_note_off_part(62, 1);
+        run(44100 * 3);
+        loop_cmd(LPC_RECOFF);
+        engine_all_off();
+        for (n = 0; n < 44100u * 3u / BLK && !b_ok; n++) {
+            run(BLK);
+            for (v = 0; v < NV; v++) b_ok |= voice[v].gate && voice[v].note == 62 && voice[v].part == 1u;
+        }
+        loop_cmd(LPC_CLEAR);
+        run(BLK * 4u);
+        CHECK(b_ok && lp.ev[0].vel == (100u | 128u), "the looper: a note played on part B plays back on B");
     }
     printf("%s\n", fails ? "FAILED" : "all ok");
     return fails != 0;

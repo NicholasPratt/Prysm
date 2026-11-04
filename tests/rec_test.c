@@ -33,8 +33,8 @@ int main(void)
     engine_seq_play(1);
     run_frames(256u);                           /* step 1 starts */
     run_frames(512u);                           /* early in step 1 */
-    nn = (uint32_t)ui_seq_key(60, 90);
-    ui_seq_key(60, 90);                         /* (a second note-on while it is held: nothing more) */
+    nn = (uint32_t)ui_seq_key(60, 90, 2);
+    ui_seq_key(60, 90, 2);                         /* (a second note-on while it is held: nothing more) */
     CHECK(nn == 1u && seq.rec_mute == 1u, "a key early in step 1: recorded, its lane (0) resting");
     run_frames(2u * STEP_F);                    /* let go early in step 3 */
     ui_seq_key_up(60);
@@ -43,8 +43,8 @@ int main(void)
     CHECK(p->trig[1] == SEQ_TIE && p->trig[2] == SEQ_REST, "held into step 3: tied over step 2, step 3 free");
     CHECK(seq.rec_mute == 0u, "let go: its lane plays again");
     run_frames(STEP_F * 3u / 4u);               /* step 3, past its middle: the key goes into step 4 */
-    ui_seq_key(64, 100);
-    ui_seq_key(67, 100);                        /* and another with it: the next lane */
+    ui_seq_key(64, 100, 2);
+    ui_seq_key(67, 100, 2);                        /* and another with it: the next lane */
     run_frames(STEP_F / 2u);
     ui_seq_key_up(64);
     ui_seq_key_up(67);
@@ -53,8 +53,8 @@ int main(void)
     CHECK(p->trig[2] == SEQ_REST, "step 3 left as it was");
     run_frames(STEP_F * 13u);                   /* round the pattern (16 steps) to step 1 again */
     run_frames(256u);
-    ui_seq_key(60, 70);                         /* overdub: the same note into its own lane, a new one beside it */
-    ui_seq_key(72, 70);
+    ui_seq_key(60, 70, 2);                         /* overdub: the same note into its own lane, a new one beside it */
+    ui_seq_key(72, 70, 2);
     run_frames(512u);
     ui_seq_key_up(60);
     ui_seq_key_up(72);
@@ -69,9 +69,9 @@ int main(void)
     seq_rec = 1;                                /* step entry: stopped, on the SEQ page */
     page = PG_SEQ;
     seq_cursor = 8;
-    ui_seq_key(48, 127);
-    ui_seq_key(52, 127);
-    ui_seq_key(55, 127);
+    ui_seq_key(48, 127, 2);
+    ui_seq_key(52, 127, 2);
+    ui_seq_key(55, 127, 2);
     CHECK(seq_cursor == 8, "a chord held: the cursor waits");
     ui_seq_key_up(52);
     ui_seq_key_up(48);
@@ -80,7 +80,7 @@ int main(void)
           seq_lane(p, 8, 2, &nn, &nv) == SEQ_NOTE && nn == 55 && seq_lane(p, 8, 3, &nn, &nv) == SEQ_REST,
           "step entry: C3 E3 G3 into step 9");
     CHECK(seq_cursor == 9, "all let go: the cursor on to step 10");
-    ui_seq_key(50, 127);
+    ui_seq_key(50, 127, 2);
     ui_seq_key_up(50);
     CHECK(seq_lane(p, 9, 0, &nn, &nv) == SEQ_NOTE && nn == 50 && seq_lane(p, 9, 1, &nn, &nv) == SEQ_REST,
           "a single key: a single note");
@@ -101,7 +101,7 @@ int main(void)
             for (k = 0; k < 2u * 256u; k++) loud += blk[k] > 2000 || blk[k] < -2000;
         }
         CHECK(seq.steps == steps0 && seq.in_ci && loud > 0, "counting in: no step yet, ticks heard (CLICK OFF)");
-        ui_seq_key(62, 100);                    /* a key just before the downbeat: on step 1 */
+        ui_seq_key(62, 100, 2);                    /* a key just before the downbeat: on step 1 */
         run_frames(STEP_F);
         ui_seq_key_up(62);
         CHECK(seq_lane(p, 0, 0, &nn, &nv) == SEQ_NOTE && nn == 62, "a key late in the count-in: into step 1");

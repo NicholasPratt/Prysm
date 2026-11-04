@@ -434,7 +434,7 @@ M.ENV 2 and the MATRIX are shared. **MODE** says how the parts play:
 | MODE | Plays |
 | --- | --- |
 | **SINGLE** | one synth, as before the parts: every note on both oscillators, through part A's filter and envelopes (part B's own settings unused). Every older patch loads as SINGLE and sounds as it did |
-| **DUAL** | the part you are editing: the keys (and the arp, the sequencer) play it. The four voices are shared, so a part B note keeps sounding when you switch to A and play over it |
+| **DUAL** | the part you are editing: the keys (and the arp) play it; the sequencer and the looper play each note on its own part. The four voices are shared, so a part B note keeps sounding when you switch to A and play over it |
 | **SPLIT** | by the key: below the split key part A, from it part B (the SPLIT row's key and octaves) |
 | **LAYER** | every note on both parts at once, each through its own filter and envelopes: two notes at a time |
 
@@ -539,6 +539,7 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 | --- | --- | --- | --- | --- |
 | STEP | the step (the cursor) | its note | its trigger: REST, NOTE, ACCENT, TIE | SLIDE ON / OFF |
 | CHORD | the step's 2nd note (-- none) | 3rd note | 4th note | its velocity: AUTO (100, an accent 127) or 1 .. 127 |
+| PART | the step's note's part: A / B (DUAL) | the 2nd note's | the 3rd's | the 4th's |
 | LOCK | LANE1: the parameter of the pattern's first lock lane (OFF: none) | VAL1: the step's value (-- none) | LANE2 | VAL2 |
 | PATTERN | the pattern edited: P1 .. P4 | its length: 1 .. 64 | step: 1/4 .. 1/32 (all patterns) | gate (all patterns) |
 | EDIT | the row: 1 .. 4, or ALL | COPY | PASTE | CLEAR |
@@ -593,6 +594,13 @@ the STEP and CHORD rows, or CLEAR a row.
   a part's notes in the EDIT row's row (or ALL), leaving the other part and the drums. A step holds up to four notes
   across both parts. Which part a note is in follows the split: move the split key and notes change sides. With the
   split off, every note is part 1's.
+- **DUAL** (MIX's PARTS row): each note carries its own part, A or B, so one pattern plays both synths. A note
+  recorded or entered goes on the part you are editing (SELECT), or, from a MIDI keyboard, on its channel's part (the
+  SETUP page's B IN). Record a bass on part A, press SELECT, overdub a lead on part B. The **PART** row shows and
+  changes the parts of the step under the cursor; steps with a note on part B have a small teal mark in their corner.
+  Here **MUTE1** / **MUTE2** and **CLR1** / **CLR2** are parts A and B. In SINGLE, SPLIT and LAYER a note's part is
+  kept but not used. The arpeggiator plays the part you are editing; the looper keeps each note on the part it was
+  played on.
 - **The song** (SONG and ENTRY rows): set MODE to SONG, its LENGTH to the number of entries, then for each entry its
   pattern and how many times it plays. PLAY then plays the entries in turn and starts again after the last.
 - **INIT** (SONG row) starts over: all four patterns empty, the song P1, P2, P3, P4 once each, PATT mode. It asks
