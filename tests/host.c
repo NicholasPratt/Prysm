@@ -151,7 +151,8 @@ static int store_save(const void *p, uint32_t n)
     printf("%6u ms  store saved (%u B)\n", fm1_ms, n);
     return 0;
 }
-#define SEQSTORE_N 9u                              /* each patch slot's sequencer, the store's own (platform.c): here, in RAM */
+#define SEQSTORE_N 11u                             /* each patch slot's sequencer, the store's own, the user tones' two */
+                                                   /* halves (platform.c): here, in RAM */
 static uint8_t host_seqs[SEQSTORE_N][STORE_MAX];
 static uint32_t host_seqs_n[SEQSTORE_N];
 static int seqstore_load(uint32_t i, void *p, uint32_t n)

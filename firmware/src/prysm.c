@@ -86,6 +86,7 @@ static void stop(uint32_t note) { stop_part(note, 2); }
 
 #define KEY0 53u                                /* key 0 = F3 */
 #include "patches.c"                            /* the 8 patch slots */
+#include "tones.c"                              /* the tone library: a part's sound, factory and user */
 static uint8_t cap_on;                          /* capture.c: a take is being recorded */
 static void cap_enc(uint32_t id, int32_t delta);
 static int32_t cap_enc_take(uint32_t e)         /* the encoders as the UI takes them: into a take too */

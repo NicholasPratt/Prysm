@@ -320,8 +320,11 @@ static void smk_trim_read(void)
 #define PRYSM_MAGIC 0x53595250u                 /* "PRYS" */
 #define PSEQ_MAGIC 0x51455350u                  /* "PSEQ": a slot's sequencer */
 #define STORE_MAX (0x1000u - 16u)
-#define SEQSTORE_N 9u                           /* (one for each patch slot, and the store's own: patches.c) */
-_Static_assert(BOARD_SMK37 || (SEQSTORE_N - 1u <= NSLOT && SLOT_SECT >= 4u), "a slot of store.h for each patch slot's sequencer");
+#define SEQSTORE_N 11u                          /* (one for each patch slot, and the store's own: patches.c; then the */
+                                                /*  user tones' two halves, TONE_AREA: tones.c) */
+#define PTON_MAGIC 0x4E4F5450u                  /* "PTON": a half of the user tones */
+_Static_assert(BOARD_SMK37 || (SEQSTORE_N - 3u <= NSLOT && SLOT_SECT >= 4u), "a slot of store.h for each patch slot's sequencer");
+_Static_assert(BOARD_SMK37 || BLOBS_AT + 4u * 0x1000u <= STORE_A, "the user tones: blobs 0 .. 3, below Prysm's store");
 typedef struct { uint32_t a, magic, seq, at; } ab_t;   /* sectors a and a + 4 KiB; the newest copy: its sequence and
                                                            sector (0: none yet) */
 static ab_t store_ab = {STORE_A, PRYSM_MAGIC, 0, 0};
@@ -371,7 +374,11 @@ static int store_save(const void *p, uint32_t n) { return ab_save(&store_ab, p, 
 static ab_t *seq_area(uint32_t i)
 {
     ab_t *s = &seq_ab[i];
-    if (!s->a) { s->a = SLOTS_AT + (i < SEQSTORE_N - 1u ? i * SLOT_SECT : 2u) * 0x1000u; s->magic = PSEQ_MAGIC; }
+    if (!s->a && i >= SEQSTORE_N - 2u) {        /* (the user tones: blobs 0, 1 and 2, 3, unused before) */
+        s->a = BLOBS_AT + (i - (SEQSTORE_N - 2u)) * 2u * 0x1000u;
+        s->magic = PTON_MAGIC;
+    }
+    if (!s->a) { s->a = SLOTS_AT + (i < SEQSTORE_N - 3u ? i * SLOT_SECT : 2u) * 0x1000u; s->magic = PSEQ_MAGIC; }
     return s;
 }
 static int seqstore_load(uint32_t i, void *p, uint32_t n) { return i < SEQSTORE_N ? ab_load(seq_area(i), p, n) : -1; }

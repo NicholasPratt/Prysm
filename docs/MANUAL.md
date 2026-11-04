@@ -757,13 +757,13 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 Press **SAVE** for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
 osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
 them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
-tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM.
+tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM, TONE.
 
 | Control | Does |
 | --- | --- |
-| **SELECT** | SAVE, LOAD, SOUND, INIT, UNDO or RANDOM |
-| **KNOB1** | the slot |
-| **KNOB2**, **KNOB3** | RANDOM: AMOUNT, and what it changes |
+| **SELECT** | SAVE, LOAD, SOUND, INIT, UNDO, RANDOM or TONE |
+| **KNOB1** | the slot (TONE: the tone) |
+| **KNOB2**, **KNOB3** | RANDOM: AMOUNT, and what it changes. TONE: KNOB2 LOAD or STORE |
 | **SAVE** | does it |
 | **HOME**, ALGORITHM or a page button | back |
 
@@ -790,6 +790,32 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM.
   ranges that sound (a pitch LFO a vibrato, short attacks more often than long), and the sound is kept audible. The
   arp, glide, velocity, the split, the VCA and the routing are never touched. Rolls in a row are **one UNDO**: UNDO
   brings back the sound before the first. Like it: SAVE it to a slot.
+- **TONE** is the tone library (below): **KNOB1** picks a tone, **KNOB2** LOAD or STORE, **SAVE** does it.
+
+### Tones
+
+A **tone** is one part's sound on its own, as the Roland D-50 kept its tones apart from its patches: the part's
+oscillator (its waves, modulators, ratios and pitches, envelopes and level), its transient and route, and the part's
+own filter, amp envelope, LFO, mod envelope 1, noise, velocity and glide. Not in a tone: the other part, the mode,
+the effects, LFO 2, mod envelope 2, the matrix, the arp and the sequencer. So a tone is something to build a sound
+from: a bass on A, a pad on B, the effects over both.
+
+The TONE row shows eight tones at a time, each its name and its carrier's wave; the selected one is framed (in the
+part's colour, two parts playing). There are 128:
+
+- **1 .. 64, the factory's**, eight of each: BASS, KEYS, PADS, LEADS, BELLS, PLUCKS, ORCH (brass, strings, winds)
+  and FX. They are fixed.
+- **65 .. 128, the user's**, USER 1 .. USER 64, EMPTY until you store one.
+
+**LOAD** puts the tone into the part being edited (SELECT picks A or B: see Parts), and leaves the rest of the sound
+as it was. The screen says where it went: DX BELL INTO B. It is one **UNDO** step. With one part playing (SINGLE), the
+tone goes into A, osc 1, and osc 2's level goes down to 0, so you hear the tone as it was made: turn OSC 2's level
+back up to layer it. A tone sounds the same in A as in B: its modulation of its own oscillator (WAVE1, MOD1 ...) is
+osc 2's in part B.
+
+**STORE** keeps the part being edited as a user tone: pick USER 1 .. 64 with KNOB1 and press SAVE (over a stored
+one it asks first: SAVE again). It is named after its number (USER 12). The user tones are kept in flash, apart from
+the patch slots.
 - The header shows the current slot on every page, with **\*** when there are unsaved changes.
 - When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.
 - Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.
@@ -905,7 +931,8 @@ uses the internal tempo).
 [The editor](https://nicholaspratt.github.io/Prysm/editor/) (Chrome or Edge) is Prysm itself, running in the
 page: the screen, the knobs (drag or scroll), the buttons and the keys (or your computer's keys, A W S E D ... from C4),
 with the sound. Beside it, a tab for every page with every parameter, the sequencer's 64 steps as a grid, and patch
-files to save and load. The browser keeps its own 8 slots between visits.
+files to save and load. The browser keeps its own 8 slots between visits, and its own user tones. **Tone…** loads a
+tone from the library into part A or B (the menu beside it).
 
 **With an FM-1** (Prysm 1.0 or later): connect it by USB and press **Connect FM-1** (allow MIDI when the browser
 asks). The editor takes the FM-1's current sound, and from then on the two stay in step: what you change in the editor

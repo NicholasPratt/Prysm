@@ -58,6 +58,23 @@ WEB void web_random(uint32_t pct, uint32_t sec, uint32_t seed)   /* RANDOM (rand
     engine_set(&edit);
     dirty = D_ALL;
 }
+static char web_tname[TONE_NAME];
+WEB const char *web_tone_name(uint32_t i)      /* the tone library's tone i (0 .. 63 the factory's, 64 .. 127 the user's): */
+{                                               /* its name, "" for an empty user tone */
+    static tone_t t;
+    return i < TONE_ROM_N + TONE_USER_N && tone_at(i, &t) == 0 ? (memcpy(web_tname, t.name, TONE_NAME), web_tname) : "";
+}
+WEB int web_tone_load(uint32_t i, uint32_t part)   /* tone i into part (0 A, 1 B), as the PATCH screen's TONE: UNDO's */
+{                                               /* step first; one part playing: osc 2 quiet. 0 = done */
+    static tone_t t;
+    if (i >= TONE_ROM_N + TONE_USER_N || tone_at(i, &t) != 0) return -1;
+    ud_take("TONE");
+    tone_put(&edit, part & 1u, &t);
+    if (edit.vmode == VM_SINGLE) edit.lvl2 = 0;
+    engine_set(&edit);
+    dirty = D_ALL;
+    return 0;
+}
 WEB int web_undo(void)                          /* the PATCH screen's UNDO (again: redo); 0 = nothing to undo */
 {
     if (!ud_ok) return 0;

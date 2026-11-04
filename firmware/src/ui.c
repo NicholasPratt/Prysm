@@ -1767,8 +1767,14 @@ static void draw_pop(void)                      /* (into the picture's canvas) *
 }
 
 #define PG_PATCH PG_N                           /* (the PATCH screen: not in ALGORITHM's round, only SAVE leads here) */
-enum { PA_SAVE, PA_LOAD, PA_SOUND, PA_INIT, PA_UNDO, PA_RANDOM, PA_N };   /* (LOAD: the sound and its sequencer; */
-static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "SOUND", "INIT", "UNDO", "RANDOM"};   /* SOUND: alone) */
+enum { PA_SAVE, PA_LOAD, PA_SOUND, PA_INIT, PA_UNDO, PA_RANDOM, PA_TONE, PA_N };   /* (LOAD: the sound and its */
+static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "SOUND", "INIT", "UNDO", "RANDOM", "TONE"};   /* sequencer; SOUND: alone) */
+/* TONE (tones.c): KNOB1 the tone (the factory's 64, then the user's 64), KNOB2 LOAD (into the part edited) or STORE
+ * (the part edited, into a user tone); SAVE does it */
+enum { TA_LOAD, TA_STORE, TA_N };
+static const char *const TA_NAME[TA_N] = {"LOAD", "STORE"};
+static const char *const TONE_GROUP[TONE_ROM_N / 8u] = {"BASS", "KEYS", "PADS", "LEADS", "BELLS", "PLUCKS", "ORCH", "FX"};
+static uint32_t pa_tone, pa_tact;
 static uint32_t pa_row;
 /* RANDOM (random.c): KNOB2 AMOUNT (5 .. 100 %), KNOB3 SECTION; SAVE rolls. The rolls in a row are one UNDO step: UNDO
  * brings back the sound before the first (a run ends with another row, another screen, or a change elsewhere) */
@@ -1895,9 +1901,35 @@ static int32_t wave_sample(uint32_t b, uint32_t pos, uint32_t i)   /* a morphed 
     return PW_WAVE[b][w][i] + (((int32_t)PW_WAVE[b][w + 1u][i] - PW_WAVE[b][w][i]) * (int32_t)f >> 8);
 }
 
+static void pa_draw_tones(void)                 /* TONE: the 8 of the tone\'s group, its name and its carrier each */
+{
+    uint32_t g = pa_tone / 8u, k, i;
+    char s[24];
+    uint16_t hi = ui_two() ? (ui_b() ? C_PART_B : C_PART_A) : C_BRIGHT;   /* (the selected: the part it goes to) */
+    cv_begin(240, G_H, C_BLACK);
+    if (g < TONE_ROM_N / 8u) put(put(s, "FACTORY  "), TONE_GROUP[g]);
+    else num(put(num(put(s, "USER  "), (g - TONE_ROM_N / 8u) * 8u + 1u), "-"), (g - TONE_ROM_N / 8u) * 8u + 8u);
+    cv_text(4, 0, &FONT_S, s, C_MID);
+    for (k = 0; k < 8u; k++) {
+        static tone_t t;                        /* (static: off the stack) */
+        uint32_t n = g * 8u + k, sel = n == pa_tone, has = tone_at(n, &t) == 0;
+        int32_t x = 2 + (int32_t)(k % 2u) * 119, y = 18 + (int32_t)(k / 2u) * 26, mid = y + 12, px = 0, py = 0;
+        cv_frame(x, y, 117, 24, sel ? hi : C_BOX);
+        if (!has) { cv_text(x + 6, y + 4, &FONT_S, "EMPTY", C_FAINT); continue; }
+        cv_text(x + 6, y + 4, &FONT_S, t.name, sel ? C_BRIGHT : C_MID);
+        for (i = 0; i < 24u; i++) {            /* its carrier */
+            int32_t xx = x + 88 + (int32_t)i, yy = mid - wave_sample(t.osc.bank[0], t.osc.pos[0], i * PW_N / 24u) * 8 / 32767;
+            if (i) cv_line(px, py, xx, yy, sel ? hi : C_FAINT);
+            px = xx; py = yy;
+        }
+    }
+    cv_blit(0, G_Y);
+}
+
 static void pa_draw_gfx(void)                   /* the 8 slots as tiles: the number, osc 1's carrier as a thumbnail */
 {
     uint32_t s, i;
+    if (pa_row == PA_TONE) { pa_draw_tones(); return; }
     cv_begin(240, G_H, C_BLACK);
     for (s = 0; s < PATCH_SLOTS; s++) {
         int32_t x = 2 + (int32_t)(s % 4u) * 60, y = 2 + (int32_t)(s / 4u) * 62, w = 56, h = 58, px = 0, py = 0;
@@ -1923,6 +1955,20 @@ static void pa_draw_gfx(void)                   /* the 8 slots as tiles: the num
     cv_blit(0, G_Y);
 }
 
+static char *pa_tone_line(char *s)              /* TONE: what SAVE will do */
+{
+    static tone_t t;
+    char *e;
+    const char *part = ui_two() ? (ui_b() ? " INTO B" : " INTO A") : "";
+    if (pa_tact == TA_STORE) {
+        if (pa_tone < TONE_ROM_N) return put(s, "STORE: PICK A USER TONE");
+        e = num(put(s, ui_two() ? (ui_b() ? "STORE B AS USER " : "STORE A AS USER ") : "STORE AS USER "), pa_tone - TONE_ROM_N + 1u);
+        return tone_at(pa_tone, &t) == 0 ? put(e, " (USED)") : e;
+    }
+    if (tone_at(pa_tone, &t) != 0) return put(num(put(s, "USER "), pa_tone - TONE_ROM_N + 1u), " IS EMPTY");
+    return put(put(put(s, "LOAD "), t.name), part);
+}
+
 static void pa_draw_text(void)                  /* the header, what SAVE will do, the message, the tabs */
 {
     char s[40], *e, n[4];
@@ -1932,6 +1978,7 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
     cv_begin(240, FOC_H, C_BLACK);
     e = pa_row == PA_SAVE ? put(s, "SAVE TO SLOT ") : pa_row == PA_LOAD ? put(s, "LOAD SLOT ") :
         pa_row == PA_SOUND ? put(s, "SOUND OF SLOT ") : pa_row == PA_INIT ? put(s, "LOAD THE DEFAULT SOUND") :
+        pa_row == PA_TONE ? pa_tone_line(s) :
         pa_row == PA_RANDOM ? (pa_rnd_pct >= 100u ? put(put(s, "NEW SOUND: "), RS_NAME[pa_rnd_sec]) :
                                put(num(put(put(put(s, "RANDOM "), RS_NAME[pa_rnd_sec]), " BY "), pa_rnd_pct), "%")) :
         !ud_ok ? put(s, "NOTHING TO UNDO") : put(put(s, ud_undone ? "REDO: " : "UNDO: "), ud_what);
@@ -1945,6 +1992,7 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
         cv_text((240 - text_w(&FONT_S, m)) / 2, 24, &FONT_S, m, C_BRIGHT);
     else {
         const char *h = pa_row == PA_UNDO ? "SAVE DO IT" : pa_row == PA_RANDOM ? "K2 AMOUNT  K3 WHAT  SAVE ROLL" :
+                        pa_row == PA_TONE ? "K1 TONE  K2 LOAD/STORE  SAVE" :
                         "KNOB1 SLOT  SAVE DO IT";
         cv_text((240 - text_w(&FONT_S, h)) / 2, 24, &FONT_S, h, C_FAINT);
     }
@@ -2510,6 +2558,30 @@ static void ud_swap(void)                       /* UNDO: the snapshot and the st
     slot_moved = 1;
 }
 
+static int pa_tone_do(void)                     /* TONE's SAVE: a tone into the part edited, or that part kept as one */
+{
+    static tone_t t;
+    uint32_t part = ui_two() && ui_b() ? 1u : 0u;
+    if (pa_tact == TA_STORE) {
+        if (pa_tone < TONE_ROM_N) { pa_say("FACTORY TONES ARE FIXED", 0); return 0; }
+        if (tone_at(pa_tone, &t) == 0 && !pa_armed) { pa_armed = 1; pa_say("TONE USED: SAVE AGAIN", 0); return 0; }
+        pa_armed = 0;
+        tone_get(&edit, part, &t);
+        memset(t.name, 0, TONE_NAME);
+        num(put(t.name, "USER "), pa_tone - TONE_ROM_N + 1u);
+        if (tone_user_put(pa_tone - TONE_ROM_N, &t) != 0) { pa_say("STORE FAILED", 0); return 0; }
+        pa_say("STORED AS USER ", pa_tone - TONE_ROM_N + 1u);
+        return 0;
+    }
+    if (tone_at(pa_tone, &t) != 0) { pa_say("EMPTY TONE", 0); return 0; }
+    ud_take("TONE");
+    tone_put(&edit, part, &t);
+    if (!ui_two()) edit.lvl2 = 0;               /* (one part: osc 2 quiet, the tone as it was made; turn it back up) */
+    put(put(put(pa_msgbuf, t.name), " INTO "), part ? "B" : "A");
+    pa_msg = pa_msgbuf;
+    return 1;
+}
+
 static int pa_do(void)                          /* the SAVE button on the PATCH screen; 1 = the sound changed */
 {
     patch_t p;
@@ -2521,6 +2593,7 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
         return 1;
     }
     pa_rnd_run = 0;
+    if (pa_row == PA_TONE) return pa_tone_do();
     if (pa_row == PA_UNDO) {
         if (!ud_ok) { pa_say("NOTHING TO UNDO", 0); return 0; }
         ud_swap();
@@ -2590,8 +2663,13 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
         dirty |= D_ALL;
     }
     for (i = 0; i < 4u; i++)                    /* KNOB1: the slot; on RANDOM, KNOB2 AMOUNT, KNOB3 SECTION */
-        if ((d = fm1_enc_take(ENC_KNOB1 + i)) != 0 && (i == 0 || (pa_row == PA_RANDOM && i <= 2u))) {
-            if (i == 0) pa_slot = (uint32_t)(((int32_t)pa_slot + d % 8 + 8) % 8);
+        if ((d = fm1_enc_take(ENC_KNOB1 + i)) != 0 && (i == 0 || (pa_row == PA_RANDOM && i <= 2u) ||
+                                                       (pa_row == PA_TONE && i == 1u))) {
+            uint32_t tn = TONE_ROM_N + TONE_USER_N;
+            if (pa_row == PA_TONE) {
+                if (i == 0) pa_tone = (uint32_t)(((int32_t)pa_tone + d % (int32_t)tn + (int32_t)tn) % (int32_t)tn);
+                else pa_tact = d > 0 ? TA_STORE : TA_LOAD;
+            } else if (i == 0) pa_slot = (uint32_t)(((int32_t)pa_slot + d % 8 + 8) % 8);
             else if (i == 1) {
                 int32_t n = (int32_t)pa_rnd_pct + d * 5;
                 pa_rnd_pct = (uint32_t)(n < 5 ? 5 : n > 100 ? 100 : n);

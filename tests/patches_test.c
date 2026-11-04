@@ -14,7 +14,7 @@ static uint8_t store[4096];                     /* a fake store (platform.c's st
 static uint32_t store_n;
 static int store_load(void *p, uint32_t n) { if (n != store_n) return -1; memcpy(p, store, n); return 0; }
 static int store_save(const void *p, uint32_t n) { memcpy(store, p, n); store_n = n; return 0; }
-#define SEQSTORE_N 9u                              /* (each slot's sequencer, the store's own: platform.c's seqstore_load / seqstore_save) */
+#define SEQSTORE_N 11u                             /* (each slot's sequencer, the store's own, the user tones: platform.c's seqstore_load / seqstore_save) */
 static uint8_t seqstore[SEQSTORE_N][4096];
 static uint32_t seqstore_n[SEQSTORE_N];
 static int seqstore_load(uint32_t i, void *p, uint32_t n) { if (i >= SEQSTORE_N || n != seqstore_n[i]) return -1; memcpy(p, seqstore[i], n); return 0; }

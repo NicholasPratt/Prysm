@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Prysm's engine on this computer: render the test patches (build/engine/*.wav), check them; then the patch bank;
 # then REC (the sequencer recording, through the app's code); then each slot's own sequencer; then the LIVE screen; then the split and its parts;
-# then the hat's ratchets; then REC on the drums; then the drums' copy and paste.
+# then the hat's ratchets; then REC on the drums; then the drums' copy and paste; then the two parts; then the tones.
 set -e
 cd "$(dirname "$0")/.."
 mkdir -p build/engine
@@ -35,3 +35,5 @@ cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/s
 build/engine/trans_test | grep -v ' ms  '
 cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/part_test tests/part_test.c
 build/engine/part_test
+cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/tone_test tests/tone_test.c
+build/engine/tone_test

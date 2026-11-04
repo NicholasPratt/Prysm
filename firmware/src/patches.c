@@ -172,7 +172,7 @@ static uint32_t old_size;                       /* the bank was converted from p
 /* Each slot has a sequencer of its own, kept apart from the bank (seqstore_load / seqstore_save, platform.c). seqs is
  * the one playing; seq_owner says whose: a slot, or -1, the store's own (the one sequencer there was before 1.3, and
  * the one playing until a slot's is loaded) */
-_Static_assert(PATCH_SLOTS + 1u == SEQSTORE_N, "a sequencer for each slot, and the store's own");
+_Static_assert(PATCH_SLOTS + 3u == SEQSTORE_N, "a sequencer for each slot, the store's own; the user tones' two halves");
 static int32_t seq_owner = -1;
 
 static int store_write(void)                    /* the bank (and the store's own sequencer, if it plays); 0 = saved */

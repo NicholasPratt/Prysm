@@ -50,6 +50,7 @@ Prysm({
   readParams();
   buildFm1();
   buildTabs();
+  toneList();
   if (PLUGIN) pluginMode();
   requestAnimationFrame(frame);
 });
@@ -59,7 +60,7 @@ function restore() {                            // the patches and the settings,
     const s = localStorage.getItem("prysm.store"), g = localStorage.getItem("prysm.settings");
     if (s) { const b = unb64(s); M.HEAPU8.set(b, M._web_store()); M._web_store_set_len(b.length); }
     if (g) M.HEAPU8.set(unb64(g).subarray(0, M._web_settings_size()), M._web_settings());
-    for (let i = 0; i < 9; i++) {               // each slot's sequencer, the store's own
+    for (let i = 0; i < 11; i++) {              // each slot's sequencer, the store's own, the user tones
       const q = localStorage.getItem("prysm.seq" + i);
       if (q) { const b = unb64(q); M.HEAPU8.set(b, M._web_seqstore(i)); M._web_seqstore_set_len(i, b.length); }
     }
@@ -69,7 +70,7 @@ function keep() {
   try {
     const n = M._web_store_len();
     if (n) localStorage.setItem("prysm.store", b64(M.HEAPU8.subarray(M._web_store(), M._web_store() + n)));
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 11; i++) {
       const q = M._web_seqstore_len(i);
       if (q) localStorage.setItem("prysm.seq" + i, b64(M.HEAPU8.subarray(M._web_seqstore(i), M._web_seqstore(i) + q)));
     }
@@ -602,6 +603,30 @@ $("file").onchange = async () => {
 };
 $("random").onclick = () => {                 // (the FM-1 follows: the differences go to it)
   M._web_random(+$("rnd-amt").value, +$("rnd-sec").value, (Math.random() * 4294967296) >>> 0);
+};
+const TONE_GROUPS = ["Bass", "Keys", "Pads", "Leads", "Bells", "Plucks", "Orchestral", "FX"];
+function toneList() {                         // the library: the factory's 64 in groups of 8, then the user's stored
+  const sel = $("tone");
+  sel.length = 1;
+  let g = null;
+  for (let i = 0; i < 128; i++) {
+    const name = M.UTF8ToString(M._web_tone_name(i));
+    if (!name) continue;
+    if (i % 8 === 0 || !g) {
+      g = document.createElement("optgroup");
+      g.label = i < 64 ? TONE_GROUPS[i >> 3] : "User";
+      if (i >= 64 && sel.lastChild.label === "User") g = sel.lastChild; else sel.appendChild(g);
+    }
+    const o = document.createElement("option");
+    o.value = i; o.textContent = name;
+    g.appendChild(o);
+  }
+}
+$("tone").onfocus = toneList;                 // (the user tones may have changed on the screen)
+$("tone").onchange = () => {                  // (the FM-1 follows: the differences go to it)
+  const i = $("tone").value;
+  $("tone").value = "";
+  if (i !== "") M._web_tone_load(+i, +$("tone-part").value);
 };
 $("undo").onclick = () => { if (!M._web_undo()) status("nothing to undo"); };
 $("send-slot").onchange = async () => {
