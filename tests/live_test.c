@@ -2,7 +2,7 @@
 /* The LIVE screen on a computer, through the app's own code (ui.c) and the engine: a pattern key at once while
  * stopped and on the next bar line while playing (from its top; a song drops to PATTERN mode), a patch key (its
  * sequencer on the bar line, its sound with it), pressing again to cancel, a stop bringing what waits at once, and the
- * knobs: a parameter chosen with PRESETS, turned with its knob.
+ * knobs: a parameter chosen on the ASSIGN row by turning its knob, turned with it on PLAY.
  *   tests/run_engine.sh runs it */
 #define main prysm_host_main
 #include "prysm.c"
@@ -101,16 +101,25 @@ int main(void)
     CHECK(n == 1 && cur_slot == 0 && edit.cut == 10 && seqs.pat[0].note[0] == 60, "a stop: slot 1 comes in at once");
     seqs_poll();
 
-    /* the knobs: K1 is the cutoff; PRESETS one on: the next parameter; KNOB1 turns it */
+    /* the knobs: K1 is the cutoff; ASSIGN, KNOB1 one on: the next parameter; PLAY, KNOB1 turns it */
     n = lv_walk(-1, -1, &pg, &r, &k);
     CHECK(n > 100 && lv_walk(-1, (int32_t)__builtin_offsetof(patch_t, arp_bpm), &pg, &r, &k) >= 0,
           "the list: every parameter of the sound, once each (%d)", (int)n);
     CHECK(knob_prm(0, &pg)->off == __builtin_offsetof(patch_t, cut) && pg == PG_FILTER, "K1: FILTER CUT");
-    lv_row = LV_K1;
-    host_enc[ENC_PRESETS] = 1;
-    live_input(0);
-    CHECK(gset.knob[0] == __builtin_offsetof(patch_t, res) && gset_dirty, "PRESETS on K1: FILTER RES (saved with the settings)");
+    lv_row = LV_ASSIGN;
+    edit.cut = 10;
+    edit.res = 40;
+    host_enc[ENC_KNOB1] = 1;
+    host_enc[ENC_PRESETS] = 2;
+    ui_input(0);
+    CHECK(gset.knob[0] == __builtin_offsetof(patch_t, res) && gset_dirty, "ASSIGN, KNOB1: FILTER RES (saved with the settings)");
+    CHECK(edit.cut == 12 && edit.res == 40, "ASSIGN: PRESETS still the cutoff, KNOB1 turned nothing of the sound");
     lv_row = LV_PLAY;
+    gset_dirty = 0;
+    fm1_ms += 1000;                             /* (not a fast turn) */
+    host_enc[ENC_PRESETS] = -2;
+    ui_input(0);
+    CHECK(edit.cut == 10 && !gset_dirty && gset.knob[0] == __builtin_offsetof(patch_t, res), "PLAY: PRESETS the cutoff, the knobs as chosen");
     fm1_ms += 1000;
     edit.res = 40;
     host_enc[ENC_KNOB1] = 5;

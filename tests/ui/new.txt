@@ -18,7 +18,7 @@
 540 btn 2
 560 btn 2
 600 enc 2 2
-620 enc 5 40
+620 enc 4 40
 700 shot
 720 enc 2 2
 800 shot

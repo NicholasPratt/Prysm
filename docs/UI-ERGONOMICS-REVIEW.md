@@ -87,3 +87,17 @@ Increase contrast for meaningful labels, give long values a consistent compact f
 The first implementation pass should address SELECT behaviour, LIVE assignment mode, inactive controls, popup placement, and consistent labels. Those changes should improve everyday use with relatively little disruption.
 
 Oscillator regrouping and sequencer navigation deserve a second pass, tested through actual tasks such as building a patch, entering a pattern, and switching parts while playing.
+
+## Status of the first pass
+
+Implemented on the `ui-ergonomics-pass1` branch (tests: `tests/nav_test.c`, `tests/live_test.c`; screenshots: `tests/run_ui.sh`):
+
+- **SELECT button:** opens FILTER from every page. On FILTER, with two parts, each press switches between part A and part B. The header shows `A`/`B` on part pages (OSC 1 = A, OSC 2 = B) and `ALL` on shared pages. There is no double press any more.
+- **LIVE:** the rows are now **PLAY** and **ASSIGN**. On ASSIGN, turning a knob chooses its parameter and nothing in the sound changes. PRESETS remains the cutoff on both rows.
+- **HOME:** opens LIVE first, then the scope, then goes back. The new SETUP > HOME row (`gset.home`, which reuses the old pad byte so saved settings still load) can put the scope first instead.
+- **Inactive controls:** dimmed in place, with the reason shown in the row's empty cells. This covers COMB on a low-pass, HP RES with the HPF off, LFO 2 RATE while synced, and MOD FX while its type is OFF.
+- **Envelope times:** shown in ms/s, from the engine's own 1 ms–10 s curve (`PR_ENV_US`, generated with the other tables).
+- **Knob positions:** MOD FX has MIX on knob 3. On M.ENV 1/2 DEST, DEST and AMT are on knobs 1 and 2 (as on LFO and LFO 2), PART on 3 and LOOP on 4.
+- **Value feedback:** a turned knob lights its own cell instead of a pop-up over the picture. Pop-ups remain for the cutoff when it is off its page, messages and confirmations.
+
+These remain for the second pass: oscillator regrouping (§2), the sequencer's rows (§5), the action/confirm pattern (§6), LIVE's transport and queue display (§7) and the CPU meter (§8).

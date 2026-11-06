@@ -202,6 +202,8 @@ def main():
     out.append(" * decay / release coefficient per block (Q16, exponential: -60 dB in that time) */")
     out.append(c_array("PR_ENV_ATT", "uint32_t", ENV_ATT, 8))
     out.append(c_array("PR_ENV_EXP", "uint16_t", ENV_EXP))
+    out.append("/* the same parameter's time in microseconds (the UI shows it: an attack's rise, a decay's or release's -60 dB) */")
+    out.append(c_array("PR_ENV_US", "uint32_t", [round(env_time(p) * 1e6) for p in range(128)], 8))
     out.append("/* fine 0..127 = -50..+50 cents (64 = 0), semitones 0..48 = -24..+24 (24 = 0): pitch factors, Q16 */")
     out.append(c_array("PR_FINE_Q16", "uint32_t", FINE, 8))
     out.append(c_array("PR_SEMI_Q16", "uint32_t", SEMI, 8))

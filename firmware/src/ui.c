@@ -5,7 +5,7 @@
  *   ALGORITHM        the page (or EDIT = OSC 1 / OSC 2 / NOISE, ENV = AMP / F.ENV / M.ENV 1 / M.ENV 2, LFO = LFO / LFO 2,
  *                    GLO = MIX / SETUP, ARP = ARP
  *                    (on the ARP page: the arp on / off), SEQ = SEQ / DRUM, FX = CHORUS / DELAY / REVERB,
- *                    the SELECT button = FILTER)
+ *                    the SELECT button = FILTER; on FILTER, two parts: part A, B in turn)
  *   the keys         on the DRUM page, a drum machine's: the 16 white keys the steps (a press: a hit, an accent, none;
  *                    their LEDs the lane), F# G# A# (the lowest) the drum (REC, playing: a hit, recorded), C# D# the
  *                    16 steps before / after
@@ -17,10 +17,10 @@
  *   PRESETS          the filter's cutoff, on every page (the header shows it a moment)
  *   SELECT           the row
  *   KNOB1 .. KNOB4   the row's parameters, left to right
- *   HOME             the oscilloscope (KNOB1: how many cycles, KNOB2: PRISM / X-Y / MONO); ALGORITHM or a page
- *                    button: back; HOME again: LIVE
- *                    (the first 4 black keys a pattern, the first 8 white keys a patch, from the next bar line; KNOB1 ..
- *                    KNOB4 the parameters chosen for them: SELECT a knob, PRESETS its parameter); HOME there: back
+ *   HOME             LIVE (the first 4 black keys a pattern, the first 8 white keys a patch, from the next bar line;
+ *                    KNOB1 .. KNOB4 the parameters chosen for them: SELECT to ASSIGN, a knob turned its parameter);
+ *                    HOME again: the oscilloscope (KNOB1: how many cycles, KNOB2: PRISM / X-Y / MONO); HOME there,
+ *                    ALGORITHM or a page button: back. (SETUP's HOME row: the oscilloscope first, then LIVE)
  *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / SOUND / INIT, KNOB1 = the slot, SAVE again = do it
  *                    (twice over a used slot or unsaved changes); HOME or a page = back
  *
@@ -99,7 +99,9 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_VMODE, K_MCHB,                         /* (the parts: the voices' mode; part B's MIDI channel, 0 none) */
        K_PTGT,                                  /* (a shared modulator's parts: BOTH, A, B) */
        K_SLPART,                                /* (the SEQ page's PART row: the step's lane off's part, A or B) */
-       K_PAN };                                 /* (a part's place: L 64 .. C .. R 63) */
+       K_PAN,                                   /* (a part's place: L 64 .. C .. R 63) */
+       K_ETIME,                                 /* (an envelope's time: 1 ms .. 10 s, as the engine has it: PR_ENV_US) */
+       K_HOME };                                /* (SETUP: what HOME opens first, LIVE or the SCOPE) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -118,7 +120,8 @@ typedef struct {
     uint8_t pad;
     uint16_t knob[4];                           /* the LIVE screen's KNOB1 .. KNOB4: the byte of patch_t each turns */
     uint8_t midi_b;                             /* part B's MIDI channel: 0 none (MIDI plays the part edited), 1 .. 16 */
-    uint8_t pad2;                               /*  (then IN plays part A) */
+    uint8_t home;                               /*  (then IN plays part A); HOME first: 0 LIVE, 1 the SCOPE (was a */
+                                                /*  pad, 0: LIVE for the settings saved before it) */
 } gset_t;
 #define GSET_V1_SIZE 5u                         /* (before bend) */
 #define GSET_V2_SIZE 6u                         /* (before click) */
@@ -152,8 +155,8 @@ static const row_t OSC_ROWS[] = {
      LIT_C | LIT_M1 | LIT_M2},
     {"MODE", {{"MOD1", OO(mode[0]), MODE_N - 1u, K_MODE}, {"MOD2", OO(mode[1]), MODE_N - 1u, K_MODE},
               {"FINE1", 0, 127, K_MFINE}, {"FINE2", 1, 127, K_MFINE}}, LIT_A1 | LIT_A2},
-    {"ENV", {{"A1", OO(att[0]), 127, K_NUM}, {"R1", OO(rel[0]), 127, K_NUM},
-             {"A2", OO(att[1]), 127, K_NUM}, {"R2", OO(rel[1]), 127, K_NUM}}, LIT_M1 | LIT_M2 | LIT_AR},
+    {"ENV", {{"A1", OO(att[0]), 127, K_ETIME}, {"R1", OO(rel[0]), 127, K_ETIME},
+             {"A2", OO(att[1]), 127, K_ETIME}, {"R2", OO(rel[1]), 127, K_ETIME}}, LIT_M1 | LIT_M2 | LIT_AR},
     {"MIX", {{"AMT1", OO(amt[0]), 127, K_NUM}, {"AMT2", OO(amt[1]), 127, K_NUM},
              {"LEVEL", OO(level), 127, K_NUM}, NOPRM}, LIT_A1 | LIT_A2 | LIT_C},
 };
@@ -175,27 +178,27 @@ static const row_t FILTER_ROWS[] = {
     {"COMB", {{"DAMP", PO(comb_damp), 127, K_NUM}, {"SPREAD", PO(comb_spread), 127, K_NUM}, NOPRM, NOPRM}, LIT_CURVE},
 };
 static const row_t AMP_ROWS[] = {
-    {"ENV", {{"A", PO(amp_a), 127, K_NUM}, {"D", PO(amp_d), 127, K_NUM},
-             {"S", PO(amp_s), 127, K_NUM}, {"R", PO(amp_r), 127, K_NUM}}, LIT_ENV},
+    {"ENV", {{"A", PO(amp_a), 127, K_ETIME}, {"D", PO(amp_d), 127, K_ETIME},
+             {"S", PO(amp_s), 127, K_NUM}, {"R", PO(amp_r), 127, K_ETIME}}, LIT_ENV},
     {"VEL", {{"AMP", PO(vel_amp), 127, K_NUM}, {"CUTOFF", PO(vel_cut), 127, K_NUM},     /* MIDI velocity */
              {"MOD", PO(vel_mod), 127, K_NUM}, NOPRM}, LIT_ENV},
     {"VCA", {{"OPEN", PO(vca), 127, K_NUM}, NOPRM, NOPRM, NOPRM}, LIT_CURVE},   /* (a drone: the amp's floor) */
 };
 static const row_t FENV_ROWS[] = {               /* (the filter's envelope; its amount: FILTER's ENV) */
-    {"ENV", {{"A", PO(flt_a), 127, K_NUM}, {"D", PO(flt_d), 127, K_NUM},
-             {"S", PO(flt_s), 127, K_NUM}, {"R", PO(flt_r), 127, K_NUM}}, LIT_ENV},
+    {"ENV", {{"A", PO(flt_a), 127, K_ETIME}, {"D", PO(flt_d), 127, K_ETIME},
+             {"S", PO(flt_s), 127, K_NUM}, {"R", PO(flt_r), 127, K_ETIME}}, LIT_ENV},
 };
 static const row_t MENV_ROWS[] = {
-    {"ENV", {{"A", PO(menv_a), 127, K_NUM}, {"D", PO(menv_d), 127, K_NUM},
-             {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_NUM}}, LIT_ENV},
-    {"DEST", {{"LOOP", PO(menv_loop), 1, K_ONOFF}, {"DEST", PO(menv_dest), DEST_N - 1u, K_DEST},
-              {"AMT", PO(menv_amt), 127, K_BIP}, NOPRM}, LIT_CURVE},
+    {"ENV", {{"A", PO(menv_a), 127, K_ETIME}, {"D", PO(menv_d), 127, K_ETIME},
+             {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_ETIME}}, LIT_ENV},
+    {"DEST", {{"DEST", PO(menv_dest), DEST_N - 1u, K_DEST}, {"AMT", PO(menv_amt), 127, K_BIP},   /* (DEST, AMT: */
+              NOPRM, {"LOOP", PO(menv_loop), 1, K_ONOFF}}, LIT_CURVE},   /* where the LFOs have them) */
 };
 static const row_t MENV2_ROWS[] = {
-    {"ENV", {{"A", PO(menv2_a), 127, K_NUM}, {"D", PO(menv2_d), 127, K_NUM},
-             {"S", PO(menv2_s), 127, K_NUM}, {"R", PO(menv2_r), 127, K_NUM}}, LIT_ENV},
-    {"DEST", {{"LOOP", PO(menv2_loop), 1, K_ONOFF}, {"DEST", PO(menv2_dest), DEST_N - 1u, K_DEST},
-              {"AMT", PO(menv2_amt), 127, K_BIP}, {"PART", PO(me2_part), PT_N - 1u, K_PTGT}}, LIT_CURVE},
+    {"ENV", {{"A", PO(menv2_a), 127, K_ETIME}, {"D", PO(menv2_d), 127, K_ETIME},
+             {"S", PO(menv2_s), 127, K_NUM}, {"R", PO(menv2_r), 127, K_ETIME}}, LIT_ENV},
+    {"DEST", {{"DEST", PO(menv2_dest), DEST_N - 1u, K_DEST}, {"AMT", PO(menv2_amt), 127, K_BIP},
+              {"PART", PO(me2_part), PT_N - 1u, K_PTGT}, {"LOOP", PO(menv2_loop), 1, K_ONOFF}}, LIT_CURVE},
 };
 static const row_t LFO_ROWS[] = {
     {"LFO", {{"WAVE", PO(lfo_wave), LFO_N - 1u, K_LFOW}, {"RATE", PO(lfo_rate), 127, K_RATE},
@@ -247,6 +250,7 @@ static const row_t SETUP_ROWS[] = {
     {"MIDI", {{"IN", GO(midi_in), 16, K_MCHI}, {"OUT", GO(midi_out), 15, K_MCHO},
               {"CLOCK", GO(clock), 1, K_CLK}, {"BEND", GO(bend), 24, K_BEND}}, LIT_ALL},
     {"PARTS", {{"B IN", GO(midi_b), 16, K_MCHB}, NOPRM, NOPRM, NOPRM}, LIT_ALL},
+    {"HOME", {{"HOME", GO(home), 1, K_HOME}, NOPRM, NOPRM, NOPRM}, LIT_ALL},   /* (HOME's first press: LIVE or SCOPE) */
 };
 /* the effects, a page each (the FX button steps through them); lit: LIT_C the chorus, LIT_M1 the delay, LIT_M2 the
  * reverb */
@@ -269,7 +273,8 @@ static const row_t REV_ROWS[] = {
 };
 static const row_t MFX_ROWS[] = {               /* (MOD FX and CRUSH: on the voices alone, before the chorus) */
     {"MOD FX", {{"TYPE", PO(mfx_type), MFX_N - 1u, K_MFX}, {"RATE", PO(mfx_rate), 127, K_RATE},
-                {"DEPTH", PO(mfx_depth), 127, K_NUM}, {"MIX", PO(mfx_mix), 127, K_NUM}}, LIT_C},
+                {"MIX", PO(mfx_mix), 127, K_NUM}, {"DEPTH", PO(mfx_depth), 127, K_NUM}}, LIT_C},   /* (MIX: */
+                                                /* knob 3, as on the other effects) */
     {"TONE", {{"MANUAL", PO(mfx_manual), 127, K_NUM}, {"FDBK", PO(mfx_fb), 127, K_BIP}, NOPRM, NOPRM}, LIT_C},
 };
 static const row_t CRUSH_ROWS[] = {
@@ -454,7 +459,6 @@ static const patch_t *pv = &edit;               /* the part edited, as a patch *
 static int ui_two(void) { return edit.vmode != VM_SINGLE && edit.vmode < VM_N; }   /* the sound has two parts */
 static uint8_t prm_part = 2;                    /* (emu/params.c's walk: 0 part A's, 1 part B's bytes; 2 the part edited) */
 static int ui_b(void) { return prm_part < 2u ? prm_part : ui_part && ui_two(); }
-#define SEL_TWICE_MS 400u                       /* SELECT twice within this: FILTER */
 #define ue (ui_b() ? &eb : &eg)                 /* its derived values */
 static int32_t cv_part_tag(int32_t x, int32_t y, uint32_t t)   /* a shared modulator's part (two parts, not BOTH): */
 {                                               /* its letter, its colour; the x after it */
@@ -584,14 +588,16 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     return (uint8_t *)&edit + p->off + base;
 }
 
-/* ---- the LIVE screen (HOME twice): the first 4 black keys a pattern, the first 8 white keys a patch (its sound and
- * its sequencer), each from the next bar line while the sequencer plays (engine.c: seq_qpat, seq_swap, seq_bar_hit;
- * at once while stopped); KNOB1 .. KNOB4 the parameters of the sound chosen for them (gset.knob: SELECT a knob, PRESETS
- * its parameter, from every page's, each once) */
+/* ---- the LIVE screen (HOME; SETUP's HOME row: or HOME twice): the first 4 black keys a pattern, the first 8 white
+ * keys a patch (its sound and its sequencer), each from the next bar line while the sequencer plays (engine.c:
+ * seq_qpat, seq_swap, seq_bar_hit; at once while stopped); KNOB1 .. KNOB4 the parameters of the sound chosen for them
+ * (gset.knob). Two rows (SELECT): PLAY, the knobs turn those parameters (PRESETS the cutoff, as on every page);
+ * ASSIGN, a knob turned chooses its parameter, from every page's, each once */
 #define PG_LIVE (PG_N + 2u)
-enum { LV_PLAY, LV_K1, LV_N = LV_K1 + 4 };
-static const char *const LV_NAME[LV_N] = {"PLAY", "K1", "K2", "K3", "K4"};
-static uint32_t lv_row;                         /* SELECT: PLAY, or the knob PRESETS chooses for */
+enum { LV_PLAY, LV_ASSIGN, LV_N };
+static const char *const LV_NAME[LV_N] = {"PLAY", "ASSIGN"};
+static uint32_t lv_row;                         /* SELECT: PLAY, or ASSIGN */
+static uint32_t lv_last;                        /* (ASSIGN: the knob last chosen for, in full in the picture) */
 static int8_t lv_qslot = -1, lv_qpat = -1;      /* waiting for the bar line: a slot, a pattern (-1: none) */
 static uint8_t lv_has_seq;                      /* the slot waiting has a sequencer of its own (taken over with it) */
 static patch_t lv_next;                         /* its sound */
@@ -694,6 +700,14 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
         break;
     }
     case K_PMS: put(num(s, (1u + (uint32_t)*v * (PRE_N - 2u) / 127u) * 1000u / 44100u), "ms"); break;
+    case K_ETIME: {                             /* an envelope's time, as the engine's tables have it */
+        uint32_t us = PR_ENV_US[*v & 127u];
+        if (us < 10000u) { char *e = num(s, us / 1000u); *e++ = '.'; put(num(e, us / 100u % 10u), "ms"); }
+        else if (us < 999500u) put(num(s, (us + 500u) / 1000u), "ms");
+        else { char *e = num(s, us / 1000000u); *e++ = '.'; put(num(e, us / 100000u % 10u), "s"); }
+        break;
+    }
+    case K_HOME: put(s, *v ? "SCOPE" : "LIVE"); break;
     case K_SHIFT: put(snum(s, (int32_t)*v - 12), "st"); break;
     case K_SPOCT: snum(s, (int32_t)*v - 2); break;
     case K_SLEARN: put(s, split_learn ? "PRESS" : "TURN"); break;
@@ -1762,6 +1776,29 @@ static void pop_turn(const char *name, const char *val, int32_t d)   /* a value 
     pop_dir = d > 0 ? 1 : -1;
 }
 
+/* a knob turned: its cell lit (its value shifted blue up, red down, fading back to white) for POP_MS, in place of a
+ * pop-up over the picture; pop-ups stay for what has no cell (the cutoff off its page, messages, confirmations) */
+static int32_t cell_k = -1;                     /* the knob's cell (-1: none) */
+static uint32_t cell_until, cell_at, cell_drawn, cell_tinted;
+static int32_t cell_dir;
+static void cell_turn(uint32_t k, int32_t d)
+{
+    cell_k = (int32_t)k;
+    cell_until = fm1_ms + POP_MS;
+    cell_at = fm1_ms;
+    cell_dir = d > 0 ? 1 : -1;
+    if (pop_until) { pop_until = 0; dirty |= D_GFX; }   /* (an older pop-up: gone) */
+    dirty |= D_ROWS;
+}
+static uint16_t shift_col(uint32_t at, int32_t dir, uint32_t *tinted)   /* a value turned: blue up, red down, fading */
+{
+    uint32_t age = fm1_ms - at, s = dir && age < SHIFT_MS ? 256u - age * 256u / SHIFT_MS : 0u;
+    uint32_t r = dir > 0 ? PR3_R : PR1_R, g = dir > 0 ? PR3_G : PR1_G, b = dir > 0 ? PR3_B : PR1_B;
+    s = s * s >> 8;                             /* (eased: it lingers, then goes) */
+    *tinted = s != 0u;
+    return s ? RGB(255u - ((255u - r) * s >> 8), 255u - ((255u - g) * s >> 8), 255u - ((255u - b) * s >> 8)) : C_BRIGHT;
+}
+
 static void draw_pop(void);
 static void draw_gfx(void)
 {
@@ -1820,14 +1857,7 @@ static void draw_pop(void)                      /* (into the picture's canvas) *
         cv_rect(x0, 0, bw, h, C_BLACK);         /* (the picture shows around it) */
         cv_frame(x0, 0, bw, h, C_MID);
         cv_text(x0 + (bw - nw) / 2, 3, &FONT_S, pop_name, C_MID);
-        {                                       /* the value: shifted, fading back to white */
-            uint32_t age = fm1_ms - pop_at, s = pop_dir && age < SHIFT_MS ? 256u - age * 256u / SHIFT_MS : 0u;
-            uint32_t r = pop_dir > 0 ? PR3_R : PR1_R, g = pop_dir > 0 ? PR3_G : PR1_G, b = pop_dir > 0 ? PR3_B : PR1_B;
-            s = s * s >> 8;                     /* (eased: it lingers, then goes) */
-            cv_text(x0 + (bw - w) / 2, 20, f, pop_val, s ? RGB(255u - ((255u - r) * s >> 8), 255u - ((255u - g) * s >> 8),
-                                                            255u - ((255u - b) * s >> 8)) : C_BRIGHT);
-            pop_tinted = s != 0u;
-        }
+        cv_text(x0 + (bw - w) / 2, 20, f, pop_val, shift_col(pop_at, pop_dir, &pop_tinted));   /* (shifted, fading) */
         pop_drawn = 1;
     } else
         pop_drawn = pop_tinted = 0;
@@ -1854,6 +1884,15 @@ static uint32_t pa_rnd_pct = 30, pa_rnd_sec = RS_ALL, pa_rnd_run, pa_rnd_n;
 static const char PA_RND_WHAT[] = "RANDOM";
 
 /* ---- the header, the focus row, the tabs */
+static int32_t hdr_part(void)                   /* what the page edits, two parts: 0 part A, 1 part B, 2 both (shared), */
+{                                               /* 3 neither (not the sound) */
+    if (page == PG_OSC1) return 0;              /* (osc 1 is part A's oscillator, osc 2 part B's) */
+    if (page == PG_OSC2) return 1;
+    if (page == PG_SEQ || page == PG_LOOP || page == PG_ARP)
+        return (int32_t)ui_b();                 /* (the part the keys record, loop, arpeggiate) */
+    if (page >= PG_N || page == PG_SETUP || page == PG_DRUM) return 3;
+    return page_parted(page) ? (int32_t)ui_b() : 2;
+}
 static void draw_hdr(void)
 {
     char s[32], *e;
@@ -1870,15 +1909,20 @@ static void draw_hdr(void)
         x = cv_text(x + 10, 1, &FONT_S, "REC", C_BLACK) + 4;
     }
     cv_line(x + 6, 5, x + 9, 9, C_FAINT); cv_line(x + 9, 9, x + 6, 13, C_FAINT);   /* > the row */
-    cv_text(x + 15, 1, &FONT_S, page < PG_N ? PAGES[page].rows[row[page]].name : page == PG_LIVE ? LV_NAME[lv_row] :
-            PA_NAME[pa_row], C_MID);
+    x = cv_text(x + 15, 1, &FONT_S, page < PG_N ? PAGES[page].rows[row[page]].name : page == PG_LIVE ? LV_NAME[lv_row] :
+                PA_NAME[pa_row], C_MID);
     e = s;                                      /* the slot, and * for unsaved changes */
     if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
     else e = put(e, "-");
     if (modified()) e = put(e, "*");
     cv_text(176 - text_w(&FONT_S, s), 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
-    if (ui_two())                               /* two parts: the one edited, its colour */
-        cv_text(176 - text_w(&FONT_S, s) - 13, 1, &FONT_S, ui_b() ? "B" : "A", ui_b() ? C_PART_B : C_PART_A);
+    if (ui_two() && hdr_part() < 3) {           /* two parts: the part this page edits, its colour; ALL: shared */
+        int32_t t = hdr_part(), tx;             /* (where it fits after the row's name; else the rule */
+        const char *n = t == 2 ? "ALL" : t ? "B" : "A";   /*  under the header shows the part alone) */
+        tx = 176 - text_w(&FONT_S, s) - 6 - text_w(&FONT_S, n);
+        if (tx >= x + 6)
+            cv_text(tx, 1, &FONT_S, n, t == 2 ? C_BRIGHT : t ? C_PART_B : C_PART_A);
+    }
     cv_batt(181, 5, fm1_batt(), 1);             /* the battery, before the CPU */
 #ifndef DINGHY_HOST
     cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak */
@@ -1887,42 +1931,83 @@ static void draw_hdr(void)
     cv_rect(203, 5, 33, 9, C_BOX);              /* the CPU: a bar, bright past 70 % */
     cv_rect(204, 6, 31, 7, C_BLACK);
     cv_rect(205, 7, (int32_t)(cpu > 100u ? 100u : cpu) * 29 / 100, 5, cpu > 70u ? C_BRIGHT : C_MID);
-    cv_rect(0, 19, 240, 1, !ui_two() ? C_BOX : ui_b() ? C_PART_B : C_PART_A);   /* the rule under it (two parts: */
-                                                /*  the part's colour) */
+    cv_rect(0, 19, 240, 1, !ui_two() || hdr_part() >= 2 ? C_BOX : hdr_part() ? C_PART_B : C_PART_A);   /* the rule */
+                                                /*  under it (a part's page: the part's colour) */
     cv_blit(0, HDR_Y);
 }
 
+static const char *prm_idle(uint32_t pg, const prm_t *p)   /* a parameter that does nothing as the sound is now: */
+{                                               /* why (it stays where it is, dimmed); 0: it works */
+    if (pg == PG_FILTER && (p->off == PO(comb_damp) || p->off == PO(comb_spread)) && pv->flt_type < FLT_COMBP)
+        return "COMB ONLY";                     /* (the low-passes have no comb) */
+    if (pg == PG_FILTER && p->off == PO(hp_res) && !pv->hp_cut)
+        return "HPF OFF";
+    if (pg == PG_LFO2 && p->off == PO(lfo2_rate) && edit.lfo2_sync)
+        return "SYNCED";                        /* (SYNC's division sets the rate) */
+    if (pg == PG_MFX && p->off != PO(mfx_type) && (!edit.mfx_type || edit.mfx_type >= MFX_N))
+        return "MOD FX OFF";
+    return 0;
+}
 static void draw_focus(void)                    /* the selected row: four labels, values (large), bars */
 {
-    uint32_t i, pg;
+    uint32_t i, pg, assign = page == PG_LIVE && lv_row == LV_ASSIGN, lit;
+    const char *why = 0;
     cv_begin(240, FOC_H, C_BLACK);
+    if (cell_k >= 0 && fm1_ms >= cell_until) cell_k = -1;
+    cell_drawn = cell_tinted = 0;
     for (i = 0; i < 4u; i++) {
         const prm_t *p = knob_prm(i, &pg);
         const uint8_t *v;
+        const char *idle;
         char s[16];
         int32_t x = (int32_t)i * FOC_W, w;
-        if (page == PG_LIVE && lv_row == LV_K1 + i)
-            cv_frame(x + 1, 0, FOC_W - 2, FOC_H - 1, C_MID);   /* (the knob PRESETS chooses for) */
+        uint16_t vc = C_BRIGHT, lc = C_MID;
         if (p->kind == K_NONE)
             continue;
+        if (assign) {                           /* LIVE's ASSIGN: what each knob turns, its page over it */
+            const char *n = PAGES[pg].name, *l = prm_label(p);
+            cv_text(x + (FOC_W - text_w(&FONT_S, n)) / 2, 0, &FONT_S, n, C_MID);
+            if ((w = text_w(&FONT_M, l)) <= FOC_W - 4) cv_text(x + (FOC_W - w) / 2, 19, &FONT_M, l, C_BRIGHT);
+            else cv_text(x + (FOC_W - text_w(&FONT_S, l)) / 2, 22, &FONT_S, l, C_BRIGHT);
+            continue;
+        }
         v = pval(pg, p);
         fmt(s, p, v);
-        cv_text(x + (FOC_W - text_w(&FONT_S, prm_label(p))) / 2, 0, &FONT_S, prm_label(p), C_MID);
+        lit = cell_k == (int32_t)i;
+        if ((idle = prm_idle(pg, p)) != 0) {    /* (does nothing now: dimmed, why below) */
+            vc = lc = C_FAINT;
+            why = idle;
+        }
+        if (lit) {                              /* (just turned: framed, its value shifted, fading) */
+            cv_frame(x + 1, 0, FOC_W - 2, FOC_H - 1, C_MID);
+            if (!idle) vc = shift_col(cell_at, cell_dir, &cell_tinted), lc = C_BRIGHT;
+            cell_drawn = 1;
+        }
+        cv_text(x + (FOC_W - text_w(&FONT_S, prm_label(p))) / 2, lit ? 2 : 0, &FONT_S, prm_label(p), lc);
         if ((w = text_w(&FONT_M, s)) <= FOC_W - 4)
-            cv_text(x + (FOC_W - w) / 2, 19, &FONT_M, s, C_BRIGHT);
+            cv_text(x + (FOC_W - w) / 2, 19, &FONT_M, s, vc);
         else                                    /* (too long for the large font: the small one) */
-            cv_text(x + (FOC_W - text_w(&FONT_S, s)) / 2, 22, &FONT_S, s, C_BRIGHT);
+            cv_text(x + (FOC_W - text_w(&FONT_S, s)) / 2, 22, &FONT_S, s, vc);
         if (p->kind == K_NUM || p->kind == K_POS || p->kind == K_BIP || p->kind == K_CENT || p->kind == K_NCOL ||
-            p->kind == K_DNUM || p->kind == K_DDEC || p->kind == K_DSEMI) {
+            p->kind == K_DNUM || p->kind == K_DDEC || p->kind == K_DSEMI || p->kind == K_ETIME) {
             int32_t bx = x + 6, bw = FOC_W - 12, by = 46;
             cv_rect(bx, by + 1, bw, 1, C_BOX);  /* the track */
             if (p->kind == K_BIP || p->kind == K_CENT || p->kind == K_DSEMI ||
                 (p->kind == K_NCOL && NOISE_RATED(pv->noise_type))) {   /* bipolar: from the middle */
                 int32_t c = p->kind == K_DSEMI ? 24 : 64, m = bx + bw / 2, d = ((int32_t)*v - c) * (bw / 2) / (c - 1);
                 cv_rect(m, by - 1, 1, 5, C_FAINT);
-                cv_rect(d < 0 ? m + d : m, by, d < 0 ? -d : d + 1, 3, C_BRIGHT);
+                cv_rect(d < 0 ? m + d : m, by, d < 0 ? -d : d + 1, 3, idle ? C_FAINT : C_BRIGHT);
             } else
-                cv_rect(bx, by, (int32_t)*v * bw / p->max, 3, C_BRIGHT);
+                cv_rect(bx, by, (int32_t)*v * bw / p->max, 3, idle ? C_FAINT : C_BRIGHT);
+        }
+    }
+    if (why && !assign) {                       /* why: in the row's empty cells (none: the dimming says it) */
+        uint32_t a = 4, b = 0;
+        for (i = 0; i < 4u; i++)
+            if (knob_prm(i, &pg)->kind == K_NONE) { if (a == 4u) a = i; b = i; }
+        if (a < 4u) {
+            int32_t x = (int32_t)a * FOC_W, wd = (int32_t)(b - a + 1u) * FOC_W;
+            cv_text(x + (wd - text_w(&FONT_S, why)) / 2, 22, &FONT_S, why, C_MID);
         }
     }
     cv_blit(0, FOC_Y);
@@ -2623,12 +2708,12 @@ static void live_draw_gfx(void)                 /* the patterns, the patches, th
         cv_rect(4 + (int32_t)i * 59, 81, 55, 3, eg.seq_play && i == beat ? C_BRIGHT : C_BOX);
     }
     {                                           /* how to choose the knobs' parameters */
-        const char *h = lv_row >= LV_K1 ? "PRESETS: ITS PARAMETER" : "SELECT: CHOOSE A KNOB";
-        cv_text((240 - text_w(&FONT_S, h)) / 2, 87, &FONT_S, h, C_FAINT);
+        const char *h = lv_row == LV_ASSIGN ? "TURN A KNOB: WHAT IT TURNS" : "SELECT: ASSIGN THE KNOBS";
+        cv_text((240 - text_w(&FONT_S, h)) / 2, 87, &FONT_S, h, lv_row == LV_ASSIGN ? C_MID : C_FAINT);
     }
-    if (lv_row >= LV_K1) {                      /* the knob PRESETS chooses for: what it turns, in full */
+    if (lv_row == LV_ASSIGN) {                  /* the knob last chosen for: what it turns, in full */
         const prm_t *p;
-        k = lv_row - LV_K1;
+        k = lv_last & 3u;
         if (lv_walk(-1, gset.knob[k], &pg, &r, &i) >= 0) {
             p = &PAGES[pg].rows[r].p[i];
             e = put(num(put(t, "K"), k + 1u), ": ");
@@ -2646,27 +2731,33 @@ static void live_draw_gfx(void)                 /* the patterns, the patches, th
     cv_blit(0, G_Y);
 }
 
-static int live_input(uint32_t buttons)         /* SELECT: PLAY or a knob; PRESETS (on a knob): its parameter */
-{
+static int live_input(uint32_t buttons)         /* SELECT: PLAY or ASSIGN; ASSIGN: a knob turned, its parameter */
+{                                               /* (PLAY's knobs, and PRESETS: ui_input) */
     int32_t d;
+    uint32_t kn;
     (void)buttons;
     if ((d = fm1_enc_take(ENC_SELECT)) != 0) {
         int32_t n = (int32_t)lv_row + d;
         lv_row = (uint32_t)(n < 0 ? 0 : n >= LV_N ? LV_N - 1 : n);
+        cell_k = -1;
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
-    if (lv_row >= LV_K1 && (d = fm1_enc_take(ENC_PRESETS)) != 0) {
-        static uint32_t last;
-        uint32_t pg, r, k, kn = lv_row - LV_K1;
-        int32_t n = lv_walk(-1, -1, &pg, &r, &k), at = lv_walk(-1, gset.knob[kn], &pg, &r, &k);
-        at += fm1_ms - last < 60u ? d * 3 : d;  /* (fast: x 3) */
-        last = fm1_ms;
-        at = at < 0 ? 0 : at >= n ? n - 1 : at;
-        lv_walk(at, -1, &pg, &r, &k);
-        gset.knob[kn] = (uint16_t)prm_byte(pg, &PAGES[pg].rows[r].p[k]);
-        gset_dirty = 1;
-        dirty |= D_GFX | D_ROWS;
-    }
+    if (lv_row != LV_ASSIGN)
+        return 0;
+    for (kn = 0; kn < 4u; kn++)
+        if ((d = fm1_enc_take(ENC_KNOB1 + kn)) != 0) {
+            static uint32_t last[4];
+            uint32_t pg, r, k;
+            int32_t n = lv_walk(-1, -1, &pg, &r, &k), at = lv_walk(-1, gset.knob[kn], &pg, &r, &k);
+            at += fm1_ms - last[kn] < 60u ? d * 3 : d;   /* (fast: x 3) */
+            last[kn] = fm1_ms;
+            at = at < 0 ? 0 : at >= n ? n - 1 : at;
+            lv_walk(at, -1, &pg, &r, &k);
+            gset.knob[kn] = (uint16_t)prm_byte(pg, &PAGES[pg].rows[r].p[k]);
+            gset_dirty = 1;
+            lv_last = kn;
+            dirty |= D_GFX | D_ROWS;
+        }
     return 0;
 }
 
@@ -3000,15 +3091,17 @@ static void sc_text(void)                       /* the header: the note, the cyc
     e = put(put(s, "KNOB2: "), SC_STYLE[sc_style]);
     num(put(e, sc_style == SC_MONO ? "  L/R  x" : "  x"), sc_gain);
     draw_text_box(0, SC_Y + SC_H + 12u, 240, &FONT_S, s, C_FAINT, 1);
-    draw_text_box(0, 222, 240, &FONT_S, "KNOB1: CYCLES   HOME: LIVE", C_FAINT, 1);
+    draw_text_box(0, 222, 240, &FONT_S, gset.home ? "KNOB1: CYCLES   HOME: LIVE" : "KNOB1: CYCLES   HOME: BACK", C_FAINT, 1);
 }
 
 static void ui_page(uint32_t pg)
 {
     if (pg > PG_LIVE) return;
     if (pg != page) lcd_fill(0, G_Y, 240, 240 - G_Y, C_BLACK);   /* (row counts differ: clear what was below) */
-    if (pg == PG_SCOPE && page != PG_SCOPE)    /* in: from where HOME was pressed */
-        sc_back = page == PG_PATCH ? pa_back : page;
+    if ((pg == PG_SCOPE || pg == PG_LIVE) && page != PG_SCOPE && page != PG_LIVE) {   /* in: from where HOME was */
+        uint32_t from = page == PG_PATCH ? pa_back : page;   /* pressed (not SCOPE or LIVE: those lead on) */
+        if (from != PG_SCOPE && from != PG_LIVE) sc_back = from;
+    }
     scope_on = pg == PG_SCOPE;                  /* (the ISR fills the capture only while it is shown) */
     if (pg == PG_PATCH && page != PG_PATCH) {   /* in: from where SAVE was pressed, the slot of the sound */
         pa_back = page;
@@ -3020,7 +3113,8 @@ static void ui_page(uint32_t pg)
     }
     if (pg != PG_LIVE) live_mute = 0;           /* (LIVE's mutes: out of it, all on) */
     page = pg;
-    pop_until = 0;                              /* (the last page's pop-up goes with it) */
+    pop_until = 0;                              /* (the last page's pop-up goes with it, and its lit cell) */
+    cell_k = -1;
     dirty = D_ALL;
 }
 
@@ -3067,12 +3161,18 @@ static int ui_input(uint32_t buttons)
         if (x != *cut) {
             *cut = (uint8_t)x;
             changed = 1;
-            {
+            {                                   /* (where a knob shows it: its cell lit; else a pop-up) */
                 char val[8];
+                uint32_t k, kp, at = 4;
+                for (k = 0; k < 4u && at == 4u; k++) {
+                    const prm_t *q = knob_prm(k, &kp);
+                    if (kp == PG_FILTER && q->kind == K_NUM && q->off == PO(cut)) at = k;
+                }
                 num(val, (uint32_t)x);
-                pop_turn("CUTOFF", val, d);
+                if (at < 4u) cell_turn(at, d);
+                else pop_turn("CUTOFF", val, d);
             }
-            dirty |= D_HDR | (page == PG_FILTER ? D_GFX | D_ROWS : 0u);
+            dirty |= D_HDR | (page == PG_FILTER || page == PG_LIVE ? D_GFX | D_ROWS : 0u);
         }
     }
     if (page == PG_SCOPE) {                     /* the SCOPE: KNOB1 the cycles, KNOB2 the style; HOME, ALGORITHM, SAVE */
@@ -3095,16 +3195,18 @@ static int ui_input(uint32_t buttons)
         }
         for (i = 2; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
         (void)fm1_enc_take(ENC_SELECT);
-        if (buttons & (1u << BTN_HOME)) { ui_page(PG_LIVE); return (int)changed; }   /* HOME again: LIVE */
+        if (buttons & (1u << BTN_HOME)) { ui_page(gset.home ? PG_LIVE : sc_back); return (int)changed; }   /* HOME */
+                                                /* again: LIVE (SCOPE first), else back */
         if (fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
         if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return (int)changed; }
         if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
                          1u << BTN_SEQ)))
             return (int)changed;                /* (else a page button: on to that page, below) */
-    } else if (page == PG_LIVE) {               /* LIVE: HOME or ALGORITHM back to where HOME was first pressed */
-        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
+    } else if (page == PG_LIVE) {               /* LIVE: HOME the SCOPE (LIVE first), else back; ALGORITHM back */
+        if (buttons & (1u << BTN_HOME)) { ui_page(gset.home ? sc_back : PG_SCOPE); return (int)changed; }
+        if (fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
     } else if (buttons & (1u << BTN_HOME) && page != PG_PATCH) {
-        ui_page(PG_SCOPE);
+        ui_page(gset.home ? PG_SCOPE : PG_LIVE);   /* (SETUP's HOME: which comes first) */
         return (int)changed;
     }
     if (page == PG_PATCH) {                     /* the PATCH screen: HOME, a page button or ALGORITHM leave it */
@@ -3122,18 +3224,10 @@ static int ui_input(uint32_t buttons)
         ui_page(page >= PG_CHO && page < PG_CRUSH ? page + 1u : PG_CHO);
     if (buttons & (1u << BTN_ENV))              /* ENV: AMP, F.ENV, M.ENV 1, M.ENV 2 in turn */
         ui_page(page >= PG_AMP && page < PG_MENV2 ? page + 1u : PG_AMP);
-    if (buttons & (1u << BTN_SEL)) {            /* SELECT (the button): two parts, A and B in turn; twice quickly (or */
-        static uint32_t sel_at;                 /* one part): to FILTER */
-        static uint8_t sel_armed, sel_from;
-        if (!ui_two()) ui_page(PG_FILTER);
-        else if (sel_armed && fm1_ms - sel_at < SEL_TWICE_MS) {
-            sel_armed = 0;
-            ui_part = sel_from;                 /* (the first press undone) */
+    if (buttons & (1u << BTN_SEL)) {            /* SELECT (the button): FILTER, from every page; on FILTER, two */
+        if (page != PG_FILTER)                  /* parts: A and B in turn (the part edited, on every page after) */
             ui_page(PG_FILTER);
-        } else {
-            sel_armed = 1;
-            sel_at = fm1_ms;
-            sel_from = ui_part;
+        else if (ui_two()) {
             ui_part ^= 1u;
             pop("PART", ui_part ? "B" : "A");
             dirty |= D_ALL;
@@ -3161,6 +3255,7 @@ static int ui_input(uint32_t buttons)
         if (page == PG_DRUM && row[page] == DR_ROLL)
             dr_sel = 2;                         /* (ROLL: the hat's) */
         pop_until = 0;
+        cell_k = -1;
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
     for (i = 0; i < 4u; i++) {
@@ -3171,7 +3266,7 @@ static int ui_input(uint32_t buttons)
         if ((d = fm1_enc_take(ENC_KNOB1 + i)) == 0 || p->kind == K_NONE || (p->kind == K_BPM && gset.clock))
             continue;                           /* (on the MIDI clock the tempo is the clock's) */
         if (p->kind == K_MODE || p->kind == K_LFOW || p->kind == K_ONOFF || p->kind == K_ARPM || p->kind == K_GLIDEM ||
-            p->kind == K_CLK || p->kind == K_STRIG || p->kind == K_SSLIDE || p->kind == K_SMODE ||
+            p->kind == K_CLK || p->kind == K_HOME || p->kind == K_STRIG || p->kind == K_SSLIDE || p->kind == K_SMODE ||
             p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT ||
             p->kind == K_NTYPE || p->kind == K_ROUTE || p->kind == K_DRUM || p->kind == K_DHIT || p->kind == K_DCLR ||
             p->kind == K_DROLL || p->kind == K_DLANE || p->kind == K_DCOPY || p->kind == K_DPASTE || p->kind == K_SLEARN ||
@@ -3243,11 +3338,8 @@ static int ui_input(uint32_t buttons)
             p->kind != K_SENTRY && p->kind != K_DRUM && p->kind != K_DLANE && p->kind != K_DPRE && PAGES[pg].osc != G)
             ud_mark("EDIT");                    /* (the first change after a pause: UNDO's point) */
         *v = (uint8_t)x;
-        if (p->kind != K_CURSOR && p->kind != K_DCUR) {   /* its name and value, large, for a moment */
-            char val[16];
-            fmt(val, p, v);
-            pop_turn(prm_label(p), val, d);
-        }
+        if (p->kind != K_CURSOR && p->kind != K_DCUR)   /* its cell lit, for a moment */
+            cell_turn(i, d);
         if (p->kind == K_DHIT)                  /* the step's hit: into the lane */
             drum_put(seq_ed(), dr_sel, dr_cursor, (uint32_t)x);
         if (p->kind == K_DROLL)                 /* the hat step's ratchet (on an empty step: a hit too) */
@@ -3515,6 +3607,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
     }
     if (pop_drawn && (fm1_ms >= pop_until || pop_tinted))
         dirty |= D_GFX;                         /* (the pop-up's time is up: the picture back; or it is fading) */
+    if (cell_drawn && (fm1_ms >= cell_until || cell_tinted))
+        dirty |= D_ROWS;                        /* (and a lit cell's) */
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;

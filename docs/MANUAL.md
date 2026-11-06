@@ -87,18 +87,25 @@ Every page works the same way:
   [WAVE]  WAVE2  RATIO  MODE  ENV          <- the page's rows: SELECT moves along them
 ```
 
-Turning a knob shows its name and value large in the picture's top right corner for a moment (PRESETS too: the
-cutoff). The value drifts **blue** as you turn it up and **red** as you turn it down, and fades back to white.
+Turning a knob lights **its own cell** for a moment: framed, its name bright, its value drifting **blue** as you turn
+it up and **red** as you turn it down, fading back to white. The picture stays in view while you change it. PRESETS
+(the cutoff) lights the CUT cell where one shows it (FILTER, LIVE); on other pages it shows large in the picture's top
+right corner, as do messages and confirmations.
+
+Envelope times show in **ms** and **s**, as the engine plays them (1 ms .. 10 s). A control that does nothing as the
+sound is now stays where it is but is **dimmed**, with the reason in the row's empty cells: COMB's DAMP and SPREAD on a
+low-pass (**COMB ONLY**), HP RES with the high-pass off, LFO 2's RATE while SYNC is on (**SYNCED**), MOD FX's knobs while
+its TYPE is OFF.
 
 | Control | Does |
 | --- | --- |
 | **ALGORITHM** | the next / previous page |
-| **PRESETS** | the filter's cutoff, from any page (shown large for a moment) |
+| **PRESETS** | the filter's cutoff, from any page (LIVE too) |
 | **SELECT** | the row (the tabs along the bottom) |
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
 | **EDIT** | OSC 1 (press again: OSC 2, then TRANS, then NOISE) |
 | **ENV** | AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2) |
-| **SELECT** (the button) | FILTER. A sound with two parts (MIX's PARTS row): part A, part B in turn; press it twice quickly for FILTER |
+| **SELECT** (the button) | FILTER, from any page. On FILTER, a sound with two parts (MIX's PARTS row): part A, part B in turn |
 | **LFO** | LFO (press again: LFO 2, then MATRIX) |
 | **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
@@ -106,7 +113,7 @@ cutoff). The value drifts **blue** as you turn it up and **red** as you turn it 
 | **PLAY** | the sequencer: run / stop (from any page; its LED shows it) |
 | **REC** | step entry on the SEQ page; while the sequencer plays, real-time recording (on the DRUM page: the drums; on the LOOP page: the looper) (its LED shows it) |
 | **FX** | CHORUS (press again: DELAY, REVERB, MOD FX, then CRUSH) |
-| **HOME** | the oscilloscope (press again: LIVE) |
+| **HOME** | the [LIVE screen](#the-live-screen) (press again: the oscilloscope; again: back). SETUP's HOME row can put the oscilloscope first |
 | **SAVE** | the PATCH screen |
 
 The header's battery shows **0 to 3 bars** (red, green, blue: a prism); empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
@@ -232,6 +239,9 @@ envelope's shape.
 | TYPE | LP 12, LP 24, COMB+, COMB- | drive (0 = clean) | high-pass cutoff (OFF, 16 Hz .. 4.2 kHz) | HP RES: the high-pass's resonance (0 = none; up: a peak at its cutoff, to +16 dB, soft-clipped when loud) |
 | COMB | damping (0 bright .. 127 dark) | spread | | |
 
+The COMB row works on COMB+ and COMB- only: on a low-pass its knobs are dimmed (**COMB ONLY**). HP RES is dimmed while
+the high-pass is OFF.
+
 Cutoff and resonance glide as you turn them, so sweeps are smooth. **Keytrack** at 100 % moves the cutoff with the
 note, so every key keeps the same brightness. A negative envelope amount closes the filter as the envelope rises.
 
@@ -295,7 +305,9 @@ four times).
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | ENV | attack | decay | sustain | release |
-| DEST | LOOP ON / OFF | destination | amount (bipolar) | M.ENV 2: PART (BOTH / A / B) |
+| DEST | destination | amount (bipolar) | M.ENV 2: PART (BOTH / A / B) | LOOP ON / OFF |
+
+DEST and AMT are on KNOB1 and KNOB2, where the LFOs have them.
 
 With **LOOP ON** an envelope runs attack -> decay -> attack -> decay ... for as long as you hold the key, then
 releases: a sustain of 0 gives full up-and-down sweeps, a higher sustain a shallower cycle. Its destination can be
@@ -354,7 +366,7 @@ can run in time with the tempo.
 | DEST | destination | amount | PART: BOTH / A / B | |
 
 **LFO 2** runs free, one for all the voices (so every note moves together). With **SYNC** on a division it ignores
-RATE and runs in time with the arp and sequencer's tempo (the BPM on the ARP page, or the MIDI clock when it follows
+RATE (dimmed, **SYNCED**) and runs in time with the arp and sequencer's tempo (the BPM on the ARP page, or the MIDI clock when it follows
 one): 1/4 is a cycle a beat, 1/1 a bar, 4/1 four bars; T, triplets. It starts from the top when the sequencer or the
 MIDI clock starts. Its destination can be any of the LFO's, or one of these (each moves the knob up and down from where
 it is set, as far as the whole knob):
@@ -458,10 +470,12 @@ On the PARTS and LEVELS rows the picture shows **the two parts side by side**: e
 level and its place, and its voices (the four squares, lit while one sounds on that part). The part you are editing
 is framed in its colour. In SINGLE part B is greyed: part A plays both oscillators.
 
-With two parts, the **SELECT** button switches the part you are editing: the header shows **A** in amber or **B** in
-teal, with a thin rule of that colour under it. Every page then turns that part's own settings (the cutoff on
-PRESETS too); the oscillators, effects and shared modulators stay as they are. RANDOM rolls the part you are on.
-Press SELECT **twice quickly** for the FILTER page. On the pages a part has its own settings on, what you are editing
+With two parts, the **SELECT** button switches the part you are editing: it opens FILTER from any page, and on FILTER
+each press switches between part A and part B. The part stays chosen as you move to other pages. The header says
+what a page edits: **A** in amber or **B** in teal, with a thin rule of that colour under it, on the pages a part has
+its own settings on (OSC 1 is part A's oscillator, OSC 2 part B's); **ALL** in white on the shared pages (the
+effects, LFO 2, M.ENV 2, the MATRIX, ...). Every part page then turns that part's own settings (the cutoff on
+PRESETS too). RANDOM rolls the part you are on. On the pages a part has its own settings on, what you are editing
 is highlighted in the part's colour (muted amber or teal); text, and the shared pages, stay white.
 
 The shared modulators reach both parts, or one: LFO 2's and M.ENV 2's **PART** (on their DEST rows) and each matrix
@@ -512,7 +526,7 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 | DELAY | D.SYNC | SYNC ON / OFF: TIME in the tempo | | | |
 | REVERB | REVERB | size | damping | mix | pre-delay (up to 93 ms) |
 | REVERB | R.MOD | rate | depth | shimmer | |
-| MOD FX | MOD FX | TYPE: OFF, PHASER, FLANGER | rate | depth | mix |
+| MOD FX | MOD FX | TYPE: OFF, PHASER, FLANGER | rate | mix | depth |
 | MOD FX | TONE | MANUAL: where it sweeps around | FDBK: feedback, either way | | |
 | CRUSH | CRUSH | BITS: OFF, 15 .. 2 bits | RATE: OFF, 44100 .. 1378 Hz | | |
 
@@ -615,8 +629,8 @@ the STEP and CHORD rows, or CLEAR a row.
   across both parts. Which part a note is in follows the split: move the split key and notes change sides. With the
   split off, every note is part 1's.
 - **DUAL** (MIX's PARTS row): each note carries its own part, A or B, so one pattern plays both synths. A note
-  recorded or entered goes on the part you are editing (SELECT), or, from a MIDI keyboard, on its channel's part (the
-  SETUP page's B IN). Record a bass on part A, press SELECT, overdub a lead on part B. The **PART** row shows and
+  recorded or entered goes on the part you are editing (SELECT on FILTER), or, from a MIDI keyboard, on its channel's part (the
+  SETUP page's B IN). Record a bass on part A, switch to part B (SELECT, SELECT), overdub a lead on it. The **PART** row shows and
   changes the parts of the step under the cursor; steps with a note on part B have a small teal mark in their corner.
   Here **MUTE1** / **MUTE2** and **CLR1** / **CLR2** are parts A and B. In SINGLE, SPLIT and LAYER a note's part is
   kept but not used. The arpeggiator plays the part you are editing; the looper keeps each note on the part it was
@@ -762,6 +776,7 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 | --- | --- | --- | --- | --- |
 | MIDI | IN: OMNI or 1 .. 16 | OUT: 1 .. 16 | CLOCK: INT / MIDI | BEND: OFF, +-1 .. +-24 semitones |
 | PARTS | B IN: OFF or 1 .. 16 | | | |
+| HOME | HOME: LIVE / SCOPE | | | |
 
 - **IN**: the channel Prysm plays from (OMNI: all of them).
 - **OUT**: the channel the FM-1's keys send their notes on.
@@ -769,6 +784,8 @@ Settings for your setup rather than a sound: they are kept with the octave, not 
 - **BEND**: how far a MIDI keyboard's pitch wheel bends every note, either way (2 at first; OFF ignores it).
 - **B IN**: part B's channel, for a sound in DUAL (MIX's PARTS row). Set, notes on it play part B and notes on IN play
   part A, so a DAW can play both parts on two tracks. OFF: MIDI plays the part you are editing.
+- **HOME**: what the HOME button opens first: the **LIVE** screen (at first), or the **SCOPE**. HOME again opens the
+  other, and once more goes back.
 
 ---
 
@@ -851,7 +868,7 @@ tones are kept in flash, apart from the patch slots.
 
 ## The oscilloscope
 
-Press **HOME** for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
+Press **HOME** twice (LIVE, then the scope; or once, with SETUP's HOME on SCOPE) for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
 down). **KNOB2** picks how it draws it:
 
 | Style | |
@@ -863,7 +880,8 @@ down). **KNOB2** picks how it draws it:
 - It locks onto the **newest note**: the trace shows that many of its cycles, starting on a rising zero, so the
   wave stands still whatever you play. **KNOB1** sets how many cycles (1 .. 8; it starts at 2).
 - It **zooms by itself** (x1 .. x8, shown under the trace), so a single quiet note fills the screen too.
-- **HOME** again opens the [LIVE screen](#the-live-screen). ALGORITHM, SAVE or a page button go back.
+- **HOME** again goes back to where you first pressed HOME (with SETUP's HOME on SCOPE: it opens the
+  [LIVE screen](#the-live-screen)). ALGORITHM, SAVE or a page button go back too.
 
 The scope costs no sound processing while it is not shown.
 
@@ -871,8 +889,8 @@ The scope costs no sound processing while it is not shown.
 
 ## The LIVE screen
 
-For playing live: change patterns and patches in time, with four knobs of your choosing. Press **HOME** twice (the
-scope, then LIVE).
+For playing live: change patterns and patches in time, with four knobs of your choosing. Press **HOME** (with SETUP's
+HOME on SCOPE: twice).
 
 ```
 LIVE > PLAY                      2
@@ -881,7 +899,7 @@ PATTERN                       PATT
 PATCH  BD SD HH CP O1 O2 NZ        the mutes: filled while on, dim while muted
 [1][#2#][3][4][5][6][7][8]        the same for the patches (empty slots dim)
 ====  ----  ----  ----            the bar: its four beats, the one playing lit
-   SELECT: CHOOSE A KNOB          a hint (on K1 .. K4: PRESETS: ITS PARAMETER)
+   SELECT: ASSIGN THE KNOBS       a hint (on ASSIGN: TURN A KNOB: WHAT IT TURNS)
 FILTER FILTER DELAY REVERB         each knob's page
  CUT    RES    MIX    MIX          KNOB1 .. KNOB4
 ```
@@ -894,10 +912,11 @@ FILTER FILTER DELAY REVERB         each knob's page
 | **D5, E5** | mute OSC 1, OSC 2 |
 | **F5** | mute the noise |
 | **G5** | unmute all (lit while anything is muted) |
-| **KNOB1 .. KNOB4** | the parameters chosen for them |
-| **SELECT** | PLAY, or K1 .. K4: the knob PRESETS chooses for |
-| **PRESETS** | on K1 .. K4: that knob's parameter (any of the sound's, page by page); on PLAY: the cutoff, as everywhere |
-| **HOME** or ALGORITHM | back to where you first pressed HOME |
+| **KNOB1 .. KNOB4** | on PLAY: the parameters chosen for them. On ASSIGN: turn a knob to choose its parameter (any of the sound's, page by page); the cells show each knob's page and parameter, and nothing in the sound changes |
+| **SELECT** | the row: PLAY, or ASSIGN |
+| **PRESETS** | the cutoff, as everywhere (on ASSIGN too) |
+| **HOME** | the oscilloscope (with SETUP's HOME on SCOPE: back) |
+| **ALGORITHM** | back to where you first pressed HOME |
 | **SAVE**, a page button | the PATCH screen, that page |
 
 - While the sequencer plays, a change **waits for the next bar line** (4 beats) and blinks until then; it starts
