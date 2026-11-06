@@ -14,7 +14,7 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.4</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.4.1</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators, and a noise source (six kinds) beside them; each of the three
 goes through a resonant filter (12 or 24 dB low-pass, or a comb) or straight past it. Then a high-pass, an amp envelope, an
@@ -41,13 +41,16 @@ the sequencer's steps can lock knobs, and a <strong>looper</strong> records what
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.4.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.4.1.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
 official V15 first (ETCH's own installer has <em>RESTORE - OFFICIAL V15</em>), then install Prysm.</p>
 <p><strong>Going back.</strong> The <a href="https://thefirmwarehub.com">FM-1 Firmware Hub</a> installs the official firmware and every
 community firmware; Prysm answers its updater like the others.</p>
+<p><strong>Newer FM-1s.</strong> Units sold from autumn 2026 (mostly on AliExpress) have a different flash chip, a UC25HQ80. Prysm
+supports it from 1.4.1 on; older Prysm releases refuse to install on these units (the FM-1 keeps the firmware it has).
+If the USB rescue screen (OCT- held at power-on) shows <em>UNKNOWN FLASH</em> and a code, please report the code.</p>
 <p>Prysm is a community firmware, not made or supported by M-VAVE. Installing it is at your own risk.</p>
 <hr />
 <h2 id="playing">Playing</h2>
