@@ -3,7 +3,7 @@
  * (none dropped); the names fit and differ; a tone into part B and back is the same tone, its destinations its own
  * oscillator's; a tone sounds the same in part A and in part B; each factory tone sounds; a user tone stored is there
  * after power-on, the rest empty; the PATCH screen's TONE row loads into the part edited (UNDO brings the sound back),
- * stores the part edited, asks before replacing, and keeps the factory's fixed.
+ * stores the part edited under a name, asks before replacing, and keeps the factory's fixed.
  *   tests/run_engine.sh runs it */
 #include <unistd.h>
 #include <sys/wait.h>
@@ -165,7 +165,18 @@ int main(void)
     pa_do();
     CHECK(pa_armed && tone_user_get(40, &t2) == 0 && !strcmp(t2.name, "MINE"), "STORE over a used tone asks first");
     pa_do();
-    CHECK(tone_user_get(40, &t2) == 0 && !strcmp(t2.name, "USER 41") && t2.pf[0] == 17, "again: stored, as USER 41");
+    CHECK(tone_user_get(40, &t2) == 0 && !strcmp(t2.name, "MINE") && t2.pf[0] == 17, "again: stored, its name kept");
+    pa_tname_turn(2, 4);                        /* (the fifth letter: B) */
+    pa_tname_turn(3, 2);
+    pa_do(); pa_do();
+    CHECK(tone_user_get(40, &t2) == 0 && !strcmp(t2.name, "MINEB") && !strcmp(pa_msg, "STORED: MINEB"),
+          "named: KNOB3 the place, KNOB4 the letter (%s)", t2.name);
+    pa_tone = TONE_ROM_N + 7u;                  /* (an empty one: USER 8) */
+    pa_tname_init();
+    CHECK(!memcmp(pa_tname, "USER 8   ", 9), "an empty one's name: USER n");
+    pa_tname_turn(3, -1);                       /* ('U' back to 'T') */
+    pa_do();
+    CHECK(tone_user_get(7, &t2) == 0 && !strcmp(t2.name, "TSER 8"), "stored with its name, the spaces after off");
     tone_user_h = 0xFFu;                        /* (power-on) */
     memset(&tone_user, 0, sizeof tone_user);
     CHECK(tone_user_get(40, &t2) == 0 && t2.pf[0] == 17, "and kept");

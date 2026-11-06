@@ -1,4 +1,5 @@
-# the PATCH screen's TONE row: the factory's basses, a bell picked and loaded, STORE into USER 1, the user tones (tests/run_ui.sh)
+# the PATCH screen's TONE row: the factory's basses, a bell picked and loaded, STORE on USER 1 named BASS (KNOB3 the
+# place, KNOB4 the letter), stored, the user tones (tests/run_ui.sh)
 100 btn 9
 200 enc 0 6
 300 shot
@@ -7,10 +8,20 @@
 600 btn 9
 700 shot
 800 enc 3 1
-900 enc 2 32
+900 enc 2 64
 1000 shot
-1100 btn 9
-1200 shot
-1300 enc 3 -1
-1400 shot
-1500 end
+1010 enc 5 -19
+1020 enc 4 1
+1030 enc 5 -18
+1040 enc 4 1
+1050 enc 5 14
+1060 enc 4 1
+1070 enc 5 1
+1080 enc 4 2
+1090 enc 5 -28
+1100 shot
+1200 btn 9
+1300 shot
+1400 enc 3 -1
+1500 shot
+1600 end

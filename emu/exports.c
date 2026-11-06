@@ -58,8 +58,11 @@ WEB void web_random(uint32_t pct, uint32_t sec, uint32_t seed)   /* RANDOM (rand
     engine_set(&edit);
     dirty = D_ALL;
 }
+WEB uint32_t web_tone_rom_n(void) { return TONE_ROM_N; }   /* the factory's tones; the user's after them */
+WEB uint32_t web_tone_n(void) { return TONE_ROM_N + TONE_USER_N; }
+WEB const char *web_tone_group(uint32_t g) { return g < TONE_ROM_N / 8u ? TONE_GROUP[g] : "USER"; }   /* (8 a group) */
 static char web_tname[TONE_NAME];
-WEB const char *web_tone_name(uint32_t i)      /* the tone library's tone i (0 .. 63 the factory's, 64 .. 127 the user's): */
+WEB const char *web_tone_name(uint32_t i)      /* the tone library's tone i (the factory's, then the user's): */
 {                                               /* its name, "" for an empty user tone */
     static tone_t t;
     return i < TONE_ROM_N + TONE_USER_N && tone_at(i, &t) == 0 ? (memcpy(web_tname, t.name, TONE_NAME), web_tname) : "";
@@ -96,6 +99,8 @@ WEB uint32_t web_store_gen(void) { return store_gen; }
 WEB uint8_t *web_seqstore(uint32_t i) { return host_seqs[i % SEQSTORE_N]; }   /* each slot's sequencer */
 WEB uint32_t web_seqstore_len(uint32_t i) { return i < SEQSTORE_N ? host_seqs_n[i] : 0u; }
 WEB void web_seqstore_set_len(uint32_t i, uint32_t n) { if (i < SEQSTORE_N) host_seqs_n[i] = n <= STORE_MAX ? n : 0u; }
+WEB uint32_t web_tone_area(void) { return TONE_AREA; }   /* (the user tones: these two seqstores) */
+WEB void web_tones_changed(void) { tone_user_h = 0xFFu; dirty = D_ALL; }   /* (set from outside: read again) */
 
 #include "params.c"                             /* the parameters (shared with the plugin) */
 WEB uint32_t web_nparams(void) { return prm_n(); }

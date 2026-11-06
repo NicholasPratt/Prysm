@@ -9,7 +9,10 @@ each other by FM, ring or mix, and a noise source (white, pink, brown, digital, 
 or past it; a drum machine (kick, snare, hat, clap in three kits, a lane in every pattern); a resonant, self-oscillating filter (12 / 24 dB low-pass or a comb) with drive and a high-pass; an LFO with six shapes and two destinations; a second, tempo-syncable LFO with many more; two mod
 envelopes that can loop and modulate the LFO's rate; a mod matrix; a bit-crusher, a phaser / flanger, stereo chorus,
 delay (with wow and pitch-shifting repeats) and a plate reverb (with modulation and shimmer); sequencer steps that lock
-knobs; a MIDI looper; 8 patch slots with UNDO; graphical pages; USB audio and MIDI.
+knobs; a MIDI looper; 8 patch slots with UNDO; graphical pages; USB audio and MIDI. A sound can be **two synths in
+one** (DUAL, SPLIT or LAYER), each part its own filter, envelopes and LFO, loaded from a **library of 96 tones** (and
+64 of your own); each oscillator can have a sampled **attack transient** in front of it, D-50 style; and **RANDOM**
+rolls a sound, a nudge or a new one.
 
 - **See it**: [the demo video](https://www.youtube.com/watch?v=mpHz8HwsCX0) (2½ minutes: the screen and the sound)
 - **Install it**: [the web installer](https://nicholaspratt.github.io/Prysm/) (Chrome or Edge), or `tools/fm1_install.py` (below)
@@ -29,6 +32,9 @@ knobs; a MIDI looper; 8 patch slots with UNDO; graphical pages; USB audio and MI
 | --- | --- |
 | **Voices** | 4, polyphonic |
 | **Oscillators** | 2 per voice; each a carrier modulated by mod 1, modulated by mod 2. Each operator: 6 banks x 8 morphing waves (BASIC, HARM, PULSE, VOCAL, DIGI, CMPLX), a ratio to the note (0.5 .. 16); each modulator: FM / RING / MIX (in MIX / RING a pitch, -24 .. +24 semitones, instead of the ratio), fine tune, an amount, its own AR envelope |
+| **Parts** | a sound is one synth (SINGLE, both oscillators per voice) or two: part A (osc 1) and part B (osc 2), each with its own filter, high-pass, amp and filter envelopes, LFO, mod envelope, velocity, glide and noise; DUAL (the keys play the part you edit, the sequencer and MIDI each note's own part, B on its own MIDI channel), SPLIT (by key) or LAYER (each note on both); the 4 voices shared; LFO 2, mod envelope 2 and each matrix route on A, B or both; each part's level and pan; SELECT switches the part you edit (amber A, teal B) |
+| **Tones** | a part's sound on its own (its oscillator, transient, filter, envelopes, LFO, noise), loaded into part A or B: 96 factory tones in 12 groups (basses, keys, pads, leads, bells, plucks, orchestral, FX, synths, percussion, voices, atmospheres) and 64 user tones, named, in flash |
+| **Transients** | per oscillator, a short sampled attack laid in front of it (24: hammer, pluck, pick, mallet, kalimba, bell, glass, metal, chiff, breath, bow, brass, slap, knock, click, zap, vox ...): its level, tune and decay; past the filter, so it sounds over slow pads |
 | **Noise** | in every voice: WHITE, PINK, BROWN (a tone each), DIGI (a short-loop shift register, pitched to the key), S&H (random steps at 16 x the note), CRACKLE (density); its level, its route |
 | **Routing** | osc 1, osc 2 and the noise each through the filter or DIRECT (past it, to the amp) |
 | **Filter** | state-variable low-pass, 12 or 24 dB/oct (zero-delay feedback), or a Blofeld-style comb (COMB+ / COMB-: the cutoff its frequency, resonance its feedback, plus damping and spread); self-oscillation at the top of RES (a steady, keytracked sine at any cutoff); drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance) |
@@ -47,7 +53,7 @@ knobs; a MIDI looper; 8 patch slots with UNDO; graphical pages; USB audio and MI
 | **LIVE** | HOME twice: patterns (the black keys) and patches (the white keys) change on the next bar line; mutes (the top white keys) for the kick, snare, hats, clap, each oscillator and the noise, and one to unmute all; four knobs, each any parameter you choose |
 | **Looper** | records the notes you play (not the audio) over 1, 2, 4 or 8 bars, in time with the sequencer; overdub, quantize to 1/16 or 1/8; up to 512 notes |
 | **Oscilloscope** | on HOME: locked to the newest note, auto-zoom; three styles: PRISM (the wave split into a spectrum, fading trails), ORBIT (the wave against itself a quarter cycle later: a sine a circle, FM a knot), MONO (left and right) |
-| **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on; UNDO (and redo) of the last change |
+| **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on; UNDO (and redo) of the last change; RANDOM: a roll of the whole sound or a section (osc, filter, envelopes, modulation, effects), by an amount (5 % a nudge, 100 % a new sound), in ranges that sound; [two-part demo sounds](patches/) to load in the editor |
 | **Editor** | [in the browser](https://nicholaspratt.github.io/Prysm/editor/): the firmware itself running in the page (screen, knobs, keys, sound), every parameter, patch files; in sync with a connected FM-1 both ways |
 | **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out, with channel select and clock; MIDI in and clock on the TRS jack too |
 
@@ -64,19 +70,20 @@ envelopes, the LFO, the effects chain.
 | Page | Button | Rows |
 | --- | --- | --- |
 | OSC 1, OSC 2 | EDIT | WAVE, WAVE2, RATIO, MODE, ENV, MIX |
-| NOISE | EDIT (3 times) | NOISE (TYPE, COLOUR, LEVEL, ROUTE) |
+| TRANS | EDIT (after OSC 2) | OSC 1, OSC 2 (TYPE, LEVEL, TUNE, DECAY) |
+| NOISE | EDIT (4 times) | NOISE (TYPE, COLOUR, LEVEL, ROUTE) |
 | FILTER | SELECT (the button) | FILTER, TYPE, COMB |
 | AMP | ENV | ENV, VEL, VCA |
 | F.ENV, M.ENV 1, M.ENV 2 | ENV (2, 3, 4 times) | ENV; the mod envelopes: ENV, DEST |
-| LFO | LFO (twice: LFO 2; three times: MATRIX) | LFO, DEST; LFO 2: LFO, DEST; MATRIX: MOD 1 .. MOD 4 |
-| MIX | GLO | OSC, ROUTE, GLIDE, SPLIT |
-| SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK, pitch BEND range |
+| LFO | LFO (twice: LFO 2; three times: MATRIX) | LFO, DEST; LFO 2: LFO, DEST; MATRIX: MOD 1 .. MOD 4, PARTS |
+| MIX | GLO | OSC, ROUTE, GLIDE, SPLIT, PARTS (MODE), LEVELS (each part's level and pan) |
+| SETUP | GLO (twice) | MIDI: IN / OUT channels, CLOCK, pitch BEND range; PARTS: part B's MIDI channel |
 | ARP | ARP (again: on / off) | ARP, TIME |
-| SEQ | SEQ (PLAY: run; REC: step entry, or recording while it plays) | STEP, CHORD, LOCK, PATTERN, EDIT, PARTS, CLICK, SONG, ENTRY |
+| SEQ | SEQ (PLAY: run; REC: step entry, or recording while it plays) | STEP, CHORD, PART, LOCK, PATTERN, EDIT, PARTS, CLICK, SONG, ENTRY |
 | DRUM | SEQ (twice; the keys: the steps) | STEP, ROLL, KICK, SNARE, HAT, CLAP, BUS, KIT, EDIT |
 | LOOP | SEQ (three times; REC: record, overdub) | LOOP (BARS, QUANT, PLAY, CLEAR) |
 | CHORUS / DELAY / REVERB / MOD FX / CRUSH | FX (1 .. 5 times) | CHORUS; DELAY, D.MOD; REVERB, R.MOD; MOD FX, TONE; CRUSH |
-| PATCH | SAVE | SAVE, LOAD, SOUND, INIT, UNDO over 8 slots |
+| PATCH | SAVE | SAVE, LOAD, SOUND, INIT, UNDO over 8 slots; RANDOM; TONE (the tone library: LOAD, STORE) |
 | SCOPE | HOME | the output, live (KNOB1: cycles, KNOB2: PRISM / ORBIT / MONO) |
 | LIVE | HOME (twice; the keys: patterns, patches, mutes) | PLAY, K1 .. K4 (the knobs' parameters) |
 
@@ -84,7 +91,7 @@ envelopes, the LFO, the effects chain.
 
 ```sh
 pip3 install mido python-rtmidi
-python3 tools/fm1_install.py prysm-1.4.fwsc       # asks before it writes; restarts into Prysm
+python3 tools/fm1_install.py prysm-1.5.fwsc       # asks before it writes; restarts into Prysm
 python3 tools/fm1_install.py --info               # what the connected FM-1 runs
 ```
 
@@ -153,9 +160,9 @@ The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](S
 tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchain, the AC79 SDK, a Python venv
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
-./build.sh --release 1.4             # build/prysm-1.4.fwsc (identity FM-1_989, as every release from 0.9 on; "1.4" on the splash)
-tools/make_site.py build/prysm-1.4.fwsc 1.4   # site/: the web installer and the manual (GitHub Pages)
-APP_VER=1.4 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
+./build.sh --release 1.5             # build/prysm-1.5.fwsc (identity FM-1_989, as every release from 0.9 on; "1.5" on the splash)
+tools/make_site.py build/prysm-1.5.fwsc 1.5   # site/: the web installer and the manual (GitHub Pages)
+APP_VER=1.5 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
 ```
 
 ### Tests (on the computer, no FM-1 needed)

@@ -16,7 +16,7 @@ const PLUGIN = typeof window.prysm_hello === "function";
 const BTNS = [["OCT-", 0], ["OCT+", 1], ["EDIT", 6], ["ENV", 4], ["LFO", 5], ["GLO", 7], ["FX", 2],
               ["ARP", 10], ["SEQ", 11], ["SELECT", 3], ["HOME", 8], ["SAVE", 9], ["PLAY", 12], ["REC", 13]];
 const ENCS = [["SELECT", 0], ["ALGO", 1], ["KNOB1", 2], ["KNOB2", 3], ["KNOB3", 4], ["KNOB4", 5], ["PRESETS", 6]];
-const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58]);   // ui.c's K_ kinds shown as a list
+const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58, 90, 92, 94]);   // ui.c's K_ kinds shown as a list
 const LFO_ONLY_NOT = new Set([13, 14]);         // LFORATE, LFOAMT: the mod envelope's own, not the LFOs'
 const KEYMAP = "awsedftgyhujkolp;'";            // C4 (key 7) up
 const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
@@ -50,6 +50,7 @@ Prysm({
   readParams();
   buildFm1();
   buildTabs();
+  toneList();
   if (PLUGIN) pluginMode();
   requestAnimationFrame(frame);
 });
@@ -59,7 +60,7 @@ function restore() {                            // the patches and the settings,
     const s = localStorage.getItem("prysm.store"), g = localStorage.getItem("prysm.settings");
     if (s) { const b = unb64(s); M.HEAPU8.set(b, M._web_store()); M._web_store_set_len(b.length); }
     if (g) M.HEAPU8.set(unb64(g).subarray(0, M._web_settings_size()), M._web_settings());
-    for (let i = 0; i < 9; i++) {               // each slot's sequencer, the store's own
+    for (let i = 0; i < 11; i++) {              // each slot's sequencer, the store's own, the user tones
       const q = localStorage.getItem("prysm.seq" + i);
       if (q) { const b = unb64(q); M.HEAPU8.set(b, M._web_seqstore(i)); M._web_seqstore_set_len(i, b.length); }
     }
@@ -69,7 +70,7 @@ function keep() {
   try {
     const n = M._web_store_len();
     if (n) localStorage.setItem("prysm.store", b64(M.HEAPU8.subarray(M._web_store(), M._web_store() + n)));
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 11; i++) {
       const q = M._web_seqstore_len(i);
       if (q) localStorage.setItem("prysm.seq" + i, b64(M.HEAPU8.subarray(M._web_seqstore(i), M._web_seqstore(i) + q)));
     }
@@ -213,7 +214,7 @@ function showTab(n) {
       p.input = input; p.valEl = val; p.shown = -1;
       grid.append(el("div", { className: "prm" }, [el("label", { textContent: p.label }), val, input]));
     }
-    r.box = el("div", { className: "prow" }, [h, grid]);
+    r.box = el("div", { className: r.name.startsWith("B ") ? "prow partb" : "prow" }, [h, grid]);
     box.append(r.box);
   });
   if (pg.name === "SEQ") box.prepend(seqUI());
@@ -221,7 +222,8 @@ function showTab(n) {
   lastPatch = lastSeqs = null;                             // (draw every value afresh)
 }
 const rowIndex = (pg, r) => {                   // the row's place on the FM-1 (the SEQ page: only its SONG row has a knob of the sound)
-  if (pg.name === "SEQ") return ["STEP", "CHORD", "PATTERN", "EDIT", "CLICK", "SONG", "ENTRY"].indexOf(r.name);
+  if (pg.name === "SEQ") return ["STEP", "CHORD", "PART", "LOCK", "PATTERN", "EDIT", "PARTS", "CLICK", "SONG", "ENTRY"].indexOf(r.name);
+  if (r.name.startsWith("B ")) return pg.rows.findIndex((x) => x.name === r.name.slice(2));   // (part B's: its row's)
   return pg.rows.indexOf(r);
 };
 
@@ -486,7 +488,7 @@ function frame() {
   if (!lastPatch || pt.some((v, i) => v !== lastPatch[i])) { refresh(pt); lastPatch = pt.slice(); }
   const sq = seqs(), play = M._web_seq_playing() << 8 | M._web_seq_entry();
   if (!lastSeqs || play !== lastPlay || sq.some((v, i) => v !== lastSeqs[i])) { refreshSeq(sq); refreshDrum(sq); lastSeqs = sq.slice(); lastPlay = play; }
-  if (M._web_store_gen() !== lastStore) { lastStore = M._web_store_gen(); keep(); }
+  if (M._web_store_gen() !== lastStore) { lastStore = M._web_store_gen(); keep(); if (PLUGIN) plug.tones(); }
   (PLUGIN ? plug : dev).sync(pt, sq);
   requestAnimationFrame(frame);
 }
@@ -599,6 +601,34 @@ $("file").onchange = async () => {
   if (M._web_load_from(M._web_scratch(), n, b[4]) !== 0) return alertLine(`a patch of another format (v${b[4]}, ${n} B)`);
   // (the FM-1 follows: the differences go to it)
 };
+$("random").onclick = () => {                 // (the FM-1 follows: the differences go to it)
+  M._web_random(+$("rnd-amt").value, +$("rnd-sec").value, (Math.random() * 4294967296) >>> 0);
+};
+function toneList() {                         // the library: the factory's in groups of 8, then the user's stored
+  const sel = $("tone"), rom = M._web_tone_rom_n(), all = M._web_tone_n();
+  const label = (i) => { const t = M.UTF8ToString(M._web_tone_group(i >> 3)); return t.length <= 2 ? t : t[0] + t.slice(1).toLowerCase(); };
+  sel.length = 1;
+  let g = null;
+  for (let i = 0; i < all; i++) {
+    const name = M.UTF8ToString(M._web_tone_name(i));
+    if (!name) continue;
+    if (i % 8 === 0 || !g) {
+      g = document.createElement("optgroup");
+      g.label = i < rom ? label(i) : "User";
+      if (i >= rom && sel.lastChild.label === "User") g = sel.lastChild; else sel.appendChild(g);
+    }
+    const o = document.createElement("option");
+    o.value = i; o.textContent = name;
+    g.appendChild(o);
+  }
+}
+$("tone").onfocus = toneList;                 // (the user tones may have changed on the screen)
+$("tone").onchange = () => {                  // (the FM-1 follows: the differences go to it)
+  const i = $("tone").value;
+  $("tone").value = "";
+  if (i !== "") M._web_tone_load(+i, +$("tone-part").value);
+};
+$("undo").onclick = () => { if (!M._web_undo()) status("nothing to undo"); };
 $("send-slot").onchange = async () => {
   const s = +$("send-slot").value;
   $("send-slot").value = "";
@@ -638,7 +668,32 @@ const plug = {
       M._web_seqs_loaded();
       this.sshadow = q.slice();
     }
+    if (r.tones && r.tones.length) {           // (the project's user tones: as the plugin keeps them)
+      const b = Uint8Array.from(r.tones), a = M._web_tone_area();
+      for (let h = 0, at = 0; h < 2 && at + 2 <= b.length; h++) {
+        const n = b[at] << 8 | b[at + 1];
+        if (at + 2 + n > b.length) break;
+        M.HEAPU8.set(b.subarray(at + 2, at + 2 + n), M._web_seqstore(a + h));
+        M._web_seqstore_set_len(a + h, n);
+        at += 2 + n;
+      }
+      M._web_tones_changed();
+      this.tonesSent = b.join();
+    } else this.tones();                        // (none in the project: this page's, to it)
     status(r.status || "");
+  },
+  tonesSent: "",
+  tones() {                                     // the user tones to the plugin, to keep in the project: each half's
+    if (typeof prysm_tones !== "function") return;   //  length (2 bytes) and bytes
+    const a = M._web_tone_area(), out = [];
+    for (let h = 0; h < 2; h++) {
+      const n = M._web_seqstore_len(a + h);
+      out.push(n >> 8, n & 255, ...M.HEAPU8.subarray(M._web_seqstore(a + h), M._web_seqstore(a + h) + n));
+    }
+    const k = out.join();
+    if (k === this.tonesSent) return;
+    this.tonesSent = k;
+    if (out.length > 4) prysm_tones(out);
   },
   sync(pt, sq) {                                // what the plugin does not have yet
     if (!this.shadow) return;

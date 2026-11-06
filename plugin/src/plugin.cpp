@@ -64,6 +64,7 @@ struct Prysm {
     std::atomic<unsigned> opsW{0}, opsR{0};
     std::vector<uint8_t> loadPending;           // a whole sound from the project (main -> audio, under loadLock)
     std::vector<uint8_t> seqsPending;           // and its patterns (empty: none came)
+    std::vector<uint8_t> tones;                 // the page's user tones, kept with the project (main thread)
     std::mutex loadLock;
     std::atomic<bool> loadReady{false};
 
@@ -287,7 +288,8 @@ struct Prysm {
             guiReady = true;
             guiStatus.clear();
             return choc::value::createString("{\"patch\":" + bytesJson(prysm_patch(), prysm_patch_size()) + ",\"seqs\":" +
-                                             bytesJson(prysm_seqs(), prysm_seqs_size()) + ",\"status\":\"" +
+                                             bytesJson(prysm_seqs(), prysm_seqs_size()) + ",\"tones\":" +
+                                             bytesJson(tones.data(), (uint32_t)tones.size()) + ",\"status\":\"" +
                                              (link ? link->status() : "") + "\"}");
         });
         web->bind("prysm_set", [this](const choc::value::ValueView& a) -> choc::value::Value {
@@ -311,6 +313,11 @@ struct Prysm {
         web->bind("prysm_note", [this](const choc::value::ValueView& a) -> choc::value::Value {
             const int k = (int)a[0].getWithDefault<int64_t>(-1), v = (int)a[1].getWithDefault<int64_t>(0);
             if (k >= 0 && k < 128) push({(uint8_t)(v ? OP_ON : OP_OFF), (uint8_t)v, (uint16_t)k});
+            return {};
+        });
+        web->bind("prysm_tones", [this](const choc::value::ValueView& a) -> choc::value::Value {
+            tones.clear();                      // (the page's user tones: as they are now)
+            for (uint32_t i = 0; i < a.size() && i < 16384u; i++) tones.push_back((uint8_t)a[i].getWithDefault<int64_t>(0));
             return {};
         });
         web->bind("prysm_store", [this](const choc::value::ValueView& a) -> choc::value::Value {
@@ -499,7 +506,9 @@ const clap_plugin_params_t PARAMS = {
     }};
 
 // the project's copy: "PRYS", 2, the patch format, its size (2 bytes), the patch, the plugin's 4 switches, then the
-// patterns' format, their size (2 bytes), the patterns and song (version 1: without them)
+// patterns' format, their size (2 bytes), the patterns and song (version 1: without them); then, if the page has
+// stored any, the user tones: "TONE", their size (3 bytes), each half's size (2 bytes) and bytes (an older Prysm stops
+// before them)
 const clap_plugin_state_t STATE = {
     [](const clap_plugin_t* p, const clap_ostream_t* st) -> bool {
         auto s = P(p);
@@ -513,6 +522,11 @@ const clap_plugin_state_t STATE = {
         b.push_back((uint8_t)(sn >> 8));
         b.push_back((uint8_t)sn);
         b.insert(b.end(), prysm_seqs(), prysm_seqs() + sn);
+        if (!s->tones.empty()) {                // (then the user tones: "TONE", 3 bytes of length; older ones stop
+            const uint32_t tn = (uint32_t)s->tones.size();   //  before it)
+            b.insert(b.end(), {'T', 'O', 'N', 'E', (uint8_t)(tn >> 16), (uint8_t)(tn >> 8), (uint8_t)tn});
+            b.insert(b.end(), s->tones.begin(), s->tones.end());
+        }
         for (size_t at = 0; at < b.size();) {
             const int64_t w = st->write(st, b.data() + at, b.size() - at);
             if (w <= 0) return false;
@@ -540,6 +554,11 @@ const clap_plugin_state_t STATE = {
                 if (b.size() >= at + 3 + sn) {
                     s->seqsPending.push_back(b[at]);
                     s->seqsPending.insert(s->seqsPending.end(), b.begin() + at + 3, b.begin() + at + 3 + sn);
+                    const size_t t = at + 3 + sn;   // (the user tones, if kept)
+                    if (b.size() >= t + 7 && !std::memcmp(b.data() + t, "TONE", 4)) {
+                        const size_t tn = (size_t)b[t + 4] << 16 | (size_t)b[t + 5] << 8 | b[t + 6];
+                        if (b.size() >= t + 7 + tn) s->tones.assign(b.begin() + t + 7, b.begin() + t + 7 + tn);
+                    }
                 }
             }
         }

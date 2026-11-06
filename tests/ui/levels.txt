@@ -1,0 +1,27 @@
+# the parts side by side (MIX's PARTS and LEVELS rows): SINGLE (A plays both); DUAL, a key on A (its voice lit); LEVELS:
+# B's level down, A to the left, B to the right; SELECT to B (its frame teal), a key on B; LAYER, a key (both lit);
+# SPLIT (the key between) (tests/run_ui.sh; build/ui/lp.wav to listen to: A left, B right)
+100 btn 7
+200 enc 0 4
+300 shot
+400 enc 2 1
+500 keys 0x80
+700 shot
+800 keys 0
+1000 enc 0 1
+1100 enc 3 -30
+1200 enc 4 -40
+1300 enc 5 50
+1400 shot
+1500 btn 3
+1700 keys 0x80
+1900 shot
+2000 keys 0
+2200 enc 0 -1
+2300 enc 2 2
+2400 keys 0x80
+2600 shot
+2700 keys 0
+2900 enc 2 -1
+3000 shot
+3100 end

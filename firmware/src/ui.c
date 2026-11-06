@@ -98,7 +98,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_TTYPE, K_TDEC,                         /* (a transient: its sound; DECAY, 127 FULL) */
        K_VMODE, K_MCHB,                         /* (the parts: the voices' mode; part B's MIDI channel, 0 none) */
        K_PTGT,                                  /* (a shared modulator's parts: BOTH, A, B) */
-       K_SLPART };                              /* (the SEQ page's PART row: the step's lane off's part, A or B) */
+       K_SLPART,                                /* (the SEQ page's PART row: the step's lane off's part, A or B) */
+       K_PAN };                                 /* (a part's place: L 64 .. C .. R 63) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -283,7 +284,10 @@ static const row_t MIX_ROWS[] = {
     {"SPLIT", {{"KEY", PO(split), 127, K_SPLIT}, {"OCT1", PO(split_oct[0]), 4, K_SPOCT},   /* (below it OSC 1, from */
                {"OCT2", PO(split_oct[1]), 4, K_SPOCT}, {"LEARN", 0, 1, K_SLEARN}}, LIT_ALL},   /* it OSC 2) */
     {"PARTS", {{"MODE", PO(vmode), VM_N - 1u, K_VMODE}, NOPRM, NOPRM, NOPRM}, LIT_ALL},
+    {"LEVELS", {{"A LVL", PO(pvol[0]), 127, K_NUM}, {"B LVL", PO(pvol[1]), 127, K_NUM},   /* (the parts', past */
+                {"A PAN", PO(ppan[0]), 127, K_PAN}, {"B PAN", PO(ppan[1]), 127, K_PAN}}, LIT_ALL},   /* their amps) */
 };
+#define MR_PARTS 4u                             /* (MIX's PARTS and LEVELS rows: the parts' picture) */
 /* the KIT row's preset beats: 16 steps a lane (KICK, SNARE, HAT, CLAP), repeated over a longer pattern. A step: . none,
  * x a hit, X an accent (the hat: open), f a flam (the snare's), 2 3 4 6 8 the hat hit so many times (a roll) */
 static const struct { const char *name, *lane[4]; } DPRE[] = {
@@ -666,6 +670,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
 {
     switch (p->kind) {
     case K_BIP: snum(s, (int32_t)*v - 64); break;
+    case K_PAN: if (*v == 64u) put(s, "C"); else num(put(s, *v < 64u ? "L" : "R"), *v < 64u ? 64u - *v : *v - 64u); break;
     case K_CENT: case K_MFINE: put(snum(s, ((int32_t)*v - 64) * 50 / 63), "c"); break;
     case K_BANK: put(s, PW_BANK_NAME[*v < PW_BANKS ? *v : 0u]); break;
     case K_POS: put(s, PW_WAVE_NAME[v[-(int)NOP] < PW_BANKS ? v[-(int)NOP] : 0u][wave_index(*v)]); break;
@@ -1309,6 +1314,66 @@ static void gfx_seq(uint32_t lit)
     (void)lit;
 }
 
+static int32_t wave_sample(uint32_t b, uint32_t pos, uint32_t i);   /* (below: the PATCH screen's) */
+static uint32_t parts_vm(void)                  /* the voices sounding: bits 0..3 part A's, 4..7 part B's */
+{
+    uint32_t v, m = 0;
+    for (v = 0; v < NV; v++)
+        if (voice_on(v)) m |= 1u << (v + (voice[v].part ? 4u : 0u));
+    return m;
+}
+static uint32_t parts_drawn;                    /* (parts_vm when the parts' picture was drawn) */
+static void gfx_parts(void)                     /* the two parts side by side: the wave, the filter, the level, the */
+{                                               /* place, the voices sounding; the part edited framed in its colour */
+    static patch_t q;                           /* (part B's view: static, off the stack) */
+    static const prm_t SP = {"KEY", 0, 127, K_SPLIT};
+    uint32_t pt, i, vm = parts_vm(), single = edit.vmode == VM_SINGLE;
+    char s[32], *e;
+    part_b(&q, &edit);
+    e = put(s, "MODE ");
+    put(e, VM_NAME[edit.vmode < VM_N ? edit.vmode : 0u]);
+    cv_text(4, 0, &FONT_S, s, C_MID);
+    if (edit.vmode == VM_SPLIT) {
+        char nt[8];
+        fmt(nt, &SP, &edit.split);
+        put(put(put(s, "A < "), nt), " < B");
+        cv_text(236 - text_w(&FONT_S, s), 0, &FONT_S, s, C_MID);
+    } else if (single)
+        cv_text(236 - text_w(&FONT_S, "A PLAYS BOTH"), 0, &FONT_S, "A PLAYS BOTH", C_FAINT);
+    for (pt = 0; pt < 2u; pt++) {
+        const patch_t *pp = pt ? &q : &edit;   /* (its filter's fields) */
+        int32_t x = 2 + (int32_t)pt * 120, y = 18, w = 116, h = 104, mid = y + 30, px = 0, py = 0, bx;
+        uint32_t off = single && pt, ed = !single && (uint32_t)ui_b() == pt;
+        uint16_t pc = pt ? C_PART_B : C_PART_A, tc = off ? C_FAINT : C_MID;
+        uint32_t vol = edit.pvol[pt] & 127u, pan = edit.ppan[pt] & 127u;
+        cv_frame(x, y, w, h, ed ? pc : C_BOX);
+        cv_text(x + 5, y + 3, &FONT_S, pt ? "B" : "A", off ? C_FAINT : pc);
+        cv_text(x + 18, y + 3, &FONT_S, pt ? "OSC2" : single ? "OSC1+2" : "OSC1", tc);
+        for (i = 0; i < 64u; i++) {            /* its carrier */
+            int32_t xx = x + 26 + (int32_t)i, yy = mid - wave_sample(edit.osc[pt].bank[0], edit.osc[pt].pos[0],
+                                                                    i * PW_N / 64u) * 12 / 32767;
+            if (i) cv_line(px, py, xx, yy, off ? C_FAINT : ed ? C_BRIGHT : C_MID);
+            px = xx; py = yy;
+        }
+        e = num(put(put(s, FLT_NAME[pp->flt_type < FLT_N ? pp->flt_type : 0u]), " CUT "), pp->cut);
+        cv_text(x + 5, y + 46, &FONT_S, s, tc);
+        cv_text(x + 5, y + 64, &FONT_S, "LVL", tc);   /* the level: a bar */
+        cv_rect(x + 36, y + 70, 72, 4, C_FILL);
+        if (!single) cv_rect(x + 36, y + 70, (int32_t)vol * 72 / 127, 4, ed ? pc : C_BRIGHT);
+        cv_text(x + 5, y + 82, &FONT_S, "PAN", tc);   /* the place: a mark on a line */
+        cv_rect(x + 36, y + 89, 72, 1, C_BOX);
+        cv_rect(x + 72, y + 86, 1, 7, C_BOX);
+        bx = x + 36 + (int32_t)pan * 71 / 127;
+        if (!single) cv_rect(bx - 1, y + 85, 3, 9, ed ? pc : C_BRIGHT);
+        for (i = 0; i < NV; i++) {             /* the voices: lit, sounding on this part */
+            int32_t vx = x + w - 10 - (int32_t)(NV - 1u - i) * 9;
+            if (vm >> (i + pt * 4u) & 1u) cv_rect(vx, y + 4, 6, 6, off ? C_MID : pc);
+            else cv_frame(vx, y + 4, 6, 6, C_BOX);
+        }
+    }
+    parts_drawn = vm;
+}
+
 static void gfx_mix(uint32_t lit)               /* the three sources' levels, each into the filter (F) or past it (D) */
 {
     static const char *const NAME[NSRC] = {"OSC1", "OSC2", "NOISE"};
@@ -1737,7 +1802,9 @@ static void draw_gfx(void)
     case PG_NOISE: gfx_noise(lit); break;
     case PG_TRANS: gfx_trans(lit); break;
     case PG_DRUM: gfx_drum(lit); break;
-    default: gfx_mix(lit);
+    default:
+        if (row[PG_MIX] >= MR_PARTS) gfx_parts();
+        else gfx_mix(lit);
     }
     draw_pop();
     cv_blit(0, G_Y);
@@ -1769,12 +1836,17 @@ static void draw_pop(void)                      /* (into the picture's canvas) *
 #define PG_PATCH PG_N                           /* (the PATCH screen: not in ALGORITHM's round, only SAVE leads here) */
 enum { PA_SAVE, PA_LOAD, PA_SOUND, PA_INIT, PA_UNDO, PA_RANDOM, PA_TONE, PA_N };   /* (LOAD: the sound and its */
 static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "SOUND", "INIT", "UNDO", "RANDOM", "TONE"};   /* sequencer; SOUND: alone) */
-/* TONE (tones.c): KNOB1 the tone (the factory's 64, then the user's 64), KNOB2 LOAD (into the part edited) or STORE
+/* TONE (tones.c): KNOB1 the tone (the factory's 96, then the user's 64), KNOB2 LOAD (into the part edited) or STORE
  * (the part edited, into a user tone); SAVE does it */
 enum { TA_LOAD, TA_STORE, TA_N };
 static const char *const TA_NAME[TA_N] = {"LOAD", "STORE"};
-static const char *const TONE_GROUP[TONE_ROM_N / 8u] = {"BASS", "KEYS", "PADS", "LEADS", "BELLS", "PLUCKS", "ORCH", "FX"};
+static const char *const TONE_GROUP[TONE_ROM_N / 8u] = {"BASS", "KEYS", "PADS", "LEADS", "BELLS", "PLUCKS", "ORCH", "FX",
+                                                         "SYNTH", "PERC", "VOICE", "ATMOS"};
 static uint32_t pa_tone, pa_tact;
+/* STORE's name: KNOB3 the letter's place, KNOB4 the letter; from the user tone's own name (or USER n) until edited */
+static const char TN_CHARS[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.&+/'#";
+static char pa_tname[TONE_NAME];                /* (9 letters, spaces after; the NUL) */
+static uint32_t pa_tcur, pa_tname_ed, pa_tname_for = 0xFFFFFFFFu;   /* (the tone the name was taken from) */
 static uint32_t pa_row;
 /* RANDOM (random.c): KNOB2 AMOUNT (5 .. 100 %), KNOB3 SECTION; SAVE rolls. The rolls in a row are one UNDO step: UNDO
  * brings back the sound before the first (a run ends with another row, another screen, or a change elsewhere) */
@@ -1857,24 +1929,43 @@ static void draw_focus(void)                    /* the selected row: four labels
 }
 
 static void tabs(const char *const *name, uint32_t nn, uint32_t sel)   /* names along the bottom, sel inverted */
-{
-    int32_t xs[12], ws[12], x = 0, shift = 0;
-    uint32_t n;
-    for (n = 0; n < nn && n < 12u; n++) {        /* where each goes; scrolled to keep the selected one on screen */
-        ws[n] = text_w(&FONT_S, name[n]) + 10;
-        xs[n] = x;
-        x += ws[n] + 4;
+{                                               /* (too many: whole ones around sel, an arrow where there are more) */
+    int32_t ws[12], tw = 0, x, pad = 10, gap = 4, room = 240;
+    uint32_t n, first = 0, last;
+    if (nn > 12u) nn = 12u;
+    for (n = 0; n < nn; n++) tw += text_w(&FONT_S, name[n]);
+    while (pad > 6 && tw + (int32_t)nn * (pad + gap) - gap > room) {   /* (tighter first) */
+        pad -= 2;
+        if (gap > 2) gap--;
     }
-    if (xs[sel] + ws[sel] > 238) shift = xs[sel] + ws[sel] - 238;
+    for (n = 0; n < nn; n++) ws[n] = text_w(&FONT_S, name[n]) + pad;
+    last = nn - 1u;
+    if (tw + (int32_t)nn * (pad + gap) - gap > room) {   /* (still too many: a window of them, room for the arrows) */
+        int32_t w;
+        room = 240 - 2 * 8;
+        for (first = 0;; first++) {             /* the first that lets sel (and the ones between) fit */
+            for (w = 0, n = first; n <= sel; n++) w += ws[n] + (n > first ? gap : 0);
+            if (w <= room || first == sel) break;
+        }
+        for (w = 0, last = first; last < nn; last++) {   /* then as many after as fit */
+            w += ws[last] + (last > first ? gap : 0);
+            if (w > room) break;
+        }
+        last--;
+    }
+    for (x = 0, n = first; n <= last; n++) x += ws[n] + (n > first ? gap : 0);
+    x = (240 - x) / 2;                          /* (centred) */
     cv_begin(240, TAB_H, C_BLACK);
     cv_rect(0, 0, 240, 1, C_BOX);               /* the rule over them */
-    for (n = 0; n < nn && n < 12u; n++) {
-        int32_t tx = xs[n] - shift + (x - 4 - shift < 240 ? (240 - (x - 4)) / 2 : 1);   /* (centred when they fit) */
+    if (first > 0) { cv_line(5, 8, 2, 12, C_MID); cv_line(2, 12, 5, 16, C_MID); }   /* < more before */
+    if (last + 1u < nn) { cv_line(234, 8, 237, 12, C_MID); cv_line(237, 12, 234, 16, C_MID); }   /* > more after */
+    for (n = first; n <= last; n++) {
         if (n == sel) {
-            cv_rect(tx, 4, ws[n], 17, C_BRIGHT);
-            cv_text(tx + 5, 5, &FONT_S, name[n], C_BLACK);
+            cv_rect(x, 4, ws[n], 17, C_BRIGHT);
+            cv_text(x + pad / 2, 5, &FONT_S, name[n], C_BLACK);
         } else
-            cv_text(tx + 5, 5, &FONT_S, name[n], C_MID);
+            cv_text(x + pad / 2, 5, &FONT_S, name[n], C_MID);
+        x += ws[n] + gap;
     }
     cv_blit(0, TAB_Y);
 }
@@ -1955,6 +2046,39 @@ static void pa_draw_gfx(void)                   /* the 8 slots as tiles: the num
     cv_blit(0, G_Y);
 }
 
+static void pa_tname_init(void)                 /* (STORE's name, unless edited: the tone's, or USER n) */
+{
+    static tone_t t;
+    uint32_t k;
+    if (pa_tname_ed || pa_tone < TONE_ROM_N || pa_tname_for == pa_tone) return;
+    pa_tname_for = pa_tone;
+    memset(pa_tname, ' ', TONE_NAME - 1u);
+    pa_tname[TONE_NAME - 1u] = 0;
+    if (tone_at(pa_tone, &t) == 0)
+        for (k = 0; k < TONE_NAME - 1u && t.name[k]; k++) pa_tname[k] = t.name[k];
+    else {
+        char n[TONE_NAME];
+        num(put(n, "USER "), pa_tone - TONE_ROM_N + 1u);
+        for (k = 0; n[k]; k++) pa_tname[k] = n[k];
+    }
+    pa_tcur = 0;
+}
+static void pa_tname_turn(uint32_t knob, int32_t d)   /* KNOB3 (2): the place; KNOB4 (3): the letter there */
+{
+    pa_tname_init();
+    if (knob == 2u) {
+        int32_t c = (int32_t)pa_tcur + d;
+        pa_tcur = (uint32_t)(c < 0 ? 0 : c > (int32_t)TONE_NAME - 2 ? (int32_t)TONE_NAME - 2 : c);
+    } else {
+        const int32_t nc = (int32_t)sizeof TN_CHARS - 1;
+        int32_t k = 0;
+        while (k < nc && TN_CHARS[k] != pa_tname[pa_tcur]) k++;
+        k = ((k == nc ? 0 : k) + d % nc + nc) % nc;
+        pa_tname[pa_tcur] = TN_CHARS[k];
+        pa_tname_ed = 1;
+    }
+}
+
 static char *pa_tone_line(char *s)              /* TONE: what SAVE will do */
 {
     static tone_t t;
@@ -1988,7 +2112,20 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
         if (pa_row == PA_SAVE && bank.used[pa_slot]) put(e, " (USED)");
     }
     cv_text((240 - text_w(&FONT_S, s)) / 2, 0, &FONT_S, s, C_MID);
-    if (*m)                                     /* what happened, or what to do */
+    if (pa_row == PA_TONE && pa_tact == TA_STORE && pa_tone >= TONE_ROM_N) {   /* STORE: the name, each letter a cell */
+        uint32_t k;
+        int32_t x0 = (240 - (int32_t)(TONE_NAME - 1u) * 13) / 2;
+        pa_tname_init();
+        for (k = 0; k < TONE_NAME - 1u; k++) {
+            char c[2] = {pa_tname[k], 0};
+            int32_t x = x0 + (int32_t)k * 13;
+            if (k == pa_tcur) cv_rect(x, 17, 12, 17, C_BRIGHT);
+            else cv_rect(x + 1, 33, 10, 1, C_BOX);
+            cv_text(x + (12 - text_w(&FONT_S, c)) / 2, 17, &FONT_S, c, k == pa_tcur ? C_BLACK : C_BRIGHT);
+        }
+        m = *m ? m : "K3 PLACE  K4 LETTER  SAVE";
+        cv_text((240 - text_w(&FONT_S, m)) / 2, 36, &FONT_S, m, *pa_msg ? C_BRIGHT : C_FAINT);
+    } else if (*m)                              /* what happened, or what to do */
         cv_text((240 - text_w(&FONT_S, m)) / 2, 24, &FONT_S, m, C_BRIGHT);
     else {
         const char *h = pa_row == PA_UNDO ? "SAVE DO IT" : pa_row == PA_RANDOM ? "K2 AMOUNT  K3 WHAT  SAVE ROLL" :
@@ -1996,7 +2133,9 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
                         "KNOB1 SLOT  SAVE DO IT";
         cv_text((240 - text_w(&FONT_S, h)) / 2, 24, &FONT_S, h, C_FAINT);
     }
-    if (pa_armed) cv_frame(4, 20, 232, 24, C_BRIGHT);   /* (asking again: framed) */
+    if (pa_armed)                               /* (asking again: framed; STORE's, under the name) */
+        cv_frame(4, pa_row == PA_TONE && pa_tact == TA_STORE ? 34 : 20, 232, pa_row == PA_TONE && pa_tact == TA_STORE ? 18 : 24,
+                 C_BRIGHT);
     cv_blit(0, FOC_Y);
     tabs(PA_NAME, PA_N, pa_row);
 }
@@ -2567,10 +2706,19 @@ static int pa_tone_do(void)                     /* TONE's SAVE: a tone into the 
         if (tone_at(pa_tone, &t) == 0 && !pa_armed) { pa_armed = 1; pa_say("TONE USED: SAVE AGAIN", 0); return 0; }
         pa_armed = 0;
         tone_get(&edit, part, &t);
+        pa_tname_init();
         memset(t.name, 0, TONE_NAME);
-        num(put(t.name, "USER "), pa_tone - TONE_ROM_N + 1u);
+        {                                       /* (its name: the trailing spaces off; blank, USER n) */
+            int32_t k = (int32_t)TONE_NAME - 2;
+            while (k >= 0 && pa_tname[k] == ' ') k--;
+            if (k < 0) num(put(t.name, "USER "), pa_tone - TONE_ROM_N + 1u);
+            else memcpy(t.name, pa_tname, (uint32_t)k + 1u);
+        }
         if (tone_user_put(pa_tone - TONE_ROM_N, &t) != 0) { pa_say("STORE FAILED", 0); return 0; }
-        pa_say("STORED AS USER ", pa_tone - TONE_ROM_N + 1u);
+        pa_tname_ed = 0;
+        pa_tname_for = 0xFFFFFFFFu;             /* (taken again: as stored) */
+        put(put(pa_msgbuf, "STORED: "), t.name);
+        pa_msg = pa_msgbuf;
         return 0;
     }
     if (tone_at(pa_tone, &t) != 0) { pa_say("EMPTY TONE", 0); return 0; }
@@ -2664,11 +2812,13 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
     }
     for (i = 0; i < 4u; i++)                    /* KNOB1: the slot; on RANDOM, KNOB2 AMOUNT, KNOB3 SECTION */
         if ((d = fm1_enc_take(ENC_KNOB1 + i)) != 0 && (i == 0 || (pa_row == PA_RANDOM && i <= 2u) ||
-                                                       (pa_row == PA_TONE && i == 1u))) {
+                                                       (pa_row == PA_TONE && (i == 1u || pa_tact == TA_STORE)))) {
             uint32_t tn = TONE_ROM_N + TONE_USER_N;
-            if (pa_row == PA_TONE) {
+            if (pa_row == PA_TONE) {            /* (KNOB3, KNOB4 on STORE: the name) */
                 if (i == 0) pa_tone = (uint32_t)(((int32_t)pa_tone + d % (int32_t)tn + (int32_t)tn) % (int32_t)tn);
-                else pa_tact = d > 0 ? TA_STORE : TA_LOAD;
+                else if (i == 1u) pa_tact = d > 0 ? TA_STORE : TA_LOAD;
+                else if (pa_tone >= TONE_ROM_N) pa_tname_turn(i, d);
+                pa_tname_init();
             } else if (i == 0) pa_slot = (uint32_t)(((int32_t)pa_slot + d % 8 + 8) % 8);
             else if (i == 1) {
                 int32_t n = (int32_t)pa_rnd_pct + d * 5;
@@ -3347,6 +3497,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
         dirty |= D_GFX;                         /* (the arp's picture follows the playing step) */
     if (page == PG_SEQ && seq_drawn != seq.steps)
         dirty |= D_GFX;                         /* (and the sequencer's) */
+    if (page == PG_MIX && row[PG_MIX] >= MR_PARTS && parts_drawn != parts_vm())
+        dirty |= D_GFX;                         /* (the parts': the voices sounding) */
     if (page == PG_DRUM && dr_drawn != seq.steps)
         dirty |= D_GFX;                         /* (and the drums') */
     if (page == PG_LOOP && (lp.run || lp_drawn != lp.state) && fm1_ms - lp_drawn_at >= 60u)

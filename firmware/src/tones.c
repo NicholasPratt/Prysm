@@ -4,12 +4,12 @@
  * envelopes, the LFO, M.ENV 1, velocity, glide, the noise). Loaded into part A or part B of the sound edited; the rest
  * of the patch (the other part, the effects, LFO 2, M.ENV 2, the matrix, the arp) stays as it is.
  *
- * 64 factory tones (TONE_ROM: each a few changes from the default sound's part A, made into a tone when picked) and
+ * 96 factory tones (TONE_ROM: each a few changes from the default sound's part A, made into a tone when picked) and
  * 64 user tones, in two halves of 32 (one in RAM at a time; the seqstore's areas TONE_AREA, TONE_AREA + 1: platform.c, blobs 0 .. 3). A
  * tone's destinations are its own oscillator's (WAVE1, MWAVE1, MOD1, M1PITCH): in part B they are osc 2's (engine.c:
  * dest_b), so a tone sounds the same in either part. Included by prysm.c after patches.c */
 #define TONE_NAME 10u                           /* (9 characters and the NUL) */
-#define TONE_ROM_N 64u
+#define TONE_ROM_N 96u
 #define TONE_USER_N 64u
 #define TONE_HALF 32u                           /* (user tones a store area) */
 #define TONE_AREA (SEQSTORE_N - 2u)             /* (the seqstore's areas of the two halves) */
@@ -220,6 +220,77 @@ static const tone_rom_t TONE_ROM[TONE_ROM_N] = {
          TP(lfo_retrig), 0, AMP(100, 80, 120, 110)),
     TONE("TALKBOX", PURE, WAVE(BK_VOCAL, W1), TP(menv_dest), DEST_WAVE1, TP(menv_amt), 110, TP(menv_a), 60,
          TP(menv_d), 60, TP(menv_s), 0, TP(menv_loop), 1, TP(cut), 100, AMP(5, 70, 120, 50)),
+    /* synths */
+    TONE("POLY SAW", WAVE(BK_BASIC, W5), DETUNED(70), TP(cut), 80, TP(res), 20, TP(fenv), 85, FLT(0, 70, 50, 50),
+         AMP(5, 70, 110, 50)),
+    TONE("STAB", WAVE(BK_BASIC, W5), DETUNED(73), TP(cut), 55, TP(res), 40, TP(fenv), 110, FLT(0, 45, 0, 35),
+         AMP(0, 50, 0, 35)),
+    TONE("HOOVER", WAVE(BK_PULSE, 30), DETUNED(80), TP(menv_dest), DEST_PITCH, TP(menv_amt), 50, TP(menv_a), 40,
+         TP(menv_d), 60, TP(menv_s), 0, TP(cut), 90, AMP(0, 70, 120, 40), TP(glide), 35),
+    TONE("PWM STRNG", PURE, WAVE(BK_PULSE, W4), TP(lfo_dest[1]), DEST_WAVE1, TP(lfo_amt[1]), 90, TP(lfo_rate), 45,
+         TP(lfo_retrig), 0, TP(cut), 75, AMP(60, 80, 115, 75)),
+    TONE("CHIPTUNE", PURE, WAVE(BK_PULSE, W3), TP(cut), 127, AMP(0, 70, 110, 10), TP(lfo_dest[0]), DEST_PITCH,
+         TP(lfo_amt[0]), 70, TP(lfo_rate), 95, TP(lfo_delay), 60),
+    TONE("SUPERSAW", WAVE(BK_BASIC, W5), DETUNED(82), TO(mode[1]), MODE_MIX, TO(bank[2]), BK_BASIC, TO(pos[2]), W5,
+         TP(mpitch[0][1]), 24, TP(mfine[0][1]), 50, TO(amt[1]), 100, TP(cut), 95, AMP(5, 70, 115, 55)),
+    TONE("RAVE ORG", PURE, WAVE(BK_HARM, W5), TO(ratio[1]), R2, TO(amt[0]), 40, TP(cut), 85, TP(res), 30, TP(fenv), 90,
+         FLT(0, 40, 30, 30), AMP(0, 60, 80, 30)),
+    TONE("BRIGHT KY", TO(ratio[1]), R2, TO(amt[0]), 70, TO(ratio[2]), R4, TO(amt[1]), 30, TP(cut), 110,
+         AMP(0, 80, 30, 55), TRN(T_TICK, 60)),
+    /* percussion */
+    TONE("TOM", PURE, TP(menv_dest), DEST_PITCH, TP(menv_amt), 95, TP(menv_a), 0, TP(menv_d), 45, TP(menv_s), 0,
+         TP(cut), 90, AMP(0, 60, 0, 55), TRN(T_THUMP, 80)),
+    TONE("COWBELL", PURE, WAVE(BK_PULSE, W1), TO(mode[0]), MODE_MIX, TO(bank[1]), BK_PULSE, TO(pos[1]), W1,
+         TP(mpitch[0][0]), 32, TO(amt[0]), 120, TP(cut), 95, TP(res), 40, TP(hp_cut), 50, AMP(0, 45, 0, 40),
+         TRN(T_CLICK, 60)),
+    TONE("CONGA", PURE, TP(menv_dest), DEST_PITCH, TP(menv_amt), 75, TP(menv_a), 0, TP(menv_d), 35, TP(menv_s), 0,
+         AMP(0, 50, 0, 45), TRN(T_SLAP, 90)),
+    TONE("WOODBLOCK", PURE, TO(ratio[1]), R3, TO(amt[0]), 40, TP(hp_cut), 40, AMP(0, 35, 0, 30), TRN(T_KNOCK, 110)),
+    TONE("TIMPANI", TO(ratio[1]), R1H, TO(amt[0]), 30, TP(cut), 70, TP(menv_dest), DEST_PITCH, TP(menv_amt), 70,
+         TP(menv_d), 50, TP(menv_s), 0, AMP(0, 90, 0, 85), TRN(T_THUMP, 100)),
+    TONE("SNAP", TP(lvl1), 0, TP(noise_lvl), 120, TP(hp_cut), 60, TP(cut), 110, AMP(0, 35, 0, 30), TRN(T_SLAP, 100)),
+    TONE("CLAVES", PURE, TO(ratio[1]), R5, TO(amt[0]), 25, TP(cut), 120, AMP(0, 30, 0, 25), TRN(T_TICK, 100),
+         TP(trn_tune[0]), 36),
+    TONE("TABLA", PURE, TP(menv_dest), DEST_PITCH, TP(menv_amt), 58, TP(menv_a), 0, TP(menv_d), 50, TP(menv_s), 0,
+         TO(ratio[1]), R2, TO(amt[0]), 20, AMP(0, 60, 0, 50), TRN(T_KNOCK, 80)),
+    /* voices */
+    TONE("AAH CHOIR", WAVE(BK_VOCAL, W3), TO(mode[0]), MODE_MIX, TO(bank[1]), BK_VOCAL, TO(pos[1]), W3,
+         TP(mpitch[0][0]), 24, TP(mfine[0][0]), 74, TO(amt[0]), 100, TP(cut), 90, AMP(85, 80, 115, 90), VIB(50)),
+    TONE("OOH PAD", WAVE(BK_VOCAL, W1), TO(mode[0]), MODE_MIX, TO(bank[1]), BK_VOCAL, TO(pos[1]), W2,
+         TP(mpitch[0][0]), 24, TP(mfine[0][0]), 70, TO(amt[0]), 90, TP(cut), 70, AMP(90, 80, 110, 90)),
+    TONE("FORMANT", PURE, WAVE(BK_VOCAL, W1), TP(lfo_wave), LFO_TRI, TP(lfo_dest[1]), DEST_WAVE1,
+         TP(lfo_amt[1]), 110, TP(lfo_rate), 50, AMP(5, 70, 120, 40)),
+    TONE("ROBOT", PURE, WAVE(BK_VOCAL, W5), TO(mode[0]), MODE_RING, TP(mpitch[0][0]), 24, TO(amt[0]), 60,
+         TP(lfo_wave), LFO_SH, TP(lfo_dest[1]), DEST_WAVE1, TP(lfo_amt[1]), 120, TP(lfo_rate), 90, TP(lfo_retrig), 0,
+         AMP(0, 70, 120, 20)),
+    TONE("WHISPER", TP(lvl1), 0, TP(noise_type), NOISE_PINK, TP(noise_lvl), 120, TP(flt_type), FLT_COMBP, TP(cut), 80,
+         TP(res), 70, TP(comb_damp), 60, AMP(40, 70, 120, 60)),
+    TONE("MONK", PURE, WAVE(BK_VOCAL, W2), TO(ratio[0]), R05, TP(cut), 60, AMP(70, 80, 120, 80), VIB(60)),
+    TONE("VOX PLUCK", PURE, WAVE(BK_VOCAL, W5), TP(menv_dest), DEST_WAVE1, TP(menv_amt), 30, TP(menv_a), 0,
+         TP(menv_d), 50, TP(menv_s), 0, AMP(0, 60, 0, 45), TRN(T_VOX, 70)),
+    TONE("VOCODER", WAVE(BK_VOCAL, W4), TO(mode[0]), MODE_RING, TO(bank[1]), BK_BASIC, TO(pos[1]), W5,
+         TP(mpitch[0][0]), 24, TO(amt[0]), 90, TP(lfo_dest[1]), DEST_WAVE1, TP(lfo_amt[1]), 100, TP(lfo_rate), 40,
+         TP(lfo_retrig), 0, AMP(5, 70, 120, 40)),
+    /* atmospheres */
+    TONE("RAIN", TP(lvl1), 0, TP(noise_type), NOISE_CRACKLE, TP(noise_lvl), 120, TP(hp_cut), 40, TP(cut), 90,
+         AMP(60, 80, 120, 90)),
+    TONE("SPACE", TO(ratio[1]), R1H, TO(amt[0]), 40, TP(mfine[0][0]), 76, TO(att[0]), 100, TP(cut), 90,
+         AMP(100, 90, 120, 110), TP(lfo_dest[1]), DEST_MOD1, TP(lfo_amt[1]), 90, TP(lfo_rate), 20, TP(lfo_retrig), 0),
+    TONE("BOWL", TO(ratio[1]), R3, TO(amt[0]), 30, TP(mfine[0][0]), 70, TP(cut), 120, AMP(0, 110, 0, 110),
+         TRN(T_BELL, 40), TP(lfo_dest[0]), DEST_AMP, TP(lfo_amt[0]), 72, TP(lfo_rate), 60),
+    TONE("GHOST", PURE, WAVE(BK_VOCAL, W8), TP(noise_type), NOISE_PINK, TP(noise_lvl), 50, TP(glide), 70,
+         AMP(90, 80, 120, 100), TP(lfo_wave), LFO_TRI, TP(lfo_dest[0]), DEST_PITCH, TP(lfo_amt[0]), 76,
+         TP(lfo_rate), 50),
+    TONE("MACHINE", WAVE(BK_DIGI, W6), TO(ratio[1]), R7, TO(amt[0]), 70, TP(lfo_wave), LFO_SQR, TP(lfo_dest[1]),
+         DEST_MOD1, TP(lfo_amt[1]), 110, TP(lfo_rate), 85, TP(lfo_retrig), 0, AMP(0, 70, 120, 40)),
+    TONE("STATIC", TP(lvl1), 0, TP(noise_type), NOISE_DIGI, TP(noise_lvl), 110, TP(noise_col), 90, TP(flt_type), FLT_LP24,
+         TP(cut), 70, TP(res), 80, TP(lfo_wave), LFO_SH, TP(lfo_amt[1]), 110, TP(lfo_rate), 100, TP(lfo_retrig), 0,
+         AMP(0, 70, 120, 50)),
+    TONE("DEEP SEA", WAVE(BK_BASIC, W1), TO(ratio[0]), R05, TP(flt_type), FLT_LP24, TP(cut), 35, TP(res), 90,
+         TP(fenv), 64, TP(noise_type), NOISE_BROWN, TP(noise_lvl), 80, TP(lfo_wave), LFO_TRI, TP(lfo_amt[1]), 100,
+         TP(lfo_rate), 15, TP(lfo_retrig), 0, AMP(100, 80, 120, 110)),
+    TONE("CHIMES", TO(ratio[1]), R7, TO(amt[0]), 45, TP(mfine[0][0]), 85, TP(cut), 125, AMP(0, 100, 0, 100),
+         TRN(T_GLASS, 60), TP(trn_tune[0]), 36),
 };
 #undef TONE
 

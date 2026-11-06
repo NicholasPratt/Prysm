@@ -14,21 +14,25 @@ thead:has(th:empty:first-child) { display: none; }   /* (tables with no headings
 code, pre { background: var(--code); font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
 pre { padding: 12px; overflow-x: auto; } code { padding: 1px 4px; } pre code { padding: 0; }
 .top { font-size: 14px; color: var(--dim); }
-</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.4.1</p><h1 id="prysm-manual">Prysm manual</h1>
+</style></head><body><main><p class="top"><a href="./">Prysm installer</a> · version 1.5</p><h1 id="prysm-manual">Prysm manual</h1>
 <p>Prysm is a 4-voice synthesizer firmware for the <strong>M-VAVE FM-1</strong>. Each voice has two oscillators, and each oscillator is a
 little modulation chain of three wavetable operators, and a noise source (six kinds) beside them; each of the three
 goes through a resonant filter (12 or 24 dB low-pass, or a comb) or straight past it. Then a high-pass, an amp envelope, an
 LFO, two looping mod envelopes, a mod matrix, a phaser / flanger, a bit-crusher and stereo chorus, delay and reverb.
 Alongside it a <strong>drum machine</strong> (kick, snare, hat, clap; three kits) plays a lane of its own in every sequencer pattern,
 the sequencer's steps can lock knobs, and a <strong>looper</strong> records what you play over it.</p>
+<p>A sound can also be <strong>two synths in one</strong>: part A on osc 1 and part B on osc 2, each with its own filter, envelopes
+and LFO, played together, side by side on the keys or one at a time (<a href="#mix">Parts</a>). Each part can load a <strong>tone</strong>
+from a library of 96 (and 64 of your own: <a href="#tones">Tones</a>); each oscillator can have a sampled <strong>attack transient</strong>
+(<a href="#trans">TRANS</a>); and <strong>RANDOM</strong> rolls a new sound, or nudges the one you have (<a href="#patches">Patches</a>).</p>
 <ul>
 <li><a href="#installing">Installing</a></li>
 <li><a href="#playing">Playing</a></li>
 <li><a href="#finding-your-way-around">Finding your way around</a></li>
-<li><a href="#the-pages">The pages</a>: <a href="#osc-1--osc-2">OSC 1 / OSC 2</a>, <a href="#noise">NOISE</a>, <a href="#filter">FILTER</a>, <a href="#amp">AMP</a>, <a href="#lfo">LFO</a>,
+<li><a href="#the-pages">The pages</a>: <a href="#osc-1--osc-2">OSC 1 / OSC 2</a>, <a href="#trans">TRANS</a>, <a href="#noise">NOISE</a>, <a href="#filter">FILTER</a>, <a href="#amp">AMP</a>, <a href="#lfo">LFO</a>,
   <a href="#lfo-2">LFO 2</a>, <a href="#matrix">MATRIX</a>, <a href="#mix">MIX</a>, <a href="#arp">ARP</a>, <a href="#seq">SEQ</a>, <a href="#drum">DRUM</a>, <a href="#loop">LOOP</a>,
   <a href="#fx">FX</a> (CHORUS, DELAY, REVERB, MOD FX, CRUSH), <a href="#setup">SETUP</a></li>
-<li><a href="#patches">Patches</a></li>
+<li><a href="#patches">Patches</a>: <a href="#tones">Tones</a></li>
 <li><a href="#the-oscilloscope">The oscilloscope</a></li>
 <li><a href="#usb-audio-and-midi">USB: audio and MIDI</a></li>
 <li><a href="#the-editor">The editor</a></li>
@@ -41,16 +45,13 @@ the sequencer's steps can lock knobs, and a <strong>looper</strong> records what
 straight to the computer, press <strong>Install Prysm</strong>, allow MIDI access when the browser asks, and wait for the FM-1 to
 restart. Do not unplug it while it writes.</p>
 <p><strong>From the command line</strong> (a built package, see the README):</p>
-<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.4.1.fwsc
+<pre><code class="language-sh">python3 tools/fm1_install.py prysm-1.5.fwsc
 </code></pre>
 <p><strong>Coming from another firmware.</strong> Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
 M-VAVE firmware) accept Prysm directly. <strong>ETCH</strong> only accepts its own updates and the official firmware: restore the
 official V15 first (ETCH's own installer has <em>RESTORE - OFFICIAL V15</em>), then install Prysm.</p>
 <p><strong>Going back.</strong> The <a href="https://thefirmwarehub.com">FM-1 Firmware Hub</a> installs the official firmware and every
 community firmware; Prysm answers its updater like the others.</p>
-<p><strong>Newer FM-1s.</strong> Units sold from autumn 2026 (mostly on AliExpress) have a different flash chip, a UC25HQ80. Prysm
-supports it from 1.4.1 on; older Prysm releases refuse to install on these units (the FM-1 keeps the firmware it has).
-If the USB rescue screen (OCT- held at power-on) shows <em>UNKNOWN FLASH</em> and a code, please report the code.</p>
 <p>Prysm is a community firmware, not made or supported by M-VAVE. Installing it is at your own risk.</p>
 <hr />
 <h2 id="playing">Playing</h2>
@@ -125,7 +126,7 @@ cutoff). The value drifts <strong>blue</strong> as you turn it up and <strong>re
 </tr>
 <tr>
 <td><strong>EDIT</strong></td>
-<td>OSC 1 (press again: OSC 2, then NOISE)</td>
+<td>OSC 1 (press again: OSC 2, then TRANS, then NOISE)</td>
 </tr>
 <tr>
 <td><strong>ENV</strong></td>
@@ -133,7 +134,7 @@ cutoff). The value drifts <strong>blue</strong> as you turn it up and <strong>re
 </tr>
 <tr>
 <td><strong>SELECT</strong> (the button)</td>
-<td>FILTER</td>
+<td>FILTER. A sound with two parts (MIX's PARTS row): part A, part B in turn; press it twice quickly for FILTER</td>
 </tr>
 <tr>
 <td><strong>LFO</strong></td>
@@ -296,9 +297,55 @@ inharmonic shimmer. The pitch is a modulation destination too (<strong>M1PITCH</
 holds while the key is down, and falls over the release. A slow mod 1 attack on FM makes a note that brightens as
 you hold it.</p>
 <p><strong>MIX row.</strong> The modulators' amounts (how much they change the next one) and the oscillator's own level.</p>
+<h3 id="trans">TRANS</h3>
+<p>An <strong>attack transient</strong> for each oscillator: a short sampled sound at the start of every note, laid over the
+oscillator, as the Roland D-50 put a sampled attack in front of a synthesised body. A hammer or a pluck in front of an
+FM tone, a breath before a pad, a click on a bass. <strong>EDIT</strong> three times (OSC 1, OSC 2, TRANS). Two rows, one for
+each oscillator; the picture shows both transients as they play at C4: the sound across, LEVEL its height, DECAY's
+fade over it, its length in milliseconds.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>KNOB1</th>
+<th>KNOB2</th>
+<th>KNOB3</th>
+<th>KNOB4</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OSC 1</td>
+<td>TYPE (OFF: none)</td>
+<td>LEVEL</td>
+<td>TUNE (-24 .. +24 st)</td>
+<td>DECAY (FULL: as made)</td>
+</tr>
+<tr>
+<td>OSC 2</td>
+<td>TYPE</td>
+<td>LEVEL</td>
+<td>TUNE</td>
+<td>DECAY</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A transient has <strong>its own envelope</strong>: the sound's own shape, faded sooner by <strong>DECAY</strong> (from FULL down). It does
+  not follow the amp envelope, so it is heard at once even on a pad with a slow attack, and it goes <strong>past the filter</strong>
+  (as the D-50's sampled attacks did). CRUSH, MOD FX and the effects still take it. A softer note's is quieter (AMP
+  velocity, as the amp's).</li>
+<li>It plays once at the start of each note (a slide in the sequencer: no new one). The split's other
+  side and a LIVE mute of its oscillator silence it.</li>
+<li>The <strong>pitched</strong> ones follow the key, made at C4: HAMMER, PLUCK, PICK, MALLET, KALIMB, BELL, GLASS, METAL, CHIFF,
+  FLUTE, BOW, BRASS, SLAP, BLIP, VOX. The others play at their own pitch on every key: ANVIL, BREATH, KNOCK, CLICK,
+  TICK, THUMP, ZAP, NOISE, SPIT. <strong>TUNE</strong> moves either.</li>
+<li>All 24 are made from scratch by <code>tools/gen_transients.py</code> (physical and spectral models; no recordings), stored as
+  8-bit mu-law at 16 .. 32 kHz.</li>
+</ul>
 <h3 id="noise">NOISE</h3>
 <p>A noise source in every voice, beside the two oscillators: it follows the amp envelope like them, and goes through the
-filter or past it (ROUTE). <strong>EDIT</strong> three times. The picture is the noise itself: its wave (a few milliseconds) above,
+filter or past it (ROUTE). <strong>EDIT</strong> four times. The picture is the noise itself: its wave (a few milliseconds) above,
 its spectrum below (24 bands, 60 Hz .. 15 kHz, the loudest at the top), so you see its colour change as you turn.</p>
 <table>
 <thead>
@@ -484,7 +531,7 @@ four times).</p>
 <td>LOOP ON / OFF</td>
 <td>destination</td>
 <td>amount (bipolar)</td>
-<td></td>
+<td>M.ENV 2: PART (BOTH / A / B)</td>
 </tr>
 </tbody>
 </table>
@@ -633,7 +680,7 @@ can run in time with the tempo.</p>
 <td>DEST</td>
 <td>destination</td>
 <td>amount</td>
-<td></td>
+<td>PART: BOTH / A / B</td>
 <td></td>
 </tr>
 </tbody>
@@ -725,7 +772,14 @@ envelopes already do. A route is off while its source is OFF or its amount is 0 
 <td>SRC: the source</td>
 <td>DEST: the destination</td>
 <td>AMT: -64 .. +63</td>
-<td></td>
+<td>TIME: a drum source's fall (1 ms .. 10 s; others: --)</td>
+</tr>
+<tr>
+<td>PARTS</td>
+<td>MOD 1's part: BOTH / A / B</td>
+<td>MOD 2's</td>
+<td>MOD 3's</td>
+<td>MOD 4's</td>
 </tr>
 </tbody>
 </table>
@@ -761,11 +815,22 @@ envelopes already do. A route is off while its source is OFF or its amount is 0 
 <td>RANDOM</td>
 <td>a new value at each note, held while it plays</td>
 </tr>
+<tr>
+<td>KICK, SNARE, HAT, CLAP</td>
+<td>that drum's hits: full on each hit, then evenly back to nothing over the route's TIME</td>
+</tr>
 </tbody>
 </table>
 <p>The picture lists the four routes, source to destination, each amount a bar from the middle. Some ideas: VELO onto
 the CUTOFF (a harder note, brighter); KEY onto MOD1 (high notes less FM, so they stay clean); WHEEL onto the LFO's
 pitch depth for vibrato on demand; RANDOM onto the pitch, a little, for an old synth's drift.</p>
+<p><strong>The drums as sources.</strong> A drum source follows that drum's hits, from the drum sequencer and from MIDI (channel 10,
+or the DRUM page's keys). It works even when the drum's LEVEL is 0, so a silent kick can still drive a route. A drum
+muted on the LIVE screen doesn't trigger it. On <strong>AMP</strong>, a negative amount <strong>ducks</strong>: the sound dips on each hit and
+comes back over TIME (sidechain pumping). A positive amount <strong>gates</strong>: the sound opens on each hit and closes over
+TIME, and a long TIME gives swells. The duck and gate act on the voices before the effects, so the delay and reverb
+tails carry on through them. Elsewhere the drum works like any envelope: KICK onto the CUTOFF opens the filter on
+every kick, and HAT onto MOD1 adds FM bite in time with the hats.</p>
 <h3 id="mix">MIX</h3>
 <table>
 <thead>
@@ -806,6 +871,20 @@ pitch depth for vibrato on demand; RANDOM onto the pitch, a little, for an old s
 <td>the high side's octave</td>
 <td>LEARN</td>
 </tr>
+<tr>
+<td>PARTS</td>
+<td>MODE: SINGLE / DUAL / SPLIT / LAYER</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>LEVELS</td>
+<td>A LVL: part A's level</td>
+<td>B LVL: part B's</td>
+<td>A PAN: part A's place, L64 .. C .. R63</td>
+<td>B PAN: part B's</td>
+</tr>
 </tbody>
 </table>
 <p><strong>Routing.</strong> Each source goes <strong>through the filter</strong> (its drive, the low-pass or the comb, the high-pass), or
@@ -823,6 +902,54 @@ sides, four notes at a time. The filter, the envelopes, the LFOs and the effects
 plays on both sides. The sequencer, the arpeggiator and MIDI follow the split too, by each note's pitch. It is saved
 with the patch, the key and both octaves, so each patch has its own split (or none) and loading a patch brings its
 split with it; a change waits for SAVE like any other. The picture shows it under the levels (OSC1 &lt; C4 &lt; OSC2).</p>
+<p><strong>Parts.</strong> A sound can be two synths in one. <strong>Part A</strong> is OSC 1 and <strong>part B</strong> is OSC 2, and each part has its own
+filter (and high-pass), amp and filter envelopes, LFO, M.ENV 1, velocity, glide and noise. The effects, LFO 2,
+M.ENV 2 and the MATRIX are shared. <strong>MODE</strong> says how the parts play:</p>
+<table>
+<thead>
+<tr>
+<th>MODE</th>
+<th>Plays</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SINGLE</strong></td>
+<td>one synth, as before the parts: every note on both oscillators, through part A's filter and envelopes (part B's own settings unused). Every older patch loads as SINGLE and sounds as it did</td>
+</tr>
+<tr>
+<td><strong>DUAL</strong></td>
+<td>the part you are editing: the keys (and the arp) play it; the sequencer and the looper play each note on its own part. The four voices are shared, so a part B note keeps sounding when you switch to A and play over it</td>
+</tr>
+<tr>
+<td><strong>SPLIT</strong></td>
+<td>by the key: below the split key part A, from it part B (the SPLIT row's key and octaves)</td>
+</tr>
+<tr>
+<td><strong>LAYER</strong></td>
+<td>every note on both parts at once, each through its own filter and envelopes: two notes at a time</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Levels.</strong> With two parts, each has its own level and its own place in the stereo picture (the LEVELS row), set
+after its amp: A LVL and B LVL balance the two without changing how hard each drives its filter, and A PAN and B PAN
+spread them apart (a bass in the middle, a pad to the left, a lead to the right). The pan is a balance: at <strong>C</strong> a
+part sounds as it did, turned to one side the other side fades out. The effects come after, over both. In SINGLE
+they are not used.</p>
+<p>On the PARTS and LEVELS rows the picture shows <strong>the two parts side by side</strong>: each part's wave, its filter, its
+level and its place, and its voices (the four squares, lit while one sounds on that part). The part you are editing
+is framed in its colour. In SINGLE part B is greyed: part A plays both oscillators.</p>
+<p>With two parts, the <strong>SELECT</strong> button switches the part you are editing: the header shows <strong>A</strong> in amber or <strong>B</strong> in
+teal, with a thin rule of that colour under it. Every page then turns that part's own settings (the cutoff on
+PRESETS too); the oscillators, effects and shared modulators stay as they are. RANDOM rolls the part you are on.
+Press SELECT <strong>twice quickly</strong> for the FILTER page. On the pages a part has its own settings on, what you are editing
+is highlighted in the part's colour (muted amber or teal); text, and the shared pages, stay white.</p>
+<p>The shared modulators reach both parts, or one: LFO 2's and M.ENV 2's <strong>PART</strong> (on their DEST rows) and each matrix
+route's (the MATRIX page's PARTS row) is <strong>BOTH</strong>, <strong>A</strong> or <strong>B</strong>. A whole-band tremolo on part B alone, a filter sweep
+on A while B holds still. A modulator on one part shows that part's letter in its picture. LFO 2 on the effects
+(CHORUS, DELAY, REVERB, DLYTIME, DLYFDBK, REVSIZE) moves them for both, as the effects are shared. In SINGLE every
+modulator reaches the one synth, whatever its PART says. In DUAL, LAYER and SPLIT each part takes its octave from the
+SPLIT row's OCT1 (part A) and OCT2 (part B). Part B's MIDI channel is on the SETUP page.</p>
 <h3 id="arp">ARP</h3>
 <p>The arpeggiator plays the notes you hold, one at a time, in time. <strong>ARP</strong> (pressed again on the ARP page) or the ARP
 cell turns it on or off (its LED lights). While it is on, the keys and MIDI notes go to it instead of straight to
@@ -911,6 +1038,14 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 <td>tone</td>
 </tr>
 <tr>
+<td>DELAY</td>
+<td>D.SYNC</td>
+<td>SYNC ON / OFF: TIME in the tempo</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
 <td>REVERB</td>
 <td>REVERB</td>
 <td>size</td>
@@ -956,6 +1091,10 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 <li><strong>Chorus</strong>: left and right swept against each other, for width. Full mix is half wet: the classic chorus.</li>
 <li><strong>Delay</strong>: <strong>ping</strong> sends the repeats from side to side. <strong>Tone</strong> darkens each repeat. Turning the time while it
   plays bends the repeats, like tape.</li>
+<li><strong>Sync</strong>: with SYNC on, TIME picks a note length of the tempo instead of ms: 1/32, 1/16T, 1/16, 1/8T, 1/16D, 1/8,
+  1/4T, 1/8D, 1/4, 1/2T, 1/4D, 1/2. The tempo is the arp's BPM, or the MIDI clock when CLOCK is MIDI, and the delay
+  follows it as it changes. A length longer than the delay's 735 ms (slow tempos) is halved until it fits, so it
+  stays in time. LFO 2 on DLYTIME steps through the lengths.</li>
 <li><strong>Wow</strong>: sweeps the delay time, so the repeats wobble in pitch.</li>
 <li><strong>Shift</strong>: each repeat is pitch-shifted: +12 makes the echoes climb an octave at a time, -5 makes them fall in
   fourths. (The first repeat is the note as played.)</li>
@@ -1008,6 +1147,13 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 <td>3rd note</td>
 <td>4th note</td>
 <td>its velocity: AUTO (100, an accent 127) or 1 .. 127</td>
+</tr>
+<tr>
+<td>PART</td>
+<td>the step's note's part: A / B (DUAL)</td>
+<td>the 2nd note's</td>
+<td>the 3rd's</td>
+<td>the 4th's</td>
 </tr>
 <tr>
 <td>LOCK</td>
@@ -1105,6 +1251,13 @@ the STEP and CHORD rows, or CLEAR a row.</p>
   a part's notes in the EDIT row's row (or ALL), leaving the other part and the drums. A step holds up to four notes
   across both parts. Which part a note is in follows the split: move the split key and notes change sides. With the
   split off, every note is part 1's.</li>
+<li><strong>DUAL</strong> (MIX's PARTS row): each note carries its own part, A or B, so one pattern plays both synths. A note
+  recorded or entered goes on the part you are editing (SELECT), or, from a MIDI keyboard, on its channel's part (the
+  SETUP page's B IN). Record a bass on part A, press SELECT, overdub a lead on part B. The <strong>PART</strong> row shows and
+  changes the parts of the step under the cursor; steps with a note on part B have a small teal mark in their corner.
+  Here <strong>MUTE1</strong> / <strong>MUTE2</strong> and <strong>CLR1</strong> / <strong>CLR2</strong> are parts A and B. In SINGLE, SPLIT and LAYER a note's part is
+  kept but not used. The arpeggiator plays the part you are editing; the looper keeps each note on the part it was
+  played on.</li>
 <li><strong>The song</strong> (SONG and ENTRY rows): set MODE to SONG, its LENGTH to the number of entries, then for each entry its
   pattern and how many times it plays. PLAY then plays the entries in turn and starts again after the last.</li>
 <li><strong>INIT</strong> (SONG row) starts over: all four patterns empty, the song P1, P2, P3, P4 once each, PATT mode. It asks
@@ -1200,8 +1353,8 @@ step's hits, each as loud as it plays, or on the BUS row its settings.</p>
 <tr>
 <td>KIT</td>
 <td>LO-FI, TR, BOOM (and any of your own)</td>
-<td></td>
-<td></td>
+<td>PRESET: a beat (below)</td>
+<td>LOAD it (turn)</td>
 <td></td>
 </tr>
 <tr>
@@ -1220,6 +1373,40 @@ steps past the length are left alone. With LANE on ALL, all four drums go to the
 it into another to move a part, such as the kick's beat onto the snare (a flam becomes an accent off the snare, and
 rolls stay on the hat). Copy one lane and paste with LANE on ALL to put it back in its own lane. The drum clipboard is
 separate from the SEQ page's, which copies notes and drums together.</p>
+<p><strong>Preset beats</strong> (KIT row): turn <strong>PRESET</strong> to pick a beat (nothing changes yet), then turn <strong>LOAD</strong> to write it into
+the pattern you are editing (the header's P1 .. P4). A preset fills all four drum lanes: hits, accents (open hats),
+flams and hat rolls. Each is 16 steps, repeated over a longer pattern (32 steps: twice). The notes, the pattern's
+length, the kit, the levels and the tempo stay as they are. Loading while the sequencer plays swaps the beat at once.
+If you didn't want it, UNDO (PATCH screen) brings the drums back.</p>
+<table>
+<thead>
+<tr>
+<th>Style</th>
+<th>Presets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>House, techno</td>
+<td>HOUSE 1, HOUSE 2, DEEP HSE, TECH HSE, TECHNO 1, TECHNO 2, DISCO</td>
+</tr>
+<tr>
+<td>Hip-hop, trap</td>
+<td>BOOM BAP, BOOMBAP2, LO-FI HH, TRAP 1, TRAP 2 (hat rolls), DRILL</td>
+</tr>
+<tr>
+<td>UK, breaks</td>
+<td>UKG 2STP, UKG 4X4, DNB, JUNGLE, DUBSTEP, BREAKS, ELECTRO, JERSEY</td>
+</tr>
+<tr>
+<td>Latin, Afro</td>
+<td>DEMBOW (reggaeton), DANCEHL, AFROBEAT, AMAPIANO</td>
+</tr>
+</tbody>
+</table>
+<p>Set the tempo to suit: around 120-128 BPM for house and techno, 130-140 for UK garage and Jersey club, 140 for trap,
+drill and dubstep (written half-time, snare on the third beat), 170-175 for DnB and jungle, 85-95 for boom bap and
+lo-fi, 90-110 for dembow, dancehall, afrobeats and amapiano.</p>
 <p><strong>On the DRUM page the keys are the drum machine's</strong>, as on a TR (they play no notes here):</p>
 <ul>
 <li>The <strong>16 white keys</strong> (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; (the snare) again: a
@@ -1316,6 +1503,13 @@ turn the filter and the loop follows.</p>
 <td>CLOCK: INT / MIDI</td>
 <td>BEND: OFF, +-1 .. +-24 semitones</td>
 </tr>
+<tr>
+<td>PARTS</td>
+<td>B IN: OFF or 1 .. 16</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
 </tbody>
 </table>
 <ul>
@@ -1323,13 +1517,15 @@ turn the filter and the loop follows.</p>
 <li><strong>OUT</strong>: the channel the FM-1's keys send their notes on.</li>
 <li><strong>CLOCK</strong>: the arpeggiator's tempo: its own (<strong>INT</strong>, the BPM on the ARP page) or the <strong>MIDI</strong> clock.</li>
 <li><strong>BEND</strong>: how far a MIDI keyboard's pitch wheel bends every note, either way (2 at first; OFF ignores it).</li>
+<li><strong>B IN</strong>: part B's channel, for a sound in DUAL (MIX's PARTS row). Set, notes on it play part B and notes on IN play
+  part A, so a DAW can play both parts on two tracks. OFF: MIDI plays the part you are editing.</li>
 </ul>
 <hr />
 <h2 id="patches">Patches</h2>
 <p>Press <strong>SAVE</strong> for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
 osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
 them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
-tabs SAVE, LOAD, SOUND, INIT, UNDO.</p>
+tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM, TONE.</p>
 <table>
 <thead>
 <tr>
@@ -1340,11 +1536,15 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO.</p>
 <tbody>
 <tr>
 <td><strong>SELECT</strong></td>
-<td>SAVE, LOAD, SOUND, INIT or UNDO</td>
+<td>SAVE, LOAD, SOUND, INIT, UNDO, RANDOM or TONE</td>
 </tr>
 <tr>
 <td><strong>KNOB1</strong></td>
-<td>the slot</td>
+<td>the slot (TONE: the tone)</td>
+</tr>
+<tr>
+<td><strong>KNOB2</strong>, <strong>KNOB3</strong></td>
+<td>RANDOM: AMOUNT, and what it changes. TONE: KNOB2 LOAD or STORE</td>
 </tr>
 <tr>
 <td><strong>SAVE</strong></td>
@@ -1373,14 +1573,46 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO.</p>
   after a pause (2 seconds: a sweep of turns is one change), or an action: a PASTE, a CLEAR, a LOAD, SOUND or INIT.
   The screen says what it will undo; press <strong>SAVE</strong>. Press SAVE again to redo. It is one step: the change before that
   is gone. It does not undo a save (the slot keeps what was saved), and the looper is apart from it.</li>
-<li>The header shows the current slot on every page, with <strong>*</strong> when there are unsaved changes.</li>
-<li>When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.</li>
-<li>Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.</li>
-<li>Patches are kept in two flash sectors written in turn: if the power goes during a save, only that save is lost.</li>
-<li>Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them). From
-  Prysm 0.8 and older: a modulator in MIX or RING gets the pitch of its ratio (x2: +12, x1.5: +7); ratios of 5 and
-  up are further than PIT goes, and come in at +24.</li>
+<li><strong>RANDOM</strong> rolls the sound: each <strong>SAVE</strong> a new roll. <strong>KNOB2</strong> is the AMOUNT, 5 .. 100 % (100: NEW SOUND): a
+  little nudges the sound you have (its waves, types and destinations seldom switch, effects that are off stay off),
+  100 % rolls a new one. <strong>KNOB3</strong> picks what may change: ALL, OSC (waves, ratios, modes, levels, the noise, the
+  transients), FILTER, ENV, MOD (the LFOs, the mod envelopes' destinations, the matrix) or FX. Values stay in the
+  ranges that sound (a pitch LFO a vibrato, short attacks more often than long), and the sound is kept audible. The
+  arp, glide, velocity, the split, the VCA and the routing are never touched. Rolls in a row are <strong>one UNDO</strong>: UNDO
+  brings back the sound before the first. Like it: SAVE it to a slot.</li>
+<li><strong>TONE</strong> is the tone library (below): <strong>KNOB1</strong> picks a tone, <strong>KNOB2</strong> LOAD or STORE, <strong>SAVE</strong> does it.</li>
 </ul>
+<h3 id="tones">Tones</h3>
+<p>A <strong>tone</strong> is one part's sound on its own, as the Roland D-50 kept its tones apart from its patches: the part's
+oscillator (its waves, modulators, ratios and pitches, envelopes and level), its transient and route, and the part's
+own filter, amp envelope, LFO, mod envelope 1, noise, velocity and glide. Not in a tone: the other part, the mode,
+the effects, LFO 2, mod envelope 2, the matrix, the arp and the sequencer. So a tone is something to build a sound
+from: a bass on A, a pad on B, the effects over both.</p>
+<p>The TONE row shows eight tones at a time, each its name and its carrier's wave; the selected one is framed (in the
+part's colour, two parts playing). There are 160:</p>
+<ul>
+<li><strong>96 factory tones</strong>, eight of each: BASS, KEYS, PADS, LEADS, BELLS, PLUCKS, ORCH (brass, strings, winds), FX,
+  SYNTH, PERC (toms, cowbell, congas, woodblock ...), VOICE (choirs, formants, robot) and ATMOS (rain, space, deep
+  sea ...). They are fixed.</li>
+<li><strong>64 user tones</strong>, after them, EMPTY until you store one.</li>
+</ul>
+<p><strong>LOAD</strong> puts the tone into the part being edited (SELECT picks A or B: see Parts), and leaves the rest of the sound
+as it was. The screen says where it went: DX BELL INTO B. It is one <strong>UNDO</strong> step. With one part playing (SINGLE), the
+tone goes into A, osc 1, and osc 2's level goes down to 0, so you hear the tone as it was made: turn OSC 2's level
+back up to layer it. A tone sounds the same in A as in B: its modulation of its own oscillator (WAVE1, MOD1 ...) is
+osc 2's in part B.</p>
+<p><strong>STORE</strong> keeps the part being edited as a user tone: pick one of the user tones with KNOB1, name it, and press SAVE
+(over a stored one it asks first: SAVE again). The name is under the line: <strong>KNOB3</strong> moves along its nine letters
+(the one being changed is inverted), <strong>KNOB4</strong> turns that letter (A .. Z, 0 .. 9, a space and - . &amp; + / ' #). An
+empty tone starts as USER and its number, a stored one with its own name (store it again to rename it). The user
+tones are kept in flash, apart from the patch slots.
+- The header shows the current slot on every page, with <strong>*</strong> when there are unsaved changes.
+- When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.
+- Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.
+- Patches are kept in two flash sectors written in turn: if the power goes during a save, only that save is lost.
+- Patches saved by an older Prysm load in a newer one (the new parts start as the default sound has them). From
+  Prysm 0.8 and older: a modulator in MIX or RING gets the pitch of its ratio (x2: +12, x1.5: +7); ratios of 5 and
+  up are further than PIT goes, and come in at +24.</p>
 <hr />
 <h2 id="the-oscilloscope">The oscilloscope</h2>
 <p>Press <strong>HOME</strong> for a live scope of what Prysm plays (before the MASTER knob, so it does not shrink as you turn it
@@ -1526,7 +1758,10 @@ uses the internal tempo).</p>
 <p><a href="https://nicholaspratt.github.io/Prysm/editor/">The editor</a> (Chrome or Edge) is Prysm itself, running in the
 page: the screen, the knobs (drag or scroll), the buttons and the keys (or your computer's keys, A W S E D ... from C4),
 with the sound. Beside it, a tab for every page with every parameter, the sequencer's 64 steps as a grid, and patch
-files to save and load. The browser keeps its own 8 slots between visits.</p>
+files to save and load. The browser keeps its own 8 slots between visits, and its own user tones. <strong>Tone…</strong> loads a
+tone from the library into part A or B (the menu beside it). In the plugin, the user tones are kept with the project.
+<strong>Load patch</strong> opens a patch file: the <a href="https://github.com/NicholasPratt/Prysm/tree/main/patches">demo sounds</a> show the
+two parts (a bass under a pad, a piano layered with strings, a bass line and a lead on one pattern ...).</p>
 <p><strong>With an FM-1</strong> (Prysm 1.0 or later): connect it by USB and press <strong>Connect FM-1</strong> (allow MIDI when the browser
 asks). The editor takes the FM-1's current sound, and from then on the two stay in step: what you change in the editor
 the FM-1 plays (its knob's value shows in the corner, as if you had turned it), and what you turn on the FM-1 shows up

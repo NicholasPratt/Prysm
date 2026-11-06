@@ -488,7 +488,7 @@ function frame() {
   if (!lastPatch || pt.some((v, i) => v !== lastPatch[i])) { refresh(pt); lastPatch = pt.slice(); }
   const sq = seqs(), play = M._web_seq_playing() << 8 | M._web_seq_entry();
   if (!lastSeqs || play !== lastPlay || sq.some((v, i) => v !== lastSeqs[i])) { refreshSeq(sq); refreshDrum(sq); lastSeqs = sq.slice(); lastPlay = play; }
-  if (M._web_store_gen() !== lastStore) { lastStore = M._web_store_gen(); keep(); }
+  if (M._web_store_gen() !== lastStore) { lastStore = M._web_store_gen(); keep(); if (PLUGIN) plug.tones(); }
   (PLUGIN ? plug : dev).sync(pt, sq);
   requestAnimationFrame(frame);
 }
@@ -604,18 +604,18 @@ $("file").onchange = async () => {
 $("random").onclick = () => {                 // (the FM-1 follows: the differences go to it)
   M._web_random(+$("rnd-amt").value, +$("rnd-sec").value, (Math.random() * 4294967296) >>> 0);
 };
-const TONE_GROUPS = ["Bass", "Keys", "Pads", "Leads", "Bells", "Plucks", "Orchestral", "FX"];
-function toneList() {                         // the library: the factory's 64 in groups of 8, then the user's stored
-  const sel = $("tone");
+function toneList() {                         // the library: the factory's in groups of 8, then the user's stored
+  const sel = $("tone"), rom = M._web_tone_rom_n(), all = M._web_tone_n();
+  const label = (i) => { const t = M.UTF8ToString(M._web_tone_group(i >> 3)); return t.length <= 2 ? t : t[0] + t.slice(1).toLowerCase(); };
   sel.length = 1;
   let g = null;
-  for (let i = 0; i < 128; i++) {
+  for (let i = 0; i < all; i++) {
     const name = M.UTF8ToString(M._web_tone_name(i));
     if (!name) continue;
     if (i % 8 === 0 || !g) {
       g = document.createElement("optgroup");
-      g.label = i < 64 ? TONE_GROUPS[i >> 3] : "User";
-      if (i >= 64 && sel.lastChild.label === "User") g = sel.lastChild; else sel.appendChild(g);
+      g.label = i < rom ? label(i) : "User";
+      if (i >= rom && sel.lastChild.label === "User") g = sel.lastChild; else sel.appendChild(g);
     }
     const o = document.createElement("option");
     o.value = i; o.textContent = name;
@@ -668,7 +668,32 @@ const plug = {
       M._web_seqs_loaded();
       this.sshadow = q.slice();
     }
+    if (r.tones && r.tones.length) {           // (the project's user tones: as the plugin keeps them)
+      const b = Uint8Array.from(r.tones), a = M._web_tone_area();
+      for (let h = 0, at = 0; h < 2 && at + 2 <= b.length; h++) {
+        const n = b[at] << 8 | b[at + 1];
+        if (at + 2 + n > b.length) break;
+        M.HEAPU8.set(b.subarray(at + 2, at + 2 + n), M._web_seqstore(a + h));
+        M._web_seqstore_set_len(a + h, n);
+        at += 2 + n;
+      }
+      M._web_tones_changed();
+      this.tonesSent = b.join();
+    } else this.tones();                        // (none in the project: this page's, to it)
     status(r.status || "");
+  },
+  tonesSent: "",
+  tones() {                                     // the user tones to the plugin, to keep in the project: each half's
+    if (typeof prysm_tones !== "function") return;   //  length (2 bytes) and bytes
+    const a = M._web_tone_area(), out = [];
+    for (let h = 0; h < 2; h++) {
+      const n = M._web_seqstore_len(a + h);
+      out.push(n >> 8, n & 255, ...M.HEAPU8.subarray(M._web_seqstore(a + h), M._web_seqstore(a + h) + n));
+    }
+    const k = out.join();
+    if (k === this.tonesSent) return;
+    this.tonesSent = k;
+    if (out.length > 4) prysm_tones(out);
   },
   sync(pt, sq) {                                // what the plugin does not have yet
     if (!this.shadow) return;

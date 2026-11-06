@@ -158,7 +158,7 @@ static void cap_midi(uint8_t st, uint8_t d1, uint8_t d2) { (void)st; (void)d1; (
 static void cap_start(uint32_t keys) { (void)keys; }
 static void cap_stop(void) {}
 
-#define CAP_STATE_MAX 6144u
+#define CAP_STATE_MAX 8192u
 static uint8_t cap_buf[CAP_STATE_MAX];
 _Static_assert(4u + PATCH_SLOTS + (PATCH_SLOTS + 2u) * sizeof(patch_t) + 4u + sizeof(gset_t) + 4u +
                PG_N * 4u + 12u + sizeof(seqs_t) <= CAP_STATE_MAX, "the capture state fits its buffer");

@@ -7,13 +7,18 @@ LFO, two looping mod envelopes, a mod matrix, a phaser / flanger, a bit-crusher 
 Alongside it a **drum machine** (kick, snare, hat, clap; three kits) plays a lane of its own in every sequencer pattern,
 the sequencer's steps can lock knobs, and a **looper** records what you play over it.
 
+A sound can also be **two synths in one**: part A on osc 1 and part B on osc 2, each with its own filter, envelopes
+and LFO, played together, side by side on the keys or one at a time ([Parts](#mix)). Each part can load a **tone**
+from a library of 96 (and 64 of your own: [Tones](#tones)); each oscillator can have a sampled **attack transient**
+([TRANS](#trans)); and **RANDOM** rolls a new sound, or nudges the one you have ([Patches](#patches)).
+
 - [Installing](#installing)
 - [Playing](#playing)
 - [Finding your way around](#finding-your-way-around)
-- [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [NOISE](#noise), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
+- [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [TRANS](#trans), [NOISE](#noise), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
   [LFO 2](#lfo-2), [MATRIX](#matrix), [MIX](#mix), [ARP](#arp), [SEQ](#seq), [DRUM](#drum), [LOOP](#loop),
   [FX](#fx) (CHORUS, DELAY, REVERB, MOD FX, CRUSH), [SETUP](#setup)
-- [Patches](#patches)
+- [Patches](#patches): [Tones](#tones)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
 - [The editor](#the-editor)
@@ -31,7 +36,7 @@ restart. Do not unplug it while it writes.
 **From the command line** (a built package, see the README):
 
 ```sh
-python3 tools/fm1_install.py prysm-1.4.fwsc
+python3 tools/fm1_install.py prysm-1.5.fwsc
 ```
 
 **Coming from another firmware.** Most community firmwares (Felucca, SLOOP, Dinghy and their family, and the official
@@ -40,6 +45,10 @@ official V15 first (ETCH's own installer has *RESTORE - OFFICIAL V15*), then ins
 
 **Going back.** The [FM-1 Firmware Hub](https://thefirmwarehub.com) installs the official firmware and every
 community firmware; Prysm answers its updater like the others.
+
+**Newer FM-1s.** Units sold from autumn 2026 (mostly on AliExpress) have a different flash chip, a UC25HQ80. Prysm
+supports it from 1.4.1 on; older Prysm releases refuse to install on these units (the FM-1 keeps the firmware it has).
+If the USB rescue screen (OCT- held at power-on) shows *UNKNOWN FLASH* and a code, please report the code.
 
 Prysm is a community firmware, not made or supported by M-VAVE. Installing it is at your own risk.
 
@@ -408,6 +417,7 @@ every kick, and HAT onto MOD1 adds FM bite in time with the hats.
 | GLIDE | glide time (0 = off) | mode: ALWAYS / LEGATO | | |
 | SPLIT | the split key (OFF, or a note) | the low side's octave (-2 .. +2) | the high side's octave | LEARN |
 | PARTS | MODE: SINGLE / DUAL / SPLIT / LAYER | | | |
+| LEVELS | A LVL: part A's level | B LVL: part B's | A PAN: part A's place, L64 .. C .. R63 | B PAN: part B's |
 
 **Routing.** Each source goes **through the filter** (its drive, the low-pass or the comb, the high-pass), or
 **DIRECT**: past it, straight to the amp (its envelope, VCA OPEN, the effects all still apply). Filter one
@@ -437,6 +447,16 @@ M.ENV 2 and the MATRIX are shared. **MODE** says how the parts play:
 | **DUAL** | the part you are editing: the keys (and the arp) play it; the sequencer and the looper play each note on its own part. The four voices are shared, so a part B note keeps sounding when you switch to A and play over it |
 | **SPLIT** | by the key: below the split key part A, from it part B (the SPLIT row's key and octaves) |
 | **LAYER** | every note on both parts at once, each through its own filter and envelopes: two notes at a time |
+
+**Levels.** With two parts, each has its own level and its own place in the stereo picture (the LEVELS row), set
+after its amp: A LVL and B LVL balance the two without changing how hard each drives its filter, and A PAN and B PAN
+spread them apart (a bass in the middle, a pad to the left, a lead to the right). The pan is a balance: at **C** a
+part sounds as it did, turned to one side the other side fades out. The effects come after, over both. In SINGLE
+they are not used.
+
+On the PARTS and LEVELS rows the picture shows **the two parts side by side**: each part's wave, its filter, its
+level and its place, and its voices (the four squares, lit while one sounds on that part). The part you are editing
+is framed in its colour. In SINGLE part B is greyed: part A plays both oscillators.
 
 With two parts, the **SELECT** button switches the part you are editing: the header shows **A** in amber or **B** in
 teal, with a thin rule of that colour under it. Every page then turns that part's own settings (the cutoff on
@@ -801,11 +821,12 @@ the effects, LFO 2, mod envelope 2, the matrix, the arp and the sequencer. So a 
 from: a bass on A, a pad on B, the effects over both.
 
 The TONE row shows eight tones at a time, each its name and its carrier's wave; the selected one is framed (in the
-part's colour, two parts playing). There are 128:
+part's colour, two parts playing). There are 160:
 
-- **1 .. 64, the factory's**, eight of each: BASS, KEYS, PADS, LEADS, BELLS, PLUCKS, ORCH (brass, strings, winds)
-  and FX. They are fixed.
-- **65 .. 128, the user's**, USER 1 .. USER 64, EMPTY until you store one.
+- **96 factory tones**, eight of each: BASS, KEYS, PADS, LEADS, BELLS, PLUCKS, ORCH (brass, strings, winds), FX,
+  SYNTH, PERC (toms, cowbell, congas, woodblock ...), VOICE (choirs, formants, robot) and ATMOS (rain, space, deep
+  sea ...). They are fixed.
+- **64 user tones**, after them, EMPTY until you store one.
 
 **LOAD** puts the tone into the part being edited (SELECT picks A or B: see Parts), and leaves the rest of the sound
 as it was. The screen says where it went: DX BELL INTO B. It is one **UNDO** step. With one part playing (SINGLE), the
@@ -813,9 +834,11 @@ tone goes into A, osc 1, and osc 2's level goes down to 0, so you hear the tone 
 back up to layer it. A tone sounds the same in A as in B: its modulation of its own oscillator (WAVE1, MOD1 ...) is
 osc 2's in part B.
 
-**STORE** keeps the part being edited as a user tone: pick USER 1 .. 64 with KNOB1 and press SAVE (over a stored
-one it asks first: SAVE again). It is named after its number (USER 12). The user tones are kept in flash, apart from
-the patch slots.
+**STORE** keeps the part being edited as a user tone: pick one of the user tones with KNOB1, name it, and press SAVE
+(over a stored one it asks first: SAVE again). The name is under the line: **KNOB3** moves along its nine letters
+(the one being changed is inverted), **KNOB4** turns that letter (A .. Z, 0 .. 9, a space and - . & + / ' #). An
+empty tone starts as USER and its number, a stored one with its own name (store it again to rename it). The user
+tones are kept in flash, apart from the patch slots.
 - The header shows the current slot on every page, with **\*** when there are unsaved changes.
 - When the FM-1 is switched on, the slot last saved or loaded comes back, and the sequencer that was playing.
 - Saving takes a moment (the flash is erased): a note playing drops out for about 50 ms.
@@ -932,7 +955,9 @@ uses the internal tempo).
 page: the screen, the knobs (drag or scroll), the buttons and the keys (or your computer's keys, A W S E D ... from C4),
 with the sound. Beside it, a tab for every page with every parameter, the sequencer's 64 steps as a grid, and patch
 files to save and load. The browser keeps its own 8 slots between visits, and its own user tones. **Tone…** loads a
-tone from the library into part A or B (the menu beside it).
+tone from the library into part A or B (the menu beside it). In the plugin, the user tones are kept with the project.
+**Load patch** opens a patch file: the [demo sounds](https://github.com/NicholasPratt/Prysm/tree/main/patches) show the
+two parts (a bass under a pad, a piano layered with strings, a bass line and a lead on one pattern ...).
 
 **With an FM-1** (Prysm 1.0 or later): connect it by USB and press **Connect FM-1** (allow MIDI when the browser
 asks). The editor takes the FM-1's current sound, and from then on the two stay in step: what you change in the editor

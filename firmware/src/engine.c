@@ -222,7 +222,9 @@ typedef struct {
     /* (added in patch format 19: the shared modulators' parts) */
     uint8_t l2_part, me2_part;                  /* LFO 2, mod envelope 2: PT_BOTH, PT_A, PT_B (SINGLE: both, always) */
     uint8_t mm_part[MM_SLOTS];                  /* each matrix route's */
-} patch_t;
+    uint8_t pvol[2];                            /* (format 20) each part's level, past its amp: 127 = as it is */
+    uint8_t ppan[2];                            /* each part's place: 0 left .. 64 centre .. 127 right (SINGLE: */
+} patch_t;                                      /*  neither) */
 /* the fields a part has its own of: part B's in pb, in this order */
 #define PF(f) ((uint8_t)__builtin_offsetof(patch_t, f))
 static const uint8_t PART_OFF[PART_N] = {
@@ -414,6 +416,7 @@ static const patch_t PATCH_INIT = {
            60, 70, 0, 60, 0, DEST_LFORATE, 64, 80, 40, 50, 0, GLIDE_ALWAYS, 0, FLT_LP12, 30, 0,
            NOISE_WHITE, 100, 0, ROUTE_FILTER, 0},
     .l2_part = PT_BOTH, .me2_part = PT_BOTH, .mm_part = {PT_BOTH, PT_BOTH, PT_BOTH, PT_BOTH},
+    .pvol = {127, 127}, .ppan = {64, 64},
 };
 
 static void part_b(patch_t *q, const patch_t *p)   /* q: p as part B has it (B's own fields in A's places) */
@@ -495,6 +498,8 @@ typedef struct {
     uint32_t t_dk[NOSC];                        /* DECAY's fade: a block's step (Q16, exponential; 0: none) */
     uint8_t vmode;                              /* VM_SINGLE .. VM_LAYER */
     uint8_t l2_parts, me2_parts, mm_parts[MM_SLOTS];   /* the parts each reaches: bit 0 A's voices, bit 1 B's */
+    uint8_t pbus;                               /* two parts, a level or a place not as it is: B's voices on a bus */
+    int32_t pg[2][2];                           /* each part's gains, left and right: Q15 (32768: as it is) */
 } eng_t;
 static volatile eng_t eg, eb;                   /* (eg: everything, part A's; eb: part B's own) */
 #define PE(v) (voice[v].part ? &eb : &eg)       /* a voice's part's */
@@ -2146,7 +2151,9 @@ static __attribute__((noinline)) void layer_follow(void)   /* LAYER: each odd vo
     }
 }
 
-static void engine_render(int32_t *out, uint32_t n)
+#define PBUS_N 256u                             /* (the FM-1's half buffer) */
+static int32_t pbus[2u * PBUS_N];               /* part B's voices, when its level or place (or A's) is its own */
+static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the caller) */
 {
     uint32_t v, o, k, b, i, nb = n / BLK;
     uint32_t g_ph[MAXBLK];                      /* the free-running LFO, block by block, shared by the voices */
@@ -2157,6 +2164,11 @@ static void engine_render(int32_t *out, uint32_t n)
     uint32_t l2inc = eg.l2_inc;
     if (!engine_up)                             /* (zeroed voices: itrig 0 would start note 0 on every one, held) */
         return;
+    if (eg.pbus && n > PBUS_N) {                /* (part B's bus: PBUS_N frames at a time) */
+        engine_render(out, PBUS_N);
+        engine_render(out + 2u * PBUS_N, n - PBUS_N);
+        return;
+    }
     {                                           /* the tempo: a tick of the arp's (or MIDI's) clock */
         uint32_t t = eg.arp_midi && mc_bpm10 && mc.period_q8 ? mc.period_q8 : eg.tick_q8;
         fx_tick_q8 = t > 1000000u ? 1000000u : t;   /* (under ~28 BPM: as slow as that) */
@@ -2238,6 +2250,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 if (voice[v].glide_q8 > -64 && voice[v].glide_q8 < 64) voice[v].glide_q8 = 0;
             }
             const volatile eng_t *pe = PE(v);   /* (its part's filter, envelopes, LFO: SINGLE always A's) */
+            int32_t *vo = (eg.pbus && voice[v].part ? pbus : out) + 2u * b;   /* (this block's: part B's bus, or out) */
             uint32_t lm = voice[v].lk_m;        /* (the step's locks: these knobs the note's own) */
             int32_t a_to = env_step(&voice[v].amp, gate, pe->a_att, lm >> LK_ADEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_ADEC]] : pe->a_dec,
                                     pe->a_sus, lm >> LK_AREL & 1u ? PR_ENV_EXP[voice[v].lk[LK_AREL]] : pe->a_rel) >> 9;
@@ -2553,8 +2566,8 @@ static void engine_render(int32_t *out, uint32_t n)
                         s = clip15(s);
                     }
                     s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
-                    out[2u * (b + i)] += s;
-                    out[2u * (b + i) + 1u] += s;
+                    vo[2u * i] += s;
+                    vo[2u * i + 1u] += s;
                 }
                 voice[v].ic1 = comb ? 0 : ic1;
                 voice[v].f_pk = pk;
@@ -2562,7 +2575,7 @@ static void engine_render(int32_t *out, uint32_t n)
                 voice[v].ic3 = lp24 ? ic3 : 0;
                 voice[v].ic4 = lp24 ? ic4 : 0;
                 if (hg)
-                    hp_block(v, hg, acc, direct ? dir : 0, a0, da, out + 2u * b);
+                    hp_block(v, hg, acc, direct ? dir : 0, a0, da, vo);
                 else
                     voice[v].hp1 = voice[v].hp2 = 0;
                 voice[v].clp = clp;
@@ -2577,12 +2590,19 @@ static void engine_render(int32_t *out, uint32_t n)
                     if (!eg.t_type[o])          /* (its TYPE turned OFF while it played: done) */
                         voice[v].t_g[o] = 0;
                     else if (voice[v].omask >> o & 1u && !(live_mute >> (LM_OSC1 + o) & 1u))
-                        trn_block(v, o, out + 2u * b, (int32_t)(voice[v].note + voice[v].shift - 60) * 16 +
+                        trn_block(v, o, vo, (int32_t)(voice[v].note + voice[v].shift - 60) * 16 +
                                                           m.pitch16[o] + (voice[v].glide_q8 >> 8));
                 }
             voice[v].amp_q15 = a_to;
         }
     }
+    if (eg.pbus)                                /* the parts' levels and places: A's in out (only it, yet), B's bus */
+        for (i = 0; i < n; i++) {
+            int32_t a = out[2u * i], bb = pbus[2u * i];   /* (mono: left and right the same) */
+            out[2u * i] = (int32_t)(((int64_t)a * eg.pg[0][0] + (int64_t)bb * eg.pg[1][0]) >> 15);
+            out[2u * i + 1u] = (int32_t)(((int64_t)a * eg.pg[0][1] + (int64_t)bb * eg.pg[1][1]) >> 15);
+            pbus[2u * i] = pbus[2u * i + 1u] = 0;
+        }
     {                                           /* the free-running LFO follows the newest note's mod envelope */
         uint32_t newest = NV, best = 0;
         for (v = 0; v < NV; v++)
@@ -2770,6 +2790,23 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
                 engine_tables(o, k);
     }
     eg.vmode = patch.vmode < VM_N ? patch.vmode : VM_SINGLE;
+    {                                           /* the parts' levels and places: a balance (centre: both as they are) */
+        uint32_t pt, on = 0;
+        for (pt = 0; pt < 2u; pt++) {
+            uint32_t vol = patch.pvol[pt] & 127u, pan = patch.ppan[pt] & 127u;
+            int32_t g = vol >= 127u ? 32768 : (int32_t)PR_CURVE_Q15[vol];
+            int32_t l = pan <= 64u ? 32768 : (int32_t)((127u - pan) * 32768u / 63u);
+            int32_t r = pan >= 64u ? 32768 : (int32_t)(pan * 32768u / 64u);
+            eg.pg[pt][0] = (int32_t)(((int64_t)g * l) >> 15);
+            eg.pg[pt][1] = (int32_t)(((int64_t)g * r) >> 15);
+            on |= vol < 127u || pan != 64u;
+        }
+        if (!on || eg.vmode == VM_SINGLE) eg.pbus = 0;
+        else if (!eg.pbus) {                    /* (the bus clean before it is used) */
+            memset(pbus, 0, sizeof pbus);
+            eg.pbus = 1;
+        }
+    }
     eg.l2_parts = parts_of(patch.l2_part);
     eg.me2_parts = parts_of(patch.me2_part);
     for (k = 0; k < MM_SLOTS; k++)

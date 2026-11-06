@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The two parts (patch format 18), on a computer, through the app's own code: a format 17 sound reads as SINGLE with
+/* The two parts (patch formats 18 .. 20), on a computer, through the app's own code: a format 17 sound reads as SINGLE with
  * part B as its part A; PATCH_INIT's part B is its part A; DUAL plays the part the keys are on, its oscillator alone
  * through its own amp; SPLIT picks the part by the note; LAYER plays every note on two voices, A and B, the arp's too,
  * and lets both go; part B's own LFO and filter are its own; a format 18 sound keeps its parts, its shared modulators on
@@ -314,6 +314,62 @@ int main(void)
         loop_cmd(LPC_CLEAR);
         run(BLK * 4u);
         CHECK(b_ok && lp.ev[0].vel == (100u | 128u), "the looper: a note played on part B plays back on B");
+    }
+
+    /* the parts' levels and places (format 20): as they are, nothing changes; B hard right: its left silent, its
+     * right as before; A's level 0: A silent; SINGLE: neither; a long render: as two of the bus's length */
+    {
+        static int32_t l0[2u * 4410u], l1[2u * 4410u];
+        uint64_t el, er, el0, er0;
+        uint32_t f;
+        p = PATCH_INIT;
+        p.cho_mix = p.dly_mix = p.rev_mix = 0;
+        p.vmode = VM_DUAL;
+#define TAKE(buf_, part_) do { start(&p); key_part = (uint8_t)(part_); engine_note_on_vel(60, 100); key_part = 0; \
+            for (f = 0; f < 4410u; f += BLK) { memset(buf, 0, sizeof buf); engine_render(buf, BLK); \
+                memcpy((buf_) + 2u * f, buf, sizeof buf); } } while (0)
+        TAKE(l0, 1);
+        CHECK(!eg.pbus, "DUAL, levels and places as they are: no bus");
+        p.ppan[1] = 127;
+        TAKE(l1, 1);
+        for (f = 0, el = er = el0 = er0 = 0; f < 4410u; f++) {
+            el += (uint64_t)((int64_t)l1[2u * f] * l1[2u * f] >> 16); er += (uint64_t)((int64_t)l1[2u * f + 1u] * l1[2u * f + 1u] >> 16);
+            el0 += (uint64_t)((int64_t)l0[2u * f] * l0[2u * f] >> 16); er0 += (uint64_t)((int64_t)l0[2u * f + 1u] * l0[2u * f + 1u] >> 16);
+        }
+        CHECK(eg.pbus && el == 0 && er0 > 0 && er > er0 - er0 / 100u && er < er0 + er0 / 100u,
+              "B hard right: its left silent, its right as it was (within 1 %%: the free LFO)");
+        TAKE(l1, 0);
+        for (f = 0, ok = 1; f < 4410u; f++) ok &= l1[2u * f] == l1[2u * f + 1u];
+        CHECK(ok, "A, centred: left and right the same with B moved");
+        p.ppan[1] = 64; p.pvol[0] = 0;
+        TAKE(l1, 0);
+        for (f = 0, ok = 1; f < 4410u; f++) ok &= l1[2u * f] == 0;
+        CHECK(ok, "A's level 0: A silent");
+        p.vmode = VM_SINGLE;
+        TAKE(l1, 0);
+        CHECK(!eg.pbus && run(BLK * 8u) > 0, "SINGLE: the levels and places not used");
+        p.vmode = VM_DUAL; p.pvol[0] = 127; p.ppan[1] = 127;
+        start(&p);
+        key_part = 1;
+        engine_note_on_vel(60, 100);
+        key_part = 0;
+        memset(l0, 0, sizeof l0);
+        engine_render(l0, 512u);               /* (past the bus's 256: two renders) */
+        for (f = 0, el = 0, er = 0, ok = 0; f < 512u; f++) {
+            el |= (uint32_t)l0[2u * f];
+            if (f < 256u) er |= l0[2u * f + 1u] != 0; else ok |= l0[2u * f + 1u] != 0;
+        }
+        CHECK(!el && er && ok, "a render of 512 frames: both halves through the bus, B still right");
+#undef TAKE
+        {
+            static uint8_t o19[PATCH_V19_SIZE];
+            p = PATCH_INIT;
+            p.vmode = VM_LAYER;
+            memcpy(o19, &p, sizeof o19);
+            memset(&q, 0xAA, sizeof q);
+            CHECK(patch_from(&q, o19, PATCH_V19_SIZE, 19) == 0 && q.vmode == VM_LAYER && q.pvol[0] == 127 &&
+                  q.pvol[1] == 127 && q.ppan[0] == 64 && q.ppan[1] == 64, "a format 19 sound: levels full, centred");
+        }
     }
     printf("%s\n", fails ? "FAILED" : "all ok");
     return fails != 0;

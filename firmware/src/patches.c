@@ -26,7 +26,7 @@
  *  18  + the two parts (vmode, pb: SINGLE, part B as part A, as before)
  *  19  + the shared modulators' parts (l2_part, me2_part, mm_part: BOTH, as before) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 19u
+#define PATCH_VERSION 20u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
@@ -45,6 +45,7 @@
 #define PATCH_V16_SIZE 161u                     /* format 16's: everything before trn_type */
 #define PATCH_V17_SIZE 169u                     /* format 17's: everything before vmode */
 #define PATCH_V18_SIZE 212u                     /* format 18's: everything before l2_part */
+#define PATCH_V19_SIZE 218u                     /* format 19's: everything before pvol */
 #define PATCH_OLD_MAX PATCH_V9_SIZE
 #define PATCH_SEQ_AT PATCH_V6_SIZE              /* formats 7 .. 9: the pattern (seq_len, div, gate, pad, note[64], */
 #define PATCH_SEQ_N (PATCH_V7_SIZE - PATCH_V6_SIZE)   /* trig[64], slide[64]) here, the rest after it */
@@ -65,6 +66,7 @@ _Static_assert(__builtin_offsetof(patch_t, dly_sync) == PATCH_V15_SIZE, "format 
 _Static_assert(__builtin_offsetof(patch_t, trn_type) == PATCH_V16_SIZE, "format 16 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, vmode) == PATCH_V17_SIZE, "format 17 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, l2_part) == PATCH_V18_SIZE, "format 18 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, pvol) == PATCH_V19_SIZE, "format 19 is a prefix of patch_t");
 
 /* patch p from n bytes of format version (a patch file, the plugin's state, a slot): 0 = done */
 static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version);
@@ -89,7 +91,7 @@ static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t ver
                                                  PATCH_V5_SIZE, PATCH_V6_SIZE, PATCH_V7_SIZE, PATCH_V8_SIZE,
                                                  PATCH_V9_SIZE, PATCH_V10_SIZE, PATCH_V11_SIZE, PATCH_V12_SIZE,
                                                  PATCH_V13_SIZE, PATCH_V14_SIZE, PATCH_V15_SIZE, PATCH_V16_SIZE,
-                                                 PATCH_V17_SIZE, PATCH_V18_SIZE};
+                                                 PATCH_V17_SIZE, PATCH_V18_SIZE, PATCH_V19_SIZE};
     /* RATIO -> PITCH (0..48, 24 = in tune) and FINE: 0.5 .. 4 as near as they go, 5 and up as far: +24 */
     static const uint8_t R_SEMI[PR_RATIOS] = {12, 24, 31, 36, 43, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48};
     static const uint8_t R_FINE[PR_RATIOS] = {64, 64, 66, 64, 66, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64};
@@ -340,6 +342,7 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     old_size = 0;
     seqs_moved = 0;
     if (store_try(PATCH_VERSION, sizeof(patch_t), SEQS_VERSION, ~0u) == 0 ||
+        store_try(19u, PATCH_V19_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.5's dev: shared modulators' parts) */
         store_try(18u, PATCH_V18_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.5's dev: two parts) */
         store_try(17u, PATCH_V17_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.5's dev: the transients) */
         store_try(16u, PATCH_V16_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.4's after: delay sync, drum routes) */
