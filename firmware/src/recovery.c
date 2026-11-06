@@ -56,13 +56,17 @@ static void recovery_main(void)
     recovery_last = recovery_usb_last = fm1_ticks();
     recovery_fraction = fm1_ms = 0;
     /* No persist_boot or OTA cleanup: no flash write just for entering rescue. */
-    flash_ok = FL_JEDEC_OK(FL_FAR(fl_jedec_ram)());
+    uint32_t jedec = FL_FAR(fl_jedec_ram)();
+    char unk[] = "UNKNOWN FLASH 000000";  /* the id, so a new part can be reported (fm1_flash_map.h) */
+    for (int i = 0; i < 6; i++)
+        unk[14 + i] = "0123456789ABCDEF"[(jedec >> (20 - 4 * i)) & 15u];
+    flash_ok = FL_JEDEC_OK(jedec);
     lcd_init();
     lcd_fill(0, 0, 240, 240, C_BLACK);
     draw_text_box(0, 64, 240, &FONT_S, APP_NAME " USB RESCUE", C_WHITE, 1);
     draw_text_box(0, 96, 240, &FONT_S, "CONNECT USB", C_WHITE, 1);
     draw_text_box(0, 124, 240, &FONT_S,
-                  flash_ok ? "OPEN THE INSTALLER" : "UNKNOWN FLASH", C_WHITE, 1);
+                  flash_ok ? "OPEN THE INSTALLER" : unk, C_WHITE, 1);
     draw_text_box(0, 164, 240, &FONT_S, "AUDIO OFF", C_WHITE, 1);
     lcd_sync();
     usb_start();

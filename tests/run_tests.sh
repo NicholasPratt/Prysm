@@ -24,6 +24,8 @@ run "FM-1 MIDI: USB, the TRS jack, a clock, the channel" sh tests/run_host.sh te
 
 $CC -DBOARD_SMK37=1 -Ifirmware/hal -o "$OUT/smk_flash_test" tests/smk_flash_test.c
 run "SMK-37 flash map: settings, blobs, owner tag, slots in the store; never the head, BTIF/USRTRIM, USR, key_mac" "$OUT/smk_flash_test"
+$CC -Ifirmware/hal -o "$OUT/flash_id_test" tests/flash_id_test.c
+run "FM-1 flash chips: the Puya P25Q80 and the newer UC25HQ80, nothing else" "$OUT/flash_id_test"
 $CC -o "$OUT/smk_wheel_test" tests/smk_wheel_test.c
 run "SMK-37 pitch wheel: the bend is back to 0 at rest, however slowly the wheel was moved" "$OUT/smk_wheel_test"
 
