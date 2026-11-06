@@ -1,10 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* The two parts (patch formats 18 .. 20), on a computer, through the app's own code: a format 17 sound reads as SINGLE with
+/* The two parts (patch formats 18 .. 21), on a computer, through the app's own code: a format 17 sound reads as SINGLE with
  * part B as its part A; PATCH_INIT's part B is its part A; DUAL plays the part the keys are on, its oscillator alone
  * through its own amp; SPLIT picks the part by the note; LAYER plays every note on two voices, A and B, the arp's too,
  * and lets both go; part B's own LFO and filter are its own; a format 18 sound keeps its parts, its shared modulators on
  * both; LFO 2, M.ENV 2 and a matrix route on one part move that part's voices alone (on both in SINGLE); the
- * sequencer's lanes play their own parts (MUTE2 rests B's); a version 5 sequencer reads; the looper keeps a note's part.
+ * sequencer's lanes play their own parts (MUTE2 rests B's); a version 5 sequencer reads; the looper keeps a note's part; DUAL's sends into the delay and the reverb, each
+ * part's own.
  *   tests/run_engine.sh runs it */
 #include <unistd.h>
 #include <sys/wait.h>
@@ -360,7 +361,58 @@ int main(void)
             if (f < 256u) er |= l0[2u * f + 1u] != 0; else ok |= l0[2u * f + 1u] != 0;
         }
         CHECK(!el && er && ok, "a render of 512 frames: both halves through the bus, B still right");
+        /* DUAL's sends (format 21): all of them full, no bus (as before); B's delay and reverb sends 0: B as dry as
+         * with the effects off, A's still wet; SINGLE: the sends not used */
+        {
+            static int32_t dry[2u * 4410u];
+#define NRG(b_) ({ uint64_t e_ = 0; uint32_t j_; for (j_ = 0; j_ < 2u * 4410u; j_++) e_ += (uint64_t)((int64_t)(b_)[j_] * (b_)[j_] >> 16); e_; })
+#define NEAR(a_, b_) ((a_) > (b_) - (b_) / 100u && (a_) < (b_) + (b_) / 100u)   /* (within 1 %%: the free LFO) */
+            p = PATCH_INIT;
+            p.vmode = VM_DUAL;
+            p.cho_mix = 0; p.dly_mix = 0; p.rev_mix = 0;
+#define FLUSH() do { start(&p); run(44100u * 8u); } while (0)   /* (the delay's line, the plate's tail: let go) */
+            TAKE(dry, 1);
+            p.dly_mix = 127; p.rev_mix = 127; p.dly_time = 2;
+            TAKE(l1, 1);
+            CHECK(!eg.pbus && !eg.psnd && !NEAR(NRG(l1), NRG(dry)), "DUAL, the sends full: no bus, B wet");
+            p.psend[1][0] = 0; p.psend[1][1] = 0;
+            FLUSH();
+            TAKE(l1, 1);
+            CHECK(eg.pbus && eg.psnd && NEAR(NRG(l1), NRG(dry)), "B's sends 0: B dry, as with the effects off");
+            p.cho_mix = 0; p.dly_mix = 0; p.rev_mix = 0;
+            TAKE(dry, 0);
+            p.dly_mix = 127; p.rev_mix = 127;
+            TAKE(l1, 0);
+            CHECK(!NEAR(NRG(l1), NRG(dry)), "A's sends full: A still wet");
+            p.psend[1][0] = 127;                /* (B's reverb send alone 0: B gets the delay, not the reverb) */
+            p.cho_mix = 0; p.dly_mix = 127; p.rev_mix = 0;
+            FLUSH();
+            TAKE(dry, 1);
+            p.rev_mix = 127;
+            FLUSH();
+            TAKE(l1, 1);
+            CHECK(NEAR(NRG(l1), NRG(dry)), "B's reverb send 0, its delay full: the reverb adds nothing to B");
+            p.vmode = VM_SINGLE;
+            TAKE(l1, 0);
+            CHECK(!eg.psnd && !eg.pbus, "SINGLE: the sends not used");
+            p.vmode = VM_SPLIT;
+            TAKE(l1, 0);
+            CHECK(!eg.psnd, "SPLIT: the sends not used");
+#undef FLUSH
+#undef NRG
+#undef NEAR
+        }
 #undef TAKE
+        {
+            static uint8_t o20[PATCH_V20_SIZE];
+            p = PATCH_INIT;
+            p.vmode = VM_DUAL; p.pvol[1] = 90;
+            memcpy(o20, &p, sizeof o20);
+            memset(&q, 0xAA, sizeof q);
+            CHECK(patch_from(&q, o20, PATCH_V20_SIZE, 20) == 0 && q.vmode == VM_DUAL && q.pvol[1] == 90 &&
+                  q.psend[0][0] == 127 && q.psend[0][1] == 127 && q.psend[1][0] == 127 && q.psend[1][1] == 127,
+                  "a format 20 sound: the sends full");
+        }
         {
             static uint8_t o19[PATCH_V19_SIZE];
             p = PATCH_INIT;

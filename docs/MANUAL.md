@@ -75,16 +75,16 @@ When a fifth note comes, the voice that is quietest (or, if all are held, the ol
 Every page works the same way:
 
 ```
- OSC 1 > WAVE              3* [###   ]     <- page > row          slot, unsaved (*), CPU bar
+ OSC 1 > MOD1                     3* [#]  <- page > row          slot, unsaved (*), battery
  ----------------------------------------
   CAR       MOD1      MOD2
  [carrier] <- [ mod 1 ] <- [ mod 2 ]       <- the page's picture: what the row touches is white
  ----------------------------------------
-  BANK     WAVE     BANK     WAVE          <- the selected row: its four knobs' names,
-  BASIC    SINE     BASIC    SINE          <- their values, large,
-  ---      ----                            <- and a bar under each level
+  BANK     WAVE     RATIO    AMT           <- the selected row: its four knobs' names,
+  BASIC    SINE     x2       70            <- their values, large,
+                             ----          <- and a bar under each level
  ----------------------------------------
-  [WAVE]  WAVE2  RATIO  MODE  ENV          <- the page's rows: SELECT moves along them
+  CAR [MOD1] ENV1 MOD2 ENV2 RATIO          <- the page's rows: SELECT moves along them
 ```
 
 Turning a knob lights **its own cell** for a moment: framed, its name bright, its value drifting **blue** as you turn
@@ -120,8 +120,9 @@ The header's battery shows **0 to 3 bars** (red, green, blue: a prism); empty, i
 **bolt** (USB power) instead, as the FM-1 cannot tell its charge while it is charging. The splash shows it too, and the
 SETUP page in words, with the raw reading (ADC).
 
-The header's **CPU** bar is how much of the FM-1's time the sound takes (its peak over the last half second); it
-turns bright past 70 %. Keep it under that: near 100 % the sound starts to crackle.
+**CPU**: how much of the FM-1's time the sound takes (its peak over the last half second) is on the
+[SETUP](#setup) page, a figure and a bar, bright past 70 %. Keep it under that: near 100 % the sound starts to
+crackle. The header says **CPU** (bright, before the slot) only while it is past 80 %.
 
 Values go from 0 to 127 unless the page says otherwise. Bipolar values (shown with a sign, like `+24`) are 0 in the
 middle of their knob.
@@ -139,12 +140,16 @@ between them: an arrow gets thicker with more modulation, and the symbol on it i
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| WAVE | carrier bank | carrier wave | mod 1 bank | mod 1 wave |
-| WAVE2 | mod 2 bank | mod 2 wave | | |
-| RATIO | carrier ratio | mod 1 ratio (PIT1 in MIX / RING) | mod 2 ratio (PIT2 in MIX / RING) | fine tune |
-| MODE | mod 1's mode | mod 2's mode | mod 1 fine (FINE1) | mod 2 fine (FINE2) |
-| ENV | mod 1 attack | mod 1 release | mod 2 attack | mod 2 release |
-| MIX | mod 1 amount | mod 2 amount | the oscillator's level | |
+| CAR | carrier bank | carrier wave | carrier ratio | the oscillator's level |
+| MOD1 | mod 1 bank | mod 1 wave | mod 1 ratio (PIT1 in MIX / RING) | mod 1 amount |
+| ENV1 | mod 1 attack | mod 1 release | mod 1's mode: FM, RING, MIX | mod 1 fine |
+| MOD2 | mod 2 bank | mod 2 wave | mod 2 ratio (PIT2 in MIX / RING) | mod 2 amount |
+| ENV2 | mod 2 attack | mod 2 release | mod 2's mode | mod 2 fine |
+| RATIO | carrier ratio | mod 1 ratio (PIT1) | mod 2 ratio (PIT2) | fine tune (the whole oscillator) |
+
+A row for each operator, then a row for each modulator's envelope and mode: everything about one operator is
+together, and the picture lights the operator the row works on. The **RATIO** row shows the three ratios side by
+side, to compare them (the same knobs as on the operators' rows).
 
 **Waves.** Six banks of eight waves, from simple to complex. The **wave** knob moves smoothly through the bank,
 morphing from one wave into the next (the name shown is the nearest).
@@ -169,16 +174,17 @@ oscillator by up to +-50 cents.
 - **MIX**: adds the modulator's wave to the other one, a layer.
 
 **Pitch in MIX and RING.** A modulator in MIX or RING is heard, not just felt, so a ratio is the wrong tool: its
-RATIO knob becomes **PIT1** (or **PIT2**), the modulator's pitch against the carrier, -24 .. +24 semitones. Switch
-back to FM and the ratio is there again, as you left it (each mode keeps its own setting). **FINE1** and **FINE2**
-(MODE row) detune each modulator by up to +-50 cents, in any mode: in MIX a chorused layer, in FM a slowly beating,
+RATIO knob (on its row and on the RATIO row) becomes **PIT1** (or **PIT2**), the modulator's pitch against the carrier, -24 .. +24 semitones. Switch
+back to FM and the ratio is there again, as you left it (each mode keeps its own setting). Each modulator's **FINE**
+(ENV1, ENV2 rows) detunes it by up to +-50 cents, in any mode: in MIX a chorused layer, in FM a slowly beating,
 inharmonic shimmer. The pitch is a modulation destination too (**M1PITCH**, **M2PITCH**, below).
 
 **Envelopes.** Each modulator has its own attack and release (1 ms .. 10 s): the amount rises over the attack,
 holds while the key is down, and falls over the release. A slow mod 1 attack on FM makes a note that brightens as
 you hold it.
 
-**MIX row.** The modulators' amounts (how much they change the next one) and the oscillator's own level.
+**Amounts and level.** Each modulator's **AMT** (on its row: how much it changes the next one) and the oscillator's
+own **LEVEL** (CAR row).
 
 ### TRANS
 
@@ -279,9 +285,9 @@ Times go from 1 ms to 10 s.
 say): an instant **drone**. Turn it up and the oscillators sound at once, at the pitch they were last played at (C3
 when nothing has been played since power-on), the whole sound: FM, filter and all. While a voice drones, its other
 envelopes (the modulators', the filter's, the mod envelopes) hold as if its key were down, so every knob works on it
-live: turn AMT1 and the drone brightens. Keys play over it with their envelope (from the drone's level up), and the
+live: turn MOD1's AMT and the drone brightens. Keys play over it with their envelope (from the drone's level up), and the
 notes you let go drone on, so a chord let go becomes a drone chord. The picture draws the level as a line across the
-envelope. Turn OPEN back to 0 and the drone releases and fades out. (A drone keeps up to four voices running: watch the CPU bar with every effect on.)
+envelope. Turn OPEN back to 0 and the drone releases and fades out. (A drone keeps up to four voices running: watch the CPU on SETUP with every effect on.)
 
 **Velocity** comes from MIDI: a keyboard or a DAW playing Prysm over USB. The FM-1's own keys have no velocity (they
 are on / off), so they always play at full velocity and these settings do not change them. Each sensitivity says how
@@ -426,6 +432,7 @@ every kick, and HAT onto MOD1 adds FM bite in time with the hats.
 | --- | --- | --- | --- | --- |
 | OSC | osc 1 level | osc 2 level | osc 2 semitones (+-24) | osc 2 fine (+-50 cents) |
 | ROUTE | osc 1: FILTER / DIRECT | osc 2: FILTER / DIRECT | the noise: FILTER / DIRECT | the noise's level |
+| ROUTE (DUAL) | A DLY: part A's delay send | A REV: part A's reverb send | B DLY: part B's | B REV: part B's |
 | GLIDE | glide time (0 = off) | mode: ALWAYS / LEGATO | | |
 | SPLIT | the split key (OFF, or a note) | the low side's octave (-2 .. +2) | the high side's octave | LEARN |
 | PARTS | MODE: SINGLE / DUAL / SPLIT / LAYER | | | |
@@ -435,6 +442,13 @@ every kick, and HAT onto MOD1 adds FM bite in time with the hats.
 **DIRECT**: past it, straight to the amp (its envelope, VCA OPEN, the effects all still apply). Filter one
 oscillator and leave the other bright: a resonant sweep over a steady body, or a comb ringing on the noise while
 the oscillators stay clean. The picture shows each source's level and its route (DIR inverted).
+
+**Sends (DUAL).** In DUAL each part already has its own filter, so the ROUTE row sends the parts to the effects
+instead: how much of each part goes into the **delay** and the **reverb** (127, the most, is how the other modes
+play: everything in). The effects' own MIX is how much comes back. A dry bass on part A and a pad drowned in
+reverb on part B: A REV 0, B REV 127. A send stays dimmed while its effect's MIX is 0 (DELAY OFF, REVERB OFF).
+The chorus, MOD FX and CRUSH stay on the whole sound. The oscillators' routes are kept, not shown: set them in
+another mode (the noise's is on the NOISE page). The picture shows each part's sends beside its level.
 
 **Glide** (portamento) slides each new note from the pitch of the last one. **ALWAYS** slides every note;
 **LEGATO** only when another note is still held (play overlapping to slide, apart to jump). Arpeggiated notes glide
@@ -552,7 +566,7 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 - **Crush**: BITS takes the sound down to fewer bits (grit at 12, broken at 4), RATE holds each sample longer (a
   lower sample rate, with the aliasing of an old sampler). The picture is a sine as it comes out.
 
-With every effect on, Prysm uses roughly twice the CPU: watch the header.
+With every effect on, Prysm uses roughly twice the CPU: watch it on the SETUP page.
 
 ### SEQ
 
@@ -565,7 +579,8 @@ over the same song, load them with SOUND instead (see [Patches](#patches)).
 
 The picture is the pattern being edited: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white
 one an accent; a little bar joins a sliding step to the next; a tie is a bar carrying the note before it on; past the
-length, dots. A chord's other notes are notches across the top of its square (a short notch: one of them tied on). The cursor is ringed (doubled while recording); a mark under a square shows the step playing. The
+length, dots. A chord's other notes are notches across the top of its square (a short notch: one of them tied on). Lines mark the beats, four to a row (a row is a bar of 16 steps). The cursor, the step you edit, is ringed
+(doubled while recording); a bar under a square shows the step playing. The
 header says which pattern you are editing (**SEQ P1** .. **P4**), or **SEQ SONG** in song mode. On the SONG and
 ENTRY rows the picture is the song instead: its entries, each a pattern and how many times it plays.
 
@@ -581,6 +596,10 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 | CLICK | the metronome: OFF, ON, REC (only while recording) | its level | | |
 | SONG | MODE: PATT or SONG | the song's length: 1 .. 16 entries | tempo (the arp's) | INIT |
 | ENTRY | the entry: 1 .. 16 | its pattern: P1 .. P4 | REPEAT: x1 .. x16 | |
+
+The rows come in four groups, by task: **STEPS** (STEP, CHORD, PART, LOCK), **PATTERN** (PATTERN, EDIT, PARTS),
+**REC** (CLICK) and **SONG** (SONG, ENTRY). The tabs show the group you are in, its name on the left; SELECT moves
+along the rows and on into the next group. The step under the cursor stays the same as you move between groups.
 
 **Entering notes** (stopped): press **REC** (its LED lights, the header says SEQ REC), move to a step with KNOB1 (or
 start at the first) and **play a key**: its note goes into the step (a rest or a tie becomes a note), and when you let
@@ -620,7 +639,11 @@ the STEP and CHORD rows, or CLEAR a row.
 - **Copy and paste** (EDIT row): pick a row of 16 steps with KNOB1, turn **COPY**, pick another row (or another
   pattern on the PATTERN row) and turn **PASTE**. With the row on **ALL**, COPY and PASTE take the whole pattern,
   its length included; a single row pasted into ALL fills all four rows. **CLEAR** empties the row (with ALL, the
-  whole pattern: turn it again within 3 seconds to confirm).
+  whole pattern).
+- **Asking first.** PASTE, CLEAR, CLR1 / CLR2, INIT, the DRUM page's CLEAR, PASTE and LOAD, and the LOOP page's
+  CLEAR change nothing at once: turned, they say exactly what they will change (say **CLEAR P1 ROW 2**) and wait.
+  Press **SAVE** to confirm, **HOME** to cancel (another button, row or page, or 6 seconds, cancel too). COPY just
+  copies, and says what.
 - **Two parts** (PARTS row), with the [split](#mix) on: the notes below the split key are **part 1** (they play
   OSC 1), from it upward **part 2** (OSC 2). Record a bass line on the low keys, then on the next passes a lead on
   the high keys: each pass overdubs, and while you hold a key only its own part's notes rest, so the other part keeps
@@ -638,7 +661,7 @@ the STEP and CHORD rows, or CLEAR a row.
 - **The song** (SONG and ENTRY rows): set MODE to SONG, its LENGTH to the number of entries, then for each entry its
   pattern and how many times it plays. PLAY then plays the entries in turn and starts again after the last.
 - **INIT** (SONG row) starts over: all four patterns empty, the song P1, P2, P3, P4 once each, PATT mode. It asks
-  first: turn it again within 3 seconds.
+  first: SAVE to confirm.
 - **Saving**: the patterns and the song save themselves into the slot whose sequencer it is, a few seconds after a
   change, once nothing is playing (the flash write would cut a note short). They come back at power-on. From Prysm
   1.2 and older (one sequencer for all), every used slot starts with a copy of it; from 0.8 and older, the pattern
@@ -678,12 +701,12 @@ step's hits, each as loud as it plays, or on the BUS row its settings.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| STEP | the drum: KICK / SNARE / HAT / CLAP | the step (the cursor) | its HIT: --, HIT, ACCENT (the snare: FLAM too) | CLEAR the drum's lane (turn twice) |
+| STEP | the drum: KICK / SNARE / HAT / CLAP | the step (the cursor) | its HIT: --, HIT, ACCENT (the snare: FLAM too) | CLEAR the drum's lane (asks: SAVE) |
 | ROLL | the step (the cursor) | the hat step's ROLL: OFF, 2, 3, 4, 6, 8 hits | RAMP: EVEN; down: FADE; up: SWELL | |
 | KICK, SNARE, HAT, CLAP | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
 | BUS | DRIVE | CRUSH: fewer bits and a lower rate still | DELAY send | REVERB send |
-| KIT | LO-FI, TR, BOOM (and any of your own) | PRESET: a beat (below) | LOAD it (turn) | |
-| EDIT | the pattern: P1 .. P4 | LANE: ALL, KICK, SNARE, HAT, CLAP | COPY (turn) | PASTE (turn) |
+| KIT | LO-FI, TR, BOOM (and any of your own) | PRESET: a beat (below) | LOAD it (turn; asks: SAVE) | |
+| EDIT | the pattern: P1 .. P4 | LANE: ALL, KICK, SNARE, HAT, CLAP | COPY (turn) | PASTE (turn; asks: SAVE) |
 
 **Copying drum patterns** (EDIT row): pick the pattern with KNOB1 and the LANE with KNOB2, turn **COPY**, pick
 another pattern and turn **PASTE**. Only the drums change; the pattern's notes and length stay as they are. The copy
@@ -754,7 +777,7 @@ turn the filter and the loop follows.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| LOOP | BARS: 1, 2, 4, 8 (the next loop's length) | QUANT: OFF, 1/16, 1/8 | PLAY: ON / OFF | CLEAR (turn) |
+| LOOP | BARS: 1, 2, 4, 8 (the next loop's length) | QUANT: OFF, 1/16, 1/8 | PLAY: ON / OFF | CLEAR (turn; asks: SAVE) |
 
 - **Recording**: on the LOOP page press **REC**. With the sequencer playing, recording starts at the next bar line;
   stopped, it starts with the first note you play. After BARS bars the loop closes and plays back, still recording:
@@ -770,7 +793,8 @@ turn the filter and the loop follows.
 
 ### SETUP
 
-Settings for your setup rather than a sound: they are kept with the octave, not in patches. **GLO** twice.
+Settings for your setup rather than a sound: they are kept with the octave, not in patches. **GLO** twice. The
+picture shows the MIDI setup, the battery and the **CPU** (its peak, a bar).
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
@@ -806,8 +830,8 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM, TONE.
 
 - **SAVE** writes the current sound and the sequencer playing (with any changes not yet saved) to the slot, and only
   to it: saved to another slot, the slot the sequencer came from keeps what it last saved. Over a slot holding another sound it asks
-  first: press SAVE again. It asks too when the slot's sound came in by SOUND (REPLACES ITS SEQ): its own sequencer
-  would make way for the one playing.
+  first (**OVERWRITE SLOT 3? SAVE**): press SAVE again. It asks too when the slot's sound came in by SOUND
+  (**REPLACE SEQ OF 3? SAVE**): its own sequencer would make way for the one playing.
 - **LOAD** brings the slot's sound back, and its sequencer. While the sequencer plays, the new one takes over where
   the next pattern would start (the sound changes at once), from the top of its pattern or song; stopped, at once.
   A slot whose sound came in from the editor alone has no sequencer yet: LOAD keeps the one playing, and it becomes
@@ -815,7 +839,7 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM, TONE.
   seconds after a change, once nothing plays) are let go.
 - **SOUND** brings the slot's sound back alone: the sequencer plays on, still saving into the slot it came from.
 - **INIT** loads the default sound (the sequencer plays on). If you have unsaved changes, LOAD, SOUND and INIT ask
-  first: press SAVE again.
+  first, saying what would happen (**DISCARD EDITS? SAVE: LOAD 4**): press SAVE again, or HOME to keep them.
 - **UNDO** takes the last change back: the sound and the sequencer as they were before it. A change is a knob turned
   after a pause (2 seconds: a sweep of turns is one change), or an action: a PASTE, a CLEAR, a LOAD, SOUND or INIT.
   The screen says what it will undo; press **SAVE**. Press SAVE again to redo. It is one step: the change before that
@@ -894,7 +918,8 @@ HOME on SCOPE: twice).
 
 ```
 LIVE > PLAY                      2
-PATTERN                       PATT
+PLAY 120 BPM               PATTERN        playing or stopped, the tempo; PATTERN or SONG, or what waits:
+                                          P2 > P3 NEXT BAR, PATCH 4 NEXT BAR
 [ P1 ][#P2#][ P3 ][ P4 ]          the pattern playing filled, the one waiting framed, blinking
 PATCH  BD SD HH CP O1 O2 NZ        the mutes: filled while on, dim while muted
 [1][#2#][3][4][5][6][7][8]        the same for the patches (empty slots dim)

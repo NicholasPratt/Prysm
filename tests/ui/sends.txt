@@ -1,0 +1,14 @@
+# MIX's ROUTE row: SINGLE, the oscillators' routes (FILTER / DIRECT); DUAL, each part's sends into the delay and the
+# reverb (the effects' MIX 0: dimmed, DELAY OFF / REVERB OFF); B's delay send and A's reverb send turned down
+# (tests/run_ui.sh)
+100 btn 7
+200 enc 0 1
+300 shot
+400 enc 0 3
+500 enc 2 1
+600 enc 0 -3
+700 shot
+800 enc 4 -60
+900 enc 3 -90
+1000 shot
+1100 end

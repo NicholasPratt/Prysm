@@ -24,9 +24,11 @@
  *  16  + the delay in time, the matrix's drum envelopes (dly_sync, mm_time: off, as before)
  *  17  + the attack transients (trn_type .. trn_dec: off, as before)
  *  18  + the two parts (vmode, pb: SINGLE, part B as part A, as before)
- *  19  + the shared modulators' parts (l2_part, me2_part, mm_part: BOTH, as before) */
+ *  19  + the shared modulators' parts (l2_part, me2_part, mm_part: BOTH, as before)
+ *  20  + the parts' levels and places (pvol, ppan: as they are)
+ *  21  + DUAL's sends (psend: all of it, as before) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 20u
+#define PATCH_VERSION 21u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
@@ -46,6 +48,7 @@
 #define PATCH_V17_SIZE 169u                     /* format 17's: everything before vmode */
 #define PATCH_V18_SIZE 212u                     /* format 18's: everything before l2_part */
 #define PATCH_V19_SIZE 218u                     /* format 19's: everything before pvol */
+#define PATCH_V20_SIZE 222u                     /* format 20's: everything before psend */
 #define PATCH_OLD_MAX PATCH_V9_SIZE
 #define PATCH_SEQ_AT PATCH_V6_SIZE              /* formats 7 .. 9: the pattern (seq_len, div, gate, pad, note[64], */
 #define PATCH_SEQ_N (PATCH_V7_SIZE - PATCH_V6_SIZE)   /* trig[64], slide[64]) here, the rest after it */
@@ -67,6 +70,7 @@ _Static_assert(__builtin_offsetof(patch_t, trn_type) == PATCH_V16_SIZE, "format 
 _Static_assert(__builtin_offsetof(patch_t, vmode) == PATCH_V17_SIZE, "format 17 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, l2_part) == PATCH_V18_SIZE, "format 18 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, pvol) == PATCH_V19_SIZE, "format 19 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, psend) == PATCH_V20_SIZE, "format 20 is a prefix of patch_t");
 
 /* patch p from n bytes of format version (a patch file, the plugin's state, a slot): 0 = done */
 static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version);
@@ -91,7 +95,8 @@ static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t ver
                                                  PATCH_V5_SIZE, PATCH_V6_SIZE, PATCH_V7_SIZE, PATCH_V8_SIZE,
                                                  PATCH_V9_SIZE, PATCH_V10_SIZE, PATCH_V11_SIZE, PATCH_V12_SIZE,
                                                  PATCH_V13_SIZE, PATCH_V14_SIZE, PATCH_V15_SIZE, PATCH_V16_SIZE,
-                                                 PATCH_V17_SIZE, PATCH_V18_SIZE, PATCH_V19_SIZE};
+                                                 PATCH_V17_SIZE, PATCH_V18_SIZE, PATCH_V19_SIZE,
+                                                 PATCH_V20_SIZE};
     /* RATIO -> PITCH (0..48, 24 = in tune) and FINE: 0.5 .. 4 as near as they go, 5 and up as far: +24 */
     static const uint8_t R_SEMI[PR_RATIOS] = {12, 24, 31, 36, 43, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48};
     static const uint8_t R_FINE[PR_RATIOS] = {64, 64, 66, 64, 66, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64};

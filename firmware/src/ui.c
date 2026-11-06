@@ -145,20 +145,23 @@ enum { LIT_C = 1, LIT_M1 = 2, LIT_M2 = 4, LIT_A1 = 8, LIT_A2 = 16, LIT_CURVE = 3
 #define SO(f) ((uint16_t)__builtin_offsetof(seqs_t, f))
 #define NOPRM {0, 0, 0, K_NONE}
 
+/* the OSC pages: a row for each operator (its wave, its ratio, how much it does), one for each modulator's envelope
+ * and mode, and the three ratios side by side (to compare them). A ratio's knob: the operator's pitch (prm_alt) */
+enum { OR_CAR, OR_MOD1, OR_M1ENV, OR_MOD2, OR_M2ENV, OR_RATIO };
 static const row_t OSC_ROWS[] = {
-    {"WAVE", {{"BANK", OO(bank[0]), PW_BANKS - 1u, K_BANK}, {"WAVE", OO(pos[0]), 127, K_POS},
-              {"BANK", OO(bank[1]), PW_BANKS - 1u, K_BANK}, {"WAVE", OO(pos[1]), 127, K_POS}}, LIT_C | LIT_M1},
-    {"WAVE2", {{"BANK", OO(bank[2]), PW_BANKS - 1u, K_BANK}, {"WAVE", OO(pos[2]), 127, K_POS}, NOPRM, NOPRM},
-     LIT_M2},
+    {"CAR", {{"BANK", OO(bank[0]), PW_BANKS - 1u, K_BANK}, {"WAVE", OO(pos[0]), 127, K_POS},
+             {"RATIO", OO(ratio[0]), PR_RATIOS - 1u, K_RATIO}, {"LEVEL", OO(level), 127, K_NUM}}, LIT_C},
+    {"MOD1", {{"BANK", OO(bank[1]), PW_BANKS - 1u, K_BANK}, {"WAVE", OO(pos[1]), 127, K_POS},
+              {"RATIO", OO(ratio[1]), PR_RATIOS - 1u, K_RATIO}, {"AMT", OO(amt[0]), 127, K_NUM}}, LIT_M1 | LIT_A1},
+    {"ENV1", {{"A", OO(att[0]), 127, K_ETIME}, {"R", OO(rel[0]), 127, K_ETIME},
+                {"MODE", OO(mode[0]), MODE_N - 1u, K_MODE}, {"FINE", 0, 127, K_MFINE}}, LIT_M1 | LIT_A1 | LIT_AR},
+    {"MOD2", {{"BANK", OO(bank[2]), PW_BANKS - 1u, K_BANK}, {"WAVE", OO(pos[2]), 127, K_POS},
+              {"RATIO", OO(ratio[2]), PR_RATIOS - 1u, K_RATIO}, {"AMT", OO(amt[1]), 127, K_NUM}}, LIT_M2 | LIT_A2},
+    {"ENV2", {{"A", OO(att[1]), 127, K_ETIME}, {"R", OO(rel[1]), 127, K_ETIME},
+                {"MODE", OO(mode[1]), MODE_N - 1u, K_MODE}, {"FINE", 1, 127, K_MFINE}}, LIT_M2 | LIT_A2 | LIT_AR},
     {"RATIO", {{"CAR", OO(ratio[0]), PR_RATIOS - 1u, K_RATIO}, {"MOD1", OO(ratio[1]), PR_RATIOS - 1u, K_RATIO},
                {"MOD2", OO(ratio[2]), PR_RATIOS - 1u, K_RATIO}, {"FINE", OO(fine), 127, K_CENT}},
      LIT_C | LIT_M1 | LIT_M2},
-    {"MODE", {{"MOD1", OO(mode[0]), MODE_N - 1u, K_MODE}, {"MOD2", OO(mode[1]), MODE_N - 1u, K_MODE},
-              {"FINE1", 0, 127, K_MFINE}, {"FINE2", 1, 127, K_MFINE}}, LIT_A1 | LIT_A2},
-    {"ENV", {{"A1", OO(att[0]), 127, K_ETIME}, {"R1", OO(rel[0]), 127, K_ETIME},
-             {"A2", OO(att[1]), 127, K_ETIME}, {"R2", OO(rel[1]), 127, K_ETIME}}, LIT_M1 | LIT_M2 | LIT_AR},
-    {"MIX", {{"AMT1", OO(amt[0]), 127, K_NUM}, {"AMT2", OO(amt[1]), 127, K_NUM},
-             {"LEVEL", OO(level), 127, K_NUM}, NOPRM}, LIT_A1 | LIT_A2 | LIT_C},
 };
 static const row_t NOISE_ROWS[] = {             /* (COLOUR: the tone, DIGI's and S&H's rate, CRACKLE's density) */
     {"NOISE", {{"TYPE", PO(noise_type), NOISE_N - 1u, K_NTYPE}, {"COLOUR", PO(noise_col), 127, K_NCOL},
@@ -292,7 +295,12 @@ static const row_t MIX_ROWS[] = {
     {"LEVELS", {{"A LVL", PO(pvol[0]), 127, K_NUM}, {"B LVL", PO(pvol[1]), 127, K_NUM},   /* (the parts', past */
                 {"A PAN", PO(ppan[0]), 127, K_PAN}, {"B PAN", PO(ppan[1]), 127, K_PAN}}, LIT_ALL},   /* their amps) */
 };
+#define MR_ROUTE 1u                             /* (MIX's ROUTE row: in DUAL, the parts' sends: SEND_PRM) */
 #define MR_PARTS 4u                             /* (MIX's PARTS and LEVELS rows: the parts' picture) */
+/* DUAL's ROUTE row: each part has its own filter (no routing to choose), so its knobs are the parts' sends into the
+ * delay and the reverb instead (the effects' MIX is their return) */
+static const prm_t SEND_PRM[4] = {{"A DLY", PO(psend[0][0]), 127, K_NUM}, {"A REV", PO(psend[0][1]), 127, K_NUM},
+                                  {"B DLY", PO(psend[1][0]), 127, K_NUM}, {"B REV", PO(psend[1][1]), 127, K_NUM}};
 /* the KIT row's preset beats: 16 steps a lane (KICK, SNARE, HAT, CLAP), repeated over a longer pattern. A step: . none,
  * x a hit, X an accent (the hat: open), f a flam (the snare's), 2 3 4 6 8 the hat hit so many times (a roll) */
 static const struct { const char *name, *lane[4]; } DPRE[] = {
@@ -417,7 +425,17 @@ static uint8_t lpart_ui;                         /* the PART row's knob: the lan
 static uint8_t clip_xnote[64][SEQ_LANES - 1u], clip_xvel[64][SEQ_LANES - 1u];
 static uint8_t chord_ui[SEQ_LANES - 1u];        /* the CHORD row's knobs: lane l's note + 1 (0: none), from the step */
 enum { SR_STEP, SR_CHORD, SR_PART, SR_LOCK, SR_PATTERN, SR_EDIT, SR_PARTS, SR_CLICK, SR_SONG, SR_ENTRY };   /* the SEQ page's rows */
-static uint32_t seq_arm, seq_arm_at;            /* a CLEAR ALL or INIT asked once: its kind, when (turn again to do it) */
+/* ... in groups by task (the tabs show the selected row's group, its name and the row's place in it; SELECT goes on
+ * from one group into the next): the steps, the pattern, recording, the song */
+static const struct { const char *name; uint8_t first, n; } SEQ_GROUPS[] = {
+    {"STEPS", SR_STEP, 4}, {"PATTERN", SR_PATTERN, 3}, {"REC", SR_CLICK, 1}, {"SONG", SR_SONG, 2}};
+#define SEQ_GROUP_N (sizeof SEQ_GROUPS / sizeof SEQ_GROUPS[0])
+static uint32_t seq_group(uint32_t r)           /* the group row r is in */
+{
+    uint32_t g;
+    for (g = SEQ_GROUP_N - 1u; g && r < SEQ_GROUPS[g].first; g--) ;
+    return g;
+}
 static pattern_t *seq_ed(void) { return &seqs.pat[seqs.cur % SEQ_PATS]; }   /* the pattern edited */
 static uint8_t dr_sel;                          /* the DRUM page: the lane (KICK, SNARE, HAT, CLAP) */
 static uint8_t dr_cursor;                       /* its step (0..63): the grid shows the 16 it is in */
@@ -512,16 +530,22 @@ static uint8_t *part_byte(uint32_t off)         /* the sound's byte off, as the 
     return (uint8_t *)&edit + off;
 }
 
-/* the RATIO row's MOD1, MOD2 when that modulator is in MIX or RING: heard, so a pitch (semitones), not a ratio */
+/* a modulator's ratio when it is in MIX or RING: heard, so a pitch (semitones), not a ratio (on its own row, and on
+ * the RATIO row) */
 static const prm_t PITCH_PRM[2] = {{"PIT1", 0, 48, K_MPIT}, {"PIT2", 1, 48, K_MPIT}};
 static const prm_t *prm_alt(uint32_t pg, uint32_t r, uint32_t i)   /* knob i's other parameter (0: none) */
 {
-    return PAGES[pg].osc && PAGES[pg].osc != G && i && PAGES[pg].rows[r].p[i].kind == K_RATIO ? &PITCH_PRM[i - 1u] : 0;
-}
+    const prm_t *p = &PAGES[pg].rows[r].p[i];
+    if (pg == PG_MIX && r == MR_ROUTE) return &SEND_PRM[i & 3u];   /* (DUAL's sends) */
+    if (!PAGES[pg].osc || PAGES[pg].osc == G || p->kind != K_RATIO) return 0;
+    return p->off == OO(ratio[1]) ? &PITCH_PRM[0] : p->off == OO(ratio[2]) ? &PITCH_PRM[1] : 0;   /* (the carrier: */
+}                                               /*  none) */
 static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's parameter, as the sound is now */
 {
     const prm_t *a = prm_alt(pg, r, i);
-    return a && edit.osc[PAGES[pg].osc - 1u].mode[i - 1u] != MODE_FM ? a : &PAGES[pg].rows[r].p[i];
+    if (a && a >= SEND_PRM && a < SEND_PRM + 4)
+        return edit.vmode == VM_DUAL ? a : &PAGES[pg].rows[r].p[i];
+    return a && edit.osc[PAGES[pg].osc - 1u].mode[a - PITCH_PRM] != MODE_FM ? a : &PAGES[pg].rows[r].p[i];
 }
 
 static const char *prm_label(const prm_t *p)     /* its label (the noise's COLOUR: what it is for the type) */
@@ -916,8 +940,9 @@ static void gfx_osc(uint32_t o, uint32_t lit)   /* the sketch: carrier <- mod 1 
         if (k) {                                /* the modulator's AR under it: attack up, hold, release down */
             int32_t aw = 1 + (int32_t)edit.osc[o].att[k - 1u] * 18 / 127, rw = 1 + (int32_t)edit.osc[o].rel[k - 1u] * 18 / 127;
             int32_t xa = x0 + 4, xh = xa + aw, xr = x0 + BOX_W - 4 - rw, yb = G_H - 2, yt = BOX_Y + BOX_H + 23;
-            uint16_t ac = lit & LIT_AR ? C_BRIGHT : C_FAINT;
-            if (lit & LIT_AR) { cv_under(xa, yb, xh, yt, yb); cv_under(xh, yt, xr, yt, yb); cv_under(xr, yt, xr + rw, yb, yb); }
+            uint32_t on = lit & LIT_AR && lit & LITS[k];   /* (a modulator's ENV row: its AR alone) */
+            uint16_t ac = on ? C_BRIGHT : C_FAINT;
+            if (on) { cv_under(xa, yb, xh, yt, yb); cv_under(xh, yt, xr, yt, yb); cv_under(xr, yt, xr + rw, yb, yb); }
             cv_line(xa, yb, xh, yt, ac);
             cv_line(xh, yt, xr, yt, ac);
             cv_line(xr, yt, xr + rw, yb, ac);
@@ -1199,16 +1224,17 @@ static void gfx_arp(uint32_t lit)
     }
 }
 
-static void gfx_setup(void)                     /* the MIDI setup, in words */
+static uint32_t ui_cpu;                         /* the longest render since the header before: % of its time (draw_hdr) */
+static void gfx_setup(void)                     /* the MIDI setup, in words; the battery; the CPU */
 {
     char s[40], *e;
     e = put(s, "MIDI IN ");
     if (gset.midi_in) e = num(put(e, "CH "), gset.midi_in); else e = put(e, "OMNI");
     put(num(put(e, "   OUT CH "), gset.midi_out + 1u), "");
-    cv_text(8, 6, &FONT_S, s, C_MID);
+    cv_text(8, 4, &FONT_S, s, C_MID);
     if (gset.midi_b) {                          /* part B's channel: it plays B, IN plays A (two parts) */
         num(put(s, "B "), gset.midi_b);
-        cv_text(236 - text_w(&FONT_S, s), 6, &FONT_S, s, C_PART_B);
+        cv_text(236 - text_w(&FONT_S, s), 4, &FONT_S, s, C_PART_B);
     }
     e = put(s, gset.clock ? "ARP CLOCK: MIDI " : "ARP CLOCK: ITS OWN");
     if (gset.clock) {
@@ -1216,22 +1242,30 @@ static void gfx_setup(void)                     /* the MIDI setup, in words */
         if (b) { e = num(e, b / 10u); *e++ = '.'; put(num(e, b % 10u), " BPM"); }
         else put(e, "(NONE YET)");
     }
-    cv_text(8, 28, &FONT_S, s, gset.clock ? C_ACC : C_MID);
+    cv_text(8, 24, &FONT_S, s, gset.clock ? C_ACC : C_MID);
     e = put(s, "PITCH BEND ");
     if (gset.bend) put(num(put(e, "+-"), gset.bend), " SEMITONES"); else put(e, "OFF");
-    cv_text(8, 50, &FONT_S, s, C_MID);
+    cv_text(8, 44, &FONT_S, s, C_MID);
     {                                           /* the battery: its bars, and the reading (stock thresholds 531 / 561 / 591) */
         uint32_t b = fm1_batt();
         int32_t x;
-        cv_batt(8, 76, b, 1);
+        cv_batt(8, 68, b, 1);
         e = b == 4u ? put(s, "USB POWER") : b == 0u ? put(s, "BATTERY LOW") : num(put(s, "BATTERY "), b);
         if (b && b < 4u) put(e, "/3");
-        x = cv_text(32, 72, &FONT_S, s, b == 0u ? C_BRIGHT : C_MID);
+        x = cv_text(32, 64, &FONT_S, s, b == 0u ? C_BRIGHT : C_MID);
         e = num(put(s, "ADC "), (uint32_t)(fm1_batt_raw > 0 ? fm1_batt_raw : 0));
-        cv_text(x + 12, 72, &FONT_S, s, C_FAINT);
+        cv_text(x + 12, 64, &FONT_S, s, C_FAINT);
     }
-    cv_rect(8, 98, 224, 1, C_BOX);
-    cv_text(8, 104, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
+    {                                           /* the CPU: the peak render, a bar (bright past 70 %) */
+        uint32_t c = ui_cpu > 100u ? 100u : ui_cpu;
+        put(num(put(s, "CPU PEAK "), ui_cpu), "%");
+        cv_text(8, 84, &FONT_S, s, ui_cpu > 70u ? C_BRIGHT : C_MID);
+        cv_rect(150, 88, 82, 9, C_BOX);
+        cv_rect(151, 89, 80, 7, C_BLACK);
+        cv_rect(152, 90, (int32_t)c * 78 / 100, 5, ui_cpu > 70u ? C_BRIGHT : C_MID);
+    }
+    cv_rect(8, 104, 224, 1, C_BOX);
+    cv_text(8, 107, &FONT_S, "GLOBAL: NOT PART OF A PATCH", C_FAINT);
 }
 
 /* the sequencer: 64 squares, 16 a row: a rest empty, a note grey, an accent white, a slide joined to the next;
@@ -1283,8 +1317,8 @@ static void gfx_seq(uint32_t lit)
     for (k = 0; k < 64u; k++) {
         int32_t x = 2 + (int32_t)(k % 16u) * 15, y = 3 + (int32_t)(k / 16u) * 30, gx = (int32_t)(k % 16u);
         uint32_t tr = pt->trig[k];
-        if (gx == 4 || gx == 8 || gx == 12)     /* the beats */
-            cv_vdots(x - 2, y, y + 22, 2);
+        if (gx == 4 || gx == 8 || gx == 12)     /* the beats: a line between (a bar a row) */
+            cv_rect(x - 2, y - 1, 1, 26, C_BOX);
         if (k >= len) {
             cv_rect(x + 5, y + 10, 2, 2, C_BOX);
             continue;
@@ -1318,8 +1352,8 @@ static void gfx_seq(uint32_t lit)
             cv_frame(x - 2, y - 2, 16, 26, c);
             if (seq_rec) cv_frame(x - 1, y - 1, 14, 24, c);
         }
-        if (eg.seq_play && k == seq.playing && seq.playing_pat == seqs.cur % SEQ_PATS)   /* the step playing */
-            cv_rect(x, y + 24, 12, 2, C_BRIGHT);
+        if (eg.seq_play && k == seq.playing && seq.playing_pat == seqs.cur % SEQ_PATS)   /* the step playing: a */
+            cv_rect(x - 1, y + 24, 14, 3, C_BRIGHT);   /* bar under it (the cursor: a frame round it) */
     }
     if (row[PG_SEQ] == SR_EDIT || row[PG_SEQ] == SR_PARTS) {   /* EDIT (PARTS: CLEAR's): its row (or all of them) */
         int32_t y0 = seq_row < 4u ? (int32_t)seq_row * 30 : 0, h = seq_row < 4u ? 30 : 120;
@@ -1400,6 +1434,21 @@ static void gfx_mix(uint32_t lit)               /* the three sources' levels, ea
         cv_text(4, y, &FONT_S, NAME[k], LVL[k] ? C_MID : C_FAINT);
         cv_rect(54, y + 5, 140, 6, C_FILL);
         cv_rect(54, y + 5, (int32_t)LVL[k] * 140 / 127, 6, LVL[k] ? C_BRIGHT : C_FAINT);
+        if (k < 2u && edit.vmode == VM_DUAL) {  /* DUAL: no routing (each part its own filter): the part's sends */
+            static const char *const SN[2] = {"DLY", "REV"};
+            uint32_t j;
+            cv_rect(54, y + 5, 140, 6, C_BLACK);   /* (the level's bar, shorter: the sends beside it) */
+            cv_rect(54, y + 5, 80, 6, C_FILL);
+            cv_rect(54, y + 5, (int32_t)LVL[k] * 80 / 127, 6, LVL[k] ? C_BRIGHT : C_FAINT);
+            for (j = 0; j < 2u; j++) {
+                int32_t x = 142 + (int32_t)j * 48, sv = edit.psend[k][j] & 127;
+                uint16_t sc = lit & LIT_RT ? C_BRIGHT : C_MID;
+                cv_text(x, y - 2, &FONT_S, SN[j], sv ? sc : C_FAINT);
+                cv_rect(x, y + 12, 44, 3, C_FILL);
+                cv_rect(x, y + 12, sv * 44 / 127, 3, sv ? sc : C_FAINT);
+            }
+            continue;
+        }
         if (d) cv_rect(200, y, 36, 16, c);      /* DIRECT: inverted, as it skips the filter */
         else cv_frame(200, y, 36, 16, lit & LIT_RT ? C_BRIGHT : C_BOX);
         cv_text(200 + (36 - text_w(&FONT_S, d ? "DIR" : "FILT")) / 2, y, &FONT_S, d ? "DIR" : "FILT", d ? C_BLACK : c);
@@ -1756,6 +1805,9 @@ static void gfx_loop(uint32_t lit)
 }
 
 static char pop_name[16], pop_val[20];          /* the knob just turned (or PRESETS: the cutoff) */
+#define ACT_MS 6000u
+static uint32_t act_kind, act_off, act_at;      /* an action waiting for SAVE (0: none; act_ask), its prm's off, when */
+static char act_what[32];
 static uint32_t pop_until, pop_drawn;
 static uint32_t pop_at, pop_tinted;             /* (when it was set; drawn shifted: redraw till it is white) */
 static int32_t pop_dir;                         /* a value turned up: 1, down: -1 (the shift), else 0 */
@@ -1847,8 +1899,10 @@ static void draw_gfx(void)
     cv_blit(0, G_Y);
 }
 
+static void draw_act(void);
 static void draw_pop(void)                      /* (into the picture's canvas) */
 {
+    if (act_kind) { draw_act(); pop_drawn = 0; return; }   /* (an action waiting: asked over everything) */
     if (fm1_ms < pop_until) {                   /* a knob turned: its name and value, large, in the top right corner */
         const felucca_font_t *f = text_w(&FONT_P, pop_val) <= 220 ? &FONT_P : &FONT_M;
         int32_t w = text_w(f, pop_val), nw = text_w(&FONT_S, pop_name), bw = (w > nw ? w : nw) + 16, x0, h = 24 + f->h;
@@ -1911,26 +1965,29 @@ static void draw_hdr(void)
     cv_line(x + 6, 5, x + 9, 9, C_FAINT); cv_line(x + 9, 9, x + 6, 13, C_FAINT);   /* > the row */
     x = cv_text(x + 15, 1, &FONT_S, page < PG_N ? PAGES[page].rows[row[page]].name : page == PG_LIVE ? LV_NAME[lv_row] :
                 PA_NAME[pa_row], C_MID);
-    e = s;                                      /* the slot, and * for unsaved changes */
-    if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
-    else e = put(e, "-");
-    if (modified()) e = put(e, "*");
-    cv_text(176 - text_w(&FONT_S, s), 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
-    if (ui_two() && hdr_part() < 3) {           /* two parts: the part this page edits, its colour; ALL: shared */
-        int32_t t = hdr_part(), tx;             /* (where it fits after the row's name; else the rule */
-        const char *n = t == 2 ? "ALL" : t ? "B" : "A";   /*  under the header shows the part alone) */
-        tx = 176 - text_w(&FONT_S, s) - 6 - text_w(&FONT_S, n);
-        if (tx >= x + 6)
-            cv_text(tx, 1, &FONT_S, n, t == 2 ? C_BRIGHT : t ? C_PART_B : C_PART_A);
-    }
-    cv_batt(181, 5, fm1_batt(), 1);             /* the battery, before the CPU */
 #ifndef DINGHY_HOST
-    cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak */
-    cpu_max = 0;
+    cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak (SETUP shows */
+    cpu_max = 0;                                /*  it; the header only past 80 %) */
 #endif
-    cv_rect(203, 5, 33, 9, C_BOX);              /* the CPU: a bar, bright past 70 % */
-    cv_rect(204, 6, 31, 7, C_BLACK);
-    cv_rect(205, 7, (int32_t)(cpu > 100u ? 100u : cpu) * 29 / 100, 5, cpu > 70u ? C_BRIGHT : C_MID);
+    ui_cpu = cpu;
+    {
+        int32_t r = 213;                        /* (right to left: the battery, CPU past 80 %, the slot, the part) */
+        cv_batt(219, 5, fm1_batt(), 1);
+        if (cpu > 80u) r = cv_text(r - text_w(&FONT_S, "CPU"), 1, &FONT_S, "CPU", C_BRIGHT) - text_w(&FONT_S, "CPU") - 6;
+        e = s;                                  /* the slot, and * for unsaved changes */
+        if (cur_slot >= 0) e = num(e, (uint32_t)cur_slot + 1u);
+        else e = put(e, "-");
+        if (modified()) e = put(e, "*");
+        r -= text_w(&FONT_S, s);
+        cv_text(r, 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
+        if (ui_two() && hdr_part() < 3) {       /* two parts: the part this page edits, its colour; ALL: shared */
+            int32_t t = hdr_part(), tx;         /* (where it fits after the row's name; else the rule */
+            const char *n = t == 2 ? "ALL" : t ? "B" : "A";   /*  under the header shows the part alone) */
+            tx = r - 6 - text_w(&FONT_S, n);
+            if (tx >= x + 6)
+                cv_text(tx, 1, &FONT_S, n, t == 2 ? C_BRIGHT : t ? C_PART_B : C_PART_A);
+        }
+    }
     cv_rect(0, 19, 240, 1, !ui_two() || hdr_part() >= 2 ? C_BOX : hdr_part() ? C_PART_B : C_PART_A);   /* the rule */
                                                 /*  under it (a part's page: the part's colour) */
     cv_blit(0, HDR_Y);
@@ -1946,6 +2003,10 @@ static const char *prm_idle(uint32_t pg, const prm_t *p)   /* a parameter that d
         return "SYNCED";                        /* (SYNC's division sets the rate) */
     if (pg == PG_MFX && p->off != PO(mfx_type) && (!edit.mfx_type || edit.mfx_type >= MFX_N))
         return "MOD FX OFF";
+    if (pg == PG_MIX && (p->off == PO(psend[0][0]) || p->off == PO(psend[1][0])) && !edit.dly_mix)
+        return "DELAY OFF";                     /* (its MIX 0: the return shut) */
+    if (pg == PG_MIX && (p->off == PO(psend[0][1]) || p->off == PO(psend[1][1])) && !edit.rev_mix)
+        return "REVERB OFF";
     return 0;
 }
 static void draw_focus(void)                    /* the selected row: four labels, values (large), bars */
@@ -2013,9 +2074,10 @@ static void draw_focus(void)                    /* the selected row: four labels
     cv_blit(0, FOC_Y);
 }
 
-static void tabs(const char *const *name, uint32_t nn, uint32_t sel)   /* names along the bottom, sel inverted */
-{                                               /* (too many: whole ones around sel, an arrow where there are more) */
-    int32_t ws[12], tw = 0, x, pad = 10, gap = 4, room = 240;
+static void tabs_in(const char *const *name, uint32_t nn, uint32_t sel, const char *label)   /* names along the */
+{                                               /* bottom, sel inverted (too many: whole ones around sel, an arrow */
+                                                /* where there are more); label (0: none) first, on the left */
+    int32_t ws[12], tw = 0, x, pad = 10, gap = 4, x0 = label ? text_w(&FONT_S, label) + 10 : 0, W = 240 - x0, room = W;
     uint32_t n, first = 0, last;
     if (nn > 12u) nn = 12u;
     for (n = 0; n < nn; n++) tw += text_w(&FONT_S, name[n]);
@@ -2027,7 +2089,7 @@ static void tabs(const char *const *name, uint32_t nn, uint32_t sel)   /* names 
     last = nn - 1u;
     if (tw + (int32_t)nn * (pad + gap) - gap > room) {   /* (still too many: a window of them, room for the arrows) */
         int32_t w;
-        room = 240 - 2 * 8;
+        room = W - 2 * 8;
         for (first = 0;; first++) {             /* the first that lets sel (and the ones between) fit */
             for (w = 0, n = first; n <= sel; n++) w += ws[n] + (n > first ? gap : 0);
             if (w <= room || first == sel) break;
@@ -2039,10 +2101,14 @@ static void tabs(const char *const *name, uint32_t nn, uint32_t sel)   /* names 
         last--;
     }
     for (x = 0, n = first; n <= last; n++) x += ws[n] + (n > first ? gap : 0);
-    x = (240 - x) / 2;                          /* (centred) */
+    x = x0 + (W - x) / 2;                       /* (centred) */
     cv_begin(240, TAB_H, C_BLACK);
     cv_rect(0, 0, 240, 1, C_BOX);               /* the rule over them */
-    if (first > 0) { cv_line(5, 8, 2, 12, C_MID); cv_line(2, 12, 5, 16, C_MID); }   /* < more before */
+    if (label) {                                /* (the label, and a rule after it) */
+        cv_text(4, 5, &FONT_S, label, C_MID);
+        cv_rect(x0 - 3, 5, 1, 15, C_BOX);
+    }
+    if (first > 0) { cv_line(x0 + 5, 8, x0 + 2, 12, C_MID); cv_line(x0 + 2, 12, x0 + 5, 16, C_MID); }   /* < more */
     if (last + 1u < nn) { cv_line(234, 8, 237, 12, C_MID); cv_line(237, 12, 234, 16, C_MID); }   /* > more after */
     for (n = first; n <= last; n++) {
         if (n == sel) {
@@ -2054,11 +2120,18 @@ static void tabs(const char *const *name, uint32_t nn, uint32_t sel)   /* names 
     }
     cv_blit(0, TAB_Y);
 }
+static void tabs(const char *const *name, uint32_t nn, uint32_t sel) { tabs_in(name, nn, sel, 0); }
 
-static void draw_tabs(void)                     /* every row of the page */
+static void draw_tabs(void)                     /* every row of the page (SEQ: of the selected row's group) */
 {
     const char *name[12];
     uint32_t n;
+    if (page == PG_SEQ) {
+        uint32_t g = seq_group(row[page]), a = SEQ_GROUPS[g].first;   /* (the group's name; its rows, the */
+        for (n = 0; n < SEQ_GROUPS[g].n; n++) name[n] = PAGES[page].rows[a + n].name;   /* selected inverted: */
+        tabs_in(name, n, row[page] - a, SEQ_GROUPS[g].name);   /* where it is in the group) */
+        return;
+    }
     for (n = 0; n < PAGES[page].n && n < 12u; n++)
         name[n] = PAGES[page].rows[n].name;
     tabs(name, n, row[page]);
@@ -2232,21 +2305,13 @@ static void pa_say(const char *a, uint32_t slot)   /* the message line: a, then 
     pa_msg = pa_msgbuf;
 }
 
-/* the EDIT row's COPY, PASTE, CLEAR and the SONG row's INIT (a knob turned either way); CLEAR ALL and INIT ask first:
- * the same turn again within 3 s does it. 1: the timing may have changed (the engine's to know) */
+/* the EDIT row's COPY, PASTE, CLEAR and the SONG row's INIT (a knob turned either way; PASTE, CLEAR and INIT asked
+ * first: act_ask). 1: the timing may have changed (the engine's to know) */
 static int seq_action(uint32_t kind)
 {
     pattern_t *pt = seq_ed();
     uint32_t a = seq_row < 4u ? seq_row * 16u : 0u, n = seq_row < 4u ? 16u : 64u, k, d;
     char msg[16], *e;
-    if ((kind == K_SINIT || (kind == K_SCLEAR && seq_row >= 4u)) &&
-        (seq_arm != kind || fm1_ms - seq_arm_at > 3000u)) {
-        seq_arm = kind;
-        seq_arm_at = fm1_ms;
-        pop(kind == K_SINIT ? "INIT ALL?" : "CLEAR ALL?", "AGAIN");
-        return 0;
-    }
-    seq_arm = 0;
     if (kind != K_SCOPY) ud_take(kind == K_SPASTE ? "PASTE" : kind == K_SCLEAR ? "CLEAR" : "INIT");
     e = seq_row < 4u ? num(put(msg, "ROW "), seq_row + 1u) : num(put(msg, "P"), seqs.cur % SEQ_PATS + 1u);
     if (kind == K_SCOPY) {
@@ -2401,16 +2466,9 @@ static void drum_preset(void)                   /* the KIT row's LOAD: the beat 
     dirty |= D_GFX | D_ROWS;
 }
 
-static void drum_clear(void)                    /* the DRUM page's CLEAR: the lane chosen, every step none (asks first) */
-{
+static void drum_clear(void)                    /* the DRUM page's CLEAR: the lane chosen, every step none (asked */
+{                                               /* first: act_ask) */
     uint32_t k;
-    if (seq_arm != K_DCLR || fm1_ms - seq_arm_at > 3000u) {
-        seq_arm = K_DCLR;
-        seq_arm_at = fm1_ms;
-        pop("CLEAR LANE?", "AGAIN");
-        return;
-    }
-    seq_arm = 0;
     ud_take("CLEAR");
     for (k = 0; k < 64u; k++)
         drum_put(seq_ed(), dr_sel, k, 0);
@@ -2677,8 +2735,22 @@ static void live_draw_gfx(void)                 /* the patterns, the patches, th
     lv_drawn = seq.steps;
     lv_blink = blink;
     cv_begin(240, G_H, C_BLACK);
-    cv_text(4, 0, &FONT_S, "PATTERN", C_FAINT);
-    cv_text(236 - text_w(&FONT_S, seqs.mode ? "SONG" : "PATT"), 0, &FONT_S, seqs.mode ? "SONG" : "PATT", C_MID);
+    {                                           /* the transport: playing or not, the tempo; what waits for the bar */
+        static const prm_t BPM = {"BPM", PO(arp_bpm), 200, K_BPM};   /* (line, else PATTERN or SONG mode) */
+        e = put(t, eg.seq_play ? "PLAY " : "STOP ");
+        fmt(e, &BPM, &edit.arp_bpm);
+        {                                       /* (BPM said, where it leaves room for what waits) */
+            char *z = e;
+            while (*z) z++;
+            if (*e != 'E' && lv_qslot < 0 && lv_qpat < 0) put(z, " BPM");   /* (EXT: the MIDI clock, none yet) */
+        }
+        cv_text(4, 0, &FONT_S, t, eg.seq_play ? C_BRIGHT : C_MID);
+        if (lv_qslot >= 0) e = put(num(put(t, "PATCH "), (uint32_t)lv_qslot + 1u), " NEXT BAR");
+        else if (lv_qpat >= 0) e = put(num(put(num(put(t, "P"), cur % SEQ_PATS + 1u), " > P"), (uint32_t)lv_qpat + 1u),
+                                       " NEXT BAR");
+        else put(t, seqs.mode ? "SONG" : "PATTERN");
+        cv_text(236 - text_w(&FONT_S, t), 0, &FONT_S, t, lv_qslot >= 0 || lv_qpat >= 0 ? C_BRIGHT : C_MID);
+    }
     for (i = 0; i < SEQ_PATS; i++) {            /* the one playing filled; the one waiting framed, blinking */
         int32_t x = 4 + (int32_t)i * 59;
         num(put(t, "P"), i + 1u);
@@ -2794,7 +2866,7 @@ static int pa_tone_do(void)                     /* TONE's SAVE: a tone into the 
     uint32_t part = ui_two() && ui_b() ? 1u : 0u;
     if (pa_tact == TA_STORE) {
         if (pa_tone < TONE_ROM_N) { pa_say("FACTORY TONES ARE FIXED", 0); return 0; }
-        if (tone_at(pa_tone, &t) == 0 && !pa_armed) { pa_armed = 1; pa_say("TONE USED: SAVE AGAIN", 0); return 0; }
+        if (tone_at(pa_tone, &t) == 0 && !pa_armed) { pa_armed = 1; pa_say("OVERWRITE THAT TONE? SAVE", 0); return 0; }
         pa_armed = 0;
         tone_get(&edit, part, &t);
         pa_tname_init();
@@ -2842,7 +2914,9 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
     if (pa_row == PA_SAVE) {                    /* the sound and the sequencer playing, into the slot */
         if (bank.used[pa_slot] && ((int32_t)pa_slot != cur_slot || (int32_t)pa_slot != seq_owner) && !pa_armed) {
             pa_armed = 1;                       /* (another slot's; or its sound came alone: its sequencer would go) */
-            pa_say((int32_t)pa_slot != cur_slot ? "SLOT USED: SAVE AGAIN" : "REPLACES ITS SEQ: SAVE AGAIN", 0);
+            put(num(put(pa_msgbuf, (int32_t)pa_slot != cur_slot ? "OVERWRITE SLOT " : "REPLACE SEQ OF "), pa_slot + 1u),
+                "? SAVE");                      /* (the consequence; SAVE again does it, HOME not) */
+            pa_msg = pa_msgbuf;
             return 0;
         }
         pa_armed = 0;
@@ -2863,9 +2937,10 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
         pa_msg = pa_msgbuf;
         return 0;
     }
-    if (modified() && !pa_armed) {              /* LOAD / INIT over unsaved changes: ask once more */
+    if (modified() && !pa_armed) {              /* LOAD / INIT over unsaved changes: ask once more, saying what goes */
         pa_armed = 1;
-        pa_say("UNSAVED: SAVE AGAIN", 0);
+        if (pa_row == PA_INIT) pa_say("DISCARD EDITS? SAVE: INIT", 0);
+        else pa_say(pa_row == PA_LOAD ? "DISCARD EDITS? SAVE: LOAD " : "DISCARD EDITS? SAVE: SOUND ", pa_slot + 1u);
         return 0;
     }
     pa_armed = 0;
@@ -3094,6 +3169,76 @@ static void sc_text(void)                       /* the header: the note, the cyc
     draw_text_box(0, 222, 240, &FONT_S, gset.home ? "KNOB1: CYCLES   HOME: LIVE" : "KNOB1: CYCLES   HOME: BACK", C_FAINT, 1);
 }
 
+/* ---- an action that replaces or clears (PASTE, CLEAR, INIT, a beat LOADed, a part's notes, the loop): turned, it
+ * names what it will change and waits: SAVE does it, HOME (or another button, another page or row, ACT_MS) not. COPY
+ * just copies, saying what */
+static int act_destroys(uint32_t k)
+{
+    return k == K_SPASTE || k == K_SCLEAR || k == K_SINIT || k == K_DPASTE || k == K_DCLR || k == K_DLOAD ||
+           k == K_SPCLR || k == K_LCLR;
+}
+static char *seq_where(char *e)                 /* the EDIT row's reach: P2 ROW 3, or P2 ALL ROWS */
+{
+    e = num(put(e, "P"), seqs.cur % SEQ_PATS + 1u);
+    return seq_row < 4u ? num(put(e, " ROW "), seq_row + 1u) : put(e, " ALL ROWS");
+}
+static void act_ask(uint32_t kind, uint32_t off)
+{
+    char *e = act_what;
+    switch (kind) {                             /* (nothing to do: said, not asked) */
+    case K_SPASTE:
+        if (!clip_rows) { pop("PASTE", "EMPTY"); return; }
+        if (clip_rows == 4u && seq_row < 4u) { pop("PASTE", "ROW=ALL"); return; }   /* (a pattern: into a pattern) */
+        seq_where(put(e, "PASTE INTO "));
+        break;
+    case K_SCLEAR: seq_where(put(e, "CLEAR ")); break;
+    case K_SINIT: put(e, "INIT EVERY PATTERN, SONG"); break;
+    case K_DPASTE: {
+        uint32_t to = dr_lane ? dr_lane - 1u : dclip_lane > DRUMS ? DRUMS : dclip_lane - 1u;
+        if (!dclip_lane) { pop("PASTE", "EMPTY"); return; }
+        e = num(put(e, "PASTE INTO P"), seqs.cur % SEQ_PATS + 1u);
+        put(put(e, " "), to < DRUMS ? DRUM_NAME[to] : "DRUMS");
+        break;
+    }
+    case K_DCLR: put(put(num(put(e, "CLEAR P"), seqs.cur % SEQ_PATS + 1u), " "), DRUM_NAME[dr_sel % DRUMS]); break;
+    case K_DLOAD: num(put(put(put(e, "LOAD "), DPRE[dr_pre % DPRE_N].name), " INTO P"), seqs.cur % SEQ_PATS + 1u); break;
+    case K_SPCLR:
+        if (off == 2u && !edit.split && edit.vmode != VM_DUAL) { pop("CLR2", "SPLIT OFF"); return; }
+        seq_where(put(num(put(e, "CLEAR PART "), off), ": "));
+        break;
+    default: put(e, "CLEAR THE LOOP"); break;
+    }
+    act_kind = kind;
+    act_off = off;
+    act_at = fm1_ms;
+    pop_until = 0;
+    dirty |= D_GFX;
+}
+static int act_do(void)                         /* SAVE: the action waiting, done; 1: the timing may have changed */
+{
+    uint32_t k = act_kind, changed = 0;
+    act_kind = 0;
+    dirty |= D_GFX;
+    switch (k) {
+    case K_SPASTE: case K_SCLEAR: case K_SINIT: changed = (uint32_t)seq_action(k); break;
+    case K_DPASTE: drum_copy(1); break;
+    case K_DCLR: drum_clear(); break;
+    case K_DLOAD: drum_preset(); break;
+    case K_SPCLR: part_clear(act_off); break;
+    case K_LCLR: loop_cmd(LPC_CLEAR); pop("LOOP", "CLEARED"); dirty |= D_ROWS; break;
+    default: break;
+    }
+    return (int)changed;
+}
+static void draw_act(void)                      /* (into the picture's canvas) the action waiting: what, and how */
+{
+    static const char HOW[] = "SAVE: CONFIRM   HOME: CANCEL";
+    cv_rect(4, 0, 232, 44, C_BLACK);
+    cv_frame(4, 0, 232, 44, C_BRIGHT);
+    cv_text((240 - text_w(&FONT_S, act_what)) / 2, 4, &FONT_S, act_what, C_BRIGHT);
+    cv_text((240 - text_w(&FONT_S, HOW)) / 2, 23, &FONT_S, HOW, C_MID);
+}
+
 static void ui_page(uint32_t pg)
 {
     if (pg > PG_LIVE) return;
@@ -3113,6 +3258,7 @@ static void ui_page(uint32_t pg)
     }
     if (pg != PG_LIVE) live_mute = 0;           /* (LIVE's mutes: out of it, all on) */
     page = pg;
+    act_kind = 0;                               /* (an action waiting: not done) */
     pop_until = 0;                              /* (the last page's pop-up goes with it, and its lit cell) */
     cell_k = -1;
     dirty = D_ALL;
@@ -3149,6 +3295,12 @@ static int ui_input(uint32_t buttons)
         if (page != PG_SEQ && page != PG_DRUM) ui_page(PG_SEQ);   /* (the DRUM page stays: its keys record) */
         dirty |= D_ALL;
         return (int)changed;
+    }
+    if (act_kind) {                             /* an action waiting: SAVE does it, HOME not; another button not either */
+        if (fm1_ms - act_at > ACT_MS) { act_kind = 0; dirty |= D_GFX; }   /* (then on as usual) */
+        else if (buttons & (1u << BTN_SAVE)) return act_do() | (int)changed;
+        else if (buttons & (1u << BTN_HOME)) { act_kind = 0; pop("CANCELLED", "NOTHING CHANGED"); return (int)changed; }
+        else if (buttons) { act_kind = 0; dirty |= D_GFX; }
     }
     if (page == PG_LIVE)                        /* (SELECT, and PRESETS when it chooses a knob's parameter) */
         live_input(buttons);
@@ -3256,6 +3408,7 @@ static int ui_input(uint32_t buttons)
             dr_sel = 2;                         /* (ROLL: the hat's) */
         pop_until = 0;
         cell_k = -1;
+        act_kind = 0;                           /* (another row: the action waiting not done) */
         dirty |= D_HDR | D_GFX | D_LEG | D_ROWS;
     }
     for (i = 0; i < 4u; i++) {
@@ -3282,20 +3435,16 @@ static int ui_input(uint32_t buttons)
             d *= 3;                             /* a fast turn covers the range quickly */
         }
         last_turn[i] = fm1_ms;
-        if (p->kind == K_SCOPY || p->kind == K_SPASTE || p->kind == K_SCLEAR || p->kind == K_SINIT) {
-            if (seq_action(p->kind)) changed = 1;   /* (a turn either way does it) */
+        if (act_destroys(p->kind)) {            /* PASTE, CLEAR, INIT, LOAD: asked first (a turn either way) */
+            if (act_kind != p->kind || act_off != p->off) act_ask(p->kind, p->off);
             continue;
         }
-        if (p->kind == K_DLOAD) {               /* the preset beat, loaded (a turn either way) */
-            drum_preset();
+        if (p->kind == K_SCOPY) {               /* COPY: at once (a turn either way) */
+            if (seq_action(p->kind)) changed = 1;
             continue;
         }
-        if (p->kind == K_DCOPY || p->kind == K_DPASTE) {   /* the drums' lanes, copied, pasted (a turn either way) */
-            drum_copy(p->kind == K_DPASTE);
-            continue;
-        }
-        if (p->kind == K_DCLR) {                /* the lane's steps, all none (asks first) */
-            drum_clear();
+        if (p->kind == K_DCOPY) {               /* the drums' lanes, copied (a turn either way) */
+            drum_copy(0);
             continue;
         }
         if (p->kind == K_SLEARN) {              /* the next key sets the split (a turn back: not) */
@@ -3304,16 +3453,7 @@ static int ui_input(uint32_t buttons)
             dirty |= D_ROWS;
             continue;
         }
-        if (p->kind == K_SPCLR) {               /* a part's notes, in the EDIT row's ROW (or ALL) */
-            part_clear(p->off);
-            continue;
-        }
-        if (p->kind == K_LCLR) {                /* the looper: empty (a turn either way) */
-            loop_cmd(LPC_CLEAR);
-            pop("LOOP", "CLEARED");
-            dirty |= D_GFX | D_ROWS;
-            continue;
-        }
+
         v = pval(pg, p);
         x = (int32_t)*v + d;
         if (p->kind == K_DMS && edit.dly_sync) {   /* SYNC: a division a step (the middle of its share of the knob) */
@@ -3609,6 +3749,10 @@ static void ui_draw(void)                       /* from the main loop: what chan
         dirty |= D_GFX;                         /* (the pop-up's time is up: the picture back; or it is fading) */
     if (cell_drawn && (fm1_ms >= cell_until || cell_tinted))
         dirty |= D_ROWS;                        /* (and a lit cell's) */
+    if (act_kind && fm1_ms - act_at > ACT_MS) {
+        act_kind = 0;                           /* (an action not answered: gone) */
+        dirty |= D_GFX;
+    }
     if (!dirty || fm1_ms - last < UI_FRAME_MS)
         return;
     last = fm1_ms;

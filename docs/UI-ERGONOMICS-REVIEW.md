@@ -100,4 +100,12 @@ Implemented on the `ui-ergonomics-pass1` branch (tests: `tests/nav_test.c`, `tes
 - **Knob positions:** MOD FX has MIX on knob 3. On M.ENV 1/2 DEST, DEST and AMT are on knobs 1 and 2 (as on LFO and LFO 2), PART on 3 and LOOP on 4.
 - **Value feedback:** a turned knob lights its own cell instead of a pop-up over the picture. Pop-ups remain for the cutoff when it is off its page, messages and confirmations.
 
-These remain for the second pass: oscillator regrouping (§2), the sequencer's rows (§5), the action/confirm pattern (§6), LIVE's transport and queue display (§7) and the CPU meter (§8).
+## Status of the second pass
+
+- **OSC pages (§2):** CAR, MOD1, ENV1, MOD2, ENV2, plus a RATIO row kept for comparing the three ratios. Each operator row has bank, wave, ratio and amount (the carrier has level). Each ENV row has A, R, mode and fine. A modulator's ratio becomes PIT1/PIT2 in MIX or RING on both its own row and the RATIO row. Only the row's own modulator lights its AR shape.
+- **SEQ (§5):** the rows are grouped as STEPS (STEP CHORD PART LOCK), PATTERN (PATTERN EDIT PARTS), REC (CLICK) and SONG (SONG ENTRY). The tab strip shows the group's name and its rows, with the selected row inverted. SELECT runs on from one group into the next, and the step cursor is kept. The grid has solid beat lines, and the playhead (a bar under the step) is drawn distinctly from the edit cursor (a frame).
+- **Actions (§6):** PASTE, CLEAR, CLR1/CLR2, INIT, the drums' CLEAR/PASTE/LOAD and the LOOP's CLEAR name their exact target (`CLEAR P1 ROW 2`) and wait for SAVE (confirm) or HOME (cancel). Another button, row or page, or 6 s, also cancels. COPY acts at once. The PATCH screen's questions now say the consequence (`OVERWRITE SLOT 3? SAVE`, `DISCARD EDITS? SAVE: LOAD 4`).
+- **LIVE (§7):** a transport line shows `PLAY 120 BPM` / `STOP …`, and either what waits (`P2 > P3 NEXT BAR`, `PATCH 4 NEXT BAR`) or PATTERN/SONG.
+- **CPU (§8):** the meter is on SETUP (peak % and a bar). The header shows `CPU` only past 80 %, and the battery moves to the far right.
+
+Not done: step numbers in the SEQ grid (the 240 px grid has no room without smaller cells; the STEP knob shows the number), and a quicker UNDO shortcut (§7).

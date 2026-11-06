@@ -258,8 +258,9 @@ static void modfx_render(int32_t *out, uint32_t n)
 }
 
 /* ---- the audio ISR: out (L R, the voices) -> chorus, delay, reverb, in place; dr: the drums' bus (mono, or 0), sent
- * into the delay and the reverb */
-static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t *dr)   /* g2: LFO 2, a value a block */
+ * into the delay and the reverb; snd: DUAL's sends (engine.c: psnd_buf, a frame's delay L R, the reverb's L+R), or 0:
+ * the voices as they are (after the chorus) into both */
+static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t *dr, const int32_t *snd)
 {
     const fxp_t p = fxp;                        /* (read once: fx_set, in the main loop, cannot run during the ISR) */
     uint32_t i, dest = eg.l2_dest, dtime = p.dly_sync ? dly_synced(p.time_v) : p.dly_time;   /* (SYNC: the tempo now) */
@@ -313,7 +314,8 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
             }
             {
                 int32_t ds = dsend ? (dr[i] * dsend) >> 15 : 0;   /* (the drums' send) */
-                int32_t il = vd == 32767 ? l : (l * vd) >> 15, ir = vd == 32767 ? r : (r * vd) >> 15;   /* (the voices') */
+                int32_t s_l = snd ? snd[3u * i] : l, s_r = snd ? snd[3u * i + 1u] : r;   /* (the voices': DUAL, each */
+                int32_t il = vd == 32767 ? s_l : (s_l * vd) >> 15, ir = vd == 32767 ? s_r : (s_r * vd) >> 15;   /* part's) */
                 if (p.dly_ping) {             /* ping-pong: in on the left, then across and back */
                     dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(((il + ir) >> 1) + ds + fr);
                     dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(fl);
@@ -329,7 +331,7 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
         if (rmix) {                             /* the plate */
             int32_t x, sl, sr, yl, yr, a, b2;
             uint32_t e0, e1;
-            x = (l + r) >> 2;                   /* (half the mono sum: headroom in the tank) */
+            x = (snd ? snd[3u * i + 2u] : l + r) >> 2;   /* (half the mono sum: headroom in the tank) */
             if (vr != 32767)                    /* (the voices' send: a lock lane's) */
                 x = (x * vr) >> 15;
             if (rsend)                          /* (the drums' send, as much of it) */

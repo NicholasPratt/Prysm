@@ -224,7 +224,9 @@ typedef struct {
     uint8_t mm_part[MM_SLOTS];                  /* each matrix route's */
     uint8_t pvol[2];                            /* (format 20) each part's level, past its amp: 127 = as it is */
     uint8_t ppan[2];                            /* each part's place: 0 left .. 64 centre .. 127 right (SINGLE: */
-} patch_t;                                      /*  neither) */
+                                                /*  neither) */
+    uint8_t psend[2][2];                        /* (format 21) DUAL: each part's sends, [part][0 delay, 1 reverb]: */
+} patch_t;                                      /*  127 = all of it, as the other modes (the effects' MIX: the return) */
 /* the fields a part has its own of: part B's in pb, in this order */
 #define PF(f) ((uint8_t)__builtin_offsetof(patch_t, f))
 static const uint8_t PART_OFF[PART_N] = {
@@ -417,6 +419,7 @@ static const patch_t PATCH_INIT = {
            NOISE_WHITE, 100, 0, ROUTE_FILTER, 0},
     .l2_part = PT_BOTH, .me2_part = PT_BOTH, .mm_part = {PT_BOTH, PT_BOTH, PT_BOTH, PT_BOTH},
     .pvol = {127, 127}, .ppan = {64, 64},
+    .psend = {{127, 127}, {127, 127}},
 };
 
 static void part_b(patch_t *q, const patch_t *p)   /* q: p as part B has it (B's own fields in A's places) */
@@ -500,6 +503,8 @@ typedef struct {
     uint8_t l2_parts, me2_parts, mm_parts[MM_SLOTS];   /* the parts each reaches: bit 0 A's voices, bit 1 B's */
     uint8_t pbus;                               /* two parts, a level or a place not as it is: B's voices on a bus */
     int32_t pg[2][2];                           /* each part's gains, left and right: Q15 (32768: as it is) */
+    uint8_t psnd;                               /* DUAL, a part's send not all of it: the sends apart (psnd_buf) */
+    int32_t ps[2][2];                           /* each part's sends, [part][delay, reverb]: Q15 (32768: all) */
 } eng_t;
 static volatile eng_t eg, eb;                   /* (eg: everything, part A's; eb: part B's own) */
 #define PE(v) (voice[v].part ? &eb : &eg)       /* a voice's part's */
@@ -2153,6 +2158,7 @@ static __attribute__((noinline)) void layer_follow(void)   /* LAYER: each odd vo
 
 #define PBUS_N 256u                             /* (the FM-1's half buffer) */
 static int32_t pbus[2u * PBUS_N];               /* part B's voices, when its level or place (or A's) is its own */
+static int32_t psnd_buf[3u * PBUS_N];           /* DUAL's sends (eg.psnd): a frame's delay input L R, the reverb's (L+R) */
 static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the caller) */
 {
     uint32_t v, o, k, b, i, nb = n / BLK;
@@ -2599,8 +2605,15 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
     if (eg.pbus)                                /* the parts' levels and places: A's in out (only it, yet), B's bus */
         for (i = 0; i < n; i++) {
             int32_t a = out[2u * i], bb = pbus[2u * i];   /* (mono: left and right the same) */
-            out[2u * i] = (int32_t)(((int64_t)a * eg.pg[0][0] + (int64_t)bb * eg.pg[1][0]) >> 15);
-            out[2u * i + 1u] = (int32_t)(((int64_t)a * eg.pg[0][1] + (int64_t)bb * eg.pg[1][1]) >> 15);
+            int32_t al = (int32_t)(((int64_t)a * eg.pg[0][0]) >> 15), ar = (int32_t)(((int64_t)a * eg.pg[0][1]) >> 15);
+            int32_t bl = (int32_t)(((int64_t)bb * eg.pg[1][0]) >> 15), br = (int32_t)(((int64_t)bb * eg.pg[1][1]) >> 15);
+            out[2u * i] = al + bl;
+            out[2u * i + 1u] = ar + br;
+            if (eg.psnd) {                      /* (DUAL's sends: each part's share into the delay, the reverb) */
+                psnd_buf[3u * i] = (int32_t)(((int64_t)al * eg.ps[0][0] + (int64_t)bl * eg.ps[1][0]) >> 15);
+                psnd_buf[3u * i + 1u] = (int32_t)(((int64_t)ar * eg.ps[0][0] + (int64_t)br * eg.ps[1][0]) >> 15);
+                psnd_buf[3u * i + 2u] = (int32_t)(((int64_t)(al + ar) * eg.ps[0][1] + (int64_t)(bl + br) * eg.ps[1][1]) >> 15);
+            }
             pbus[2u * i] = pbus[2u * i + 1u] = 0;
         }
     {                                           /* the free-running LFO follows the newest note's mod envelope */
@@ -2613,7 +2626,7 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
         static int32_t bus[MAXBLK * BLK];
         int dr = drums_render(bus, n <= MAXBLK * BLK ? n : MAXBLK * BLK);
         modfx_render(out, n);                   /* CRUSH, MOD FX: the voices' alone */
-        fx_render(out, n, g2, dr ? bus : 0);    /* the effects, over all the voices (LFO 2 on them) */
+        fx_render(out, n, g2, dr ? bus : 0, eg.pbus && eg.psnd ? psnd_buf : 0);   /* the effects, over all the voices */
         if (dr)
             for (i = 0; i < n && i < MAXBLK * BLK; i++) {
                 out[2u * i] += bus[i];
@@ -2800,6 +2813,17 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
             eg.pg[pt][0] = (int32_t)(((int64_t)g * l) >> 15);
             eg.pg[pt][1] = (int32_t)(((int64_t)g * r) >> 15);
             on |= vol < 127u || pan != 64u;
+        }
+        {                                       /* DUAL: each part's own sends into the delay and the reverb */
+            uint32_t c, sn = 0;
+            for (pt = 0; pt < 2u; pt++)
+                for (c = 0; c < 2u; c++) {
+                    uint32_t v = patch.psend[pt][c] & 127u;
+                    eg.ps[pt][c] = v >= 127u ? 32768 : (int32_t)PR_CURVE_Q15[v];
+                    sn |= v < 127u;
+                }
+            eg.psnd = (uint8_t)(sn && eg.vmode == VM_DUAL);
+            on |= eg.psnd;
         }
         if (!on || eg.vmode == VM_SINGLE) eg.pbus = 0;
         else if (!eg.pbus) {                    /* (the bus clean before it is used) */
