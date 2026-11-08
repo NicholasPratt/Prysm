@@ -308,6 +308,7 @@ static void app_main(void)
             cap_midi(st, d1, d2);
             if ((st & 0xF0u) == 0x90u && (st & 0x0Fu) == 9u && d2 && engine_drum_note(d1) >= 0) {
                 engine_drum((uint32_t)engine_drum_note(d1), d2);   /* (channel 10: the drums, whatever IN says) */
+                ui_drum_midi((uint32_t)engine_drum_note(d1), d2);   /* (REC: into the pattern, by its velocity) */
                 continue;
             }
             if ((st & 0xE0u) == 0x80u && (st & 0x0Fu) == 9u && engine_drum_note(d1) >= 0)

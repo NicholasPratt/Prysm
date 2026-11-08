@@ -253,16 +253,19 @@ static const char *const SEQ_TRIG_NAME[SEQ_TRIGS] = {"REST", "NOTE", "ACCENT", "
  * step's own (note, trig, slide: what the STEP row edits; ACCENT and SLIDE are the whole step's), lanes 1 .. 3 the
  * chord's others, each a note and a velocity, or a tie. Each lane plays as a voice of its own: a lane's TIE carries
  * that lane's note on. Beside them, the drums' lanes: a bit a step for each drum, and a bit for its accent (the hat
- * opens), and the hat's ratchets: a step played 2 .. 8 times over its length (a roll). And two lock lanes: each a
+ * opens), a bit for its ghost (a soft hit), and the hat's and the snare's ratchets: a step played 2 .. 8 times over
+ * its length (a roll). And two lock lanes: each a
  * parameter of the sound (LK_CUTOFF ..), and a value for it on any step (the notes that step plays take it; the
  * sends: that step's share into the delay, the reverb). (Patterns of SEQS_VERSION 1 were lane 0 alone, of 2 had no
- * drums, of 3 no ratchets, of 4 three drums and no locks: patches.c converts them.) */
+ * drums, of 3 no ratchets, of 4 three drums and no locks, of 5 no parts, of 6 no ghosts: patches.c converts them.) */
 #define SEQ_PATS 4u
 #define SONG_N 16u
 #define SEQ_LANES 4u
 #define SEQ_XTIE 0x80u                          /* xnote: the lane's note before goes on (no new attack) */
 typedef struct {
-    uint8_t len, pad[3];                        /* 1 .. 64 steps */
+    uint8_t len;                                /* 1 .. 64 steps */
+    uint8_t blen;                               /* (padding before 1.6, so 0 there) DUAL: part B's own length, 1 .. 64 */
+    uint8_t pad[2];                             /* (0: the pattern's, len): B's notes then loop on their own (seq_step) */
     uint8_t note[64], trig[64], slide[64];      /* lane 0; trig: SEQ_REST .. SEQ_TIE */
     uint8_t vel[64];                            /* lane 0's velocity (recorded): 0 = its trig's (NOTE 100) */
     uint8_t xnote[64][SEQ_LANES - 1u];          /* lanes 1 .. 3: a note (| SEQ_XTIE: a tie) */
@@ -275,6 +278,9 @@ typedef struct {
     uint8_t lk[2][64];                          /* each step's lock: 0 none, else the value + 1 */
     uint8_t lpart[64];                          /* (SEQS_VERSION 6) step k's lanes' parts: bit l, lane l's note on part B */
                                                 /* (heard in DUAL; SPLIT, the others: by the note, part_of) */
+    uint8_t dgho[4][8];                         /* (SEQS_VERSION 7) the drums' ghosts: step k's, bit k & 7 of byte k >> 3
+                                                 * (a soft hit: its hit and accent bits clear) */
+    uint8_t sret[32];                           /* (SEQS_VERSION 7) the snare's ratchets, as dret the hat's */
 } pattern_t;
 #define DRUMS 4u                                /* kick, snare, hat, clap */
 #define PLOCKS 2u
@@ -310,8 +316,10 @@ typedef struct {
     uint8_t dr_ramp;                            /* a ratchet's hits: 64 = all at the step's level; down: they fade; up: */
                                                 /* they swell into it */
     uint8_t dr_kit;                             /* (SEQS_VERSION 5) the kit's sounds: DR_KITS's (prysm_drums.h) */
+    uint8_t dr_ghost;                           /* (SEQS_VERSION 7; padding before) a ghost's velocity, 0..127 */
 } seqs_t;
-#define SEQS_VERSION 6u
+#define SEQS_VERSION 7u
+#define DR_GHOST_VEL 48u                        /* a ghost's velocity, as new (the KIT row's GHOST) */
 #define RATCHETS 6u
 static const uint8_t RATCHET[RATCHETS] = {1, 2, 3, 4, 6, 8};   /* a ratchet's hits (3, 6: triplets) */
 static seqs_t seqs;
@@ -335,41 +343,62 @@ static void seqs_blank(seqs_t *s)               /* four empty patterns (16 rests
         s->dr_dec[i] = 127;
     }
     s->dr_ramp = 64;
+    s->dr_ghost = DR_GHOST_VEL;
 }
 static void seqs_init(void) { seqs_blank(&seqs); }
 
-static uint32_t drum_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d on step k: 0 none, 1 a hit, 2 accented, */
-{                                               /* 3 a flam */
+enum { DH_NONE, DH_HIT, DH_ACCENT, DH_FLAM, DH_GHOST, DH_N };   /* a drum's step (DH_FLAM: the snare's alone) */
+static uint32_t drum_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d on step k: DH_NONE .. DH_GHOST */
+{
     uint32_t hit, acc;
     k %= 64u;
     hit = p->dhit[d % DRUMS][k >> 3] >> (k & 7u) & 1u;
     acc = p->dacc[d % DRUMS][k >> 3] >> (k & 7u) & 1u;
-    return hit ? 1u + acc : acc ? 3u : 0u;
+    return hit ? 1u + acc : acc ? DH_FLAM : p->dgho[d % DRUMS][k >> 3] >> (k & 7u) & 1u ? DH_GHOST : DH_NONE;
+}
+static uint32_t drum_next(uint32_t d, uint32_t h)   /* a press on a step of drum d holding h: the next (a hit, an */
+{                                               /* accent, the snare's flam, a ghost, none, round) */
+    h = (h + 1u) % DH_N;
+    return h == DH_FLAM && d % DRUMS != 1u ? DH_GHOST : h;
 }
 
-static uint32_t ratchet_at(const pattern_t *p, uint32_t k)   /* the hat's ratchet on step k: 0 .. RATCHETS - 1 */
-{
+#define DR_ROLLS(d) ((d) == 1u || (d) == 2u)     /* the drums that roll: the snare, the hat */
+#define DR_RL(d) ((d) == 1u ? 1u : 0u)          /* (a rolling drum's index: the hat 0, the snare 1) */
+static uint32_t roll_at(const pattern_t *p, uint32_t d, uint32_t k)   /* drum d's ratchet on step k: 0 .. RATCHETS - 1 */
+{                                               /* (0: one hit; the kick, the clap: always) */
     uint32_t r;
     k %= 64u;
-    r = (uint32_t)p->dret[k >> 1] >> (k & 1u) * 4u & 15u;
+    if (!DR_ROLLS(d)) return 0u;
+    r = (uint32_t)(d == 1u ? p->sret : p->dret)[k >> 1] >> (k & 1u) * 4u & 15u;
     return r < RATCHETS ? r : 0u;
 }
 
-static void ratchet_put(pattern_t *p, uint32_t k, uint32_t r)
+static void roll_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t r)
 {
     uint32_t sh = (k % 64u & 1u) * 4u;
-    k = k % 64u >> 1;
-    p->dret[k] = (uint8_t)((p->dret[k] & ~(15u << sh)) | (r < RATCHETS ? r : 0u) << sh);
+    uint8_t *b;
+    if (!DR_ROLLS(d)) return;
+    b = &(d == 1u ? p->sret : p->dret)[k % 64u >> 1];
+    *b = (uint8_t)((*b & ~(15u << sh)) | (r < RATCHETS ? r : 0u) << sh);
 }
+static uint32_t ratchet_at(const pattern_t *p, uint32_t k) { return roll_at(p, 2u, k); }   /* (the hat's) */
+static void ratchet_put(pattern_t *p, uint32_t k, uint32_t r) { roll_put(p, 2u, k, r); }
 
-static void drum_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t v)   /* (0 .. 3 as drum_at; none: no ratchet) */
+static void drum_put(pattern_t *p, uint32_t d, uint32_t k, uint32_t v)   /* (as drum_at; none: no ratchet) */
 {
     uint8_t b = (uint8_t)(1u << (k % 64u & 7u));
-    if (!v && d % DRUMS == 2u) ratchet_put(p, k, 0);
+    if (!v) roll_put(p, d % DRUMS, k, 0);
     d %= DRUMS;
     k = k % 64u >> 3;
-    p->dhit[d][k] = (uint8_t)(v == 1u || v == 2u ? p->dhit[d][k] | b : p->dhit[d][k] & ~b);
-    p->dacc[d][k] = (uint8_t)(v >= 2u ? p->dacc[d][k] | b : p->dacc[d][k] & ~b);
+    p->dhit[d][k] = (uint8_t)(v == DH_HIT || v == DH_ACCENT ? p->dhit[d][k] | b : p->dhit[d][k] & ~b);
+    p->dacc[d][k] = (uint8_t)(v == DH_ACCENT || v == DH_FLAM ? p->dacc[d][k] | b : p->dacc[d][k] & ~b);
+    p->dgho[d][k] = (uint8_t)(v == DH_GHOST ? p->dgho[d][k] | b : p->dgho[d][k] & ~b);
+}
+#define DR_HIT_VEL 106u                         /* a drum step's velocities: a hit, an accent; a ghost's: the kit's */
+#define DR_ACC_VEL 127u                         /* GHOST (soft, under the groove) */
+static uint32_t drum_vel(uint32_t h)
+{
+    return h == DH_ACCENT ? DR_ACC_VEL : h == DH_GHOST ? (seqs.dr_ghost & 127u ? seqs.dr_ghost & 127u : 1u) : DR_HIT_VEL;
 }
 #define SEQ_VEL 100u                            /* a step's velocity (an accent: 127): AMP's VEL row makes the accent */
 #define SEQ_SLIDE_K 58u                         /* a slide's speed (PR_ENV_EXP: there in ~30 ms, as a 303) */
@@ -1230,6 +1259,10 @@ static struct {
     uint32_t was, phase_q8, odd, now;
     uint32_t hold[SEQ_LANES];                   /* the lane's note goes on into the next step */
     int32_t v[SEQ_LANES];                       /* each lane's voice (-1: none) */
+    uint32_t holdb[SEQ_LANES];                  /* (DUAL, B a length of its own: part B's notes, as hold and v; */
+    int32_t vb[SEQ_LANES];                      /*  part A's then in hold and v) */
+    uint8_t posb;                               /* (and B's step to play next, in the pattern playing) */
+    volatile uint8_t playing_b, now_b, next_b;  /* B's step playing; recording: its step then, the next */
     int32_t gate_left, count, wait;             /* count: ticks since START (the MIDI clock) */
     volatile uint32_t steps, playing, playing_pat, entry;   /* (the page follows: steps played, the step, its pattern, entry) */
     volatile seqpos_t now_at;                   /* the step playing (recording: where a key falls) */
@@ -1241,7 +1274,7 @@ static struct {
     uint32_t n;                                 /* steps since PLAY (the metronome's count) */
     volatile uint32_t ci;                       /* the count-in: its steps still to come (a bar's, from PLAY) */
     volatile uint8_t in_ci, want_ci;            /* counting in; PLAY with a count-in (the main loop's) */
-} seq = {.v = {-1, -1, -1, -1}, .count = -1, .wait = -1};
+} seq = {.v = {-1, -1, -1, -1}, .vb = {-1, -1, -1, -1}, .count = -1, .wait = -1};
 /* another patch's sequencer, loaded while this one plays: it takes over where the next pattern would start, or with
  * seq_at_bar on the next bar line (seq_step). seq_swap: 1 waiting (the main loop's), 2 taken over (the main loop then
  * follows: seqs_poll, ui.c). The LIVE screen's changes wait for the bar line too: a pattern (seq_qpat, from its top,
@@ -1373,9 +1406,10 @@ static void drum_queue(uint32_t sound, uint32_t vel, uint32_t at)   /* (the ISR)
     if (dq_n < DQ_N) { dq[dq_n].at = (uint16_t)at; dq[dq_n].sound = (uint8_t)sound; dq[dq_n].vel = (uint8_t)vel; dq_n++; }
 }
 
-/* the hat's ratchet playing: the hits still to come, the frames between them (Q8), to the next (Q8, from the block's
- * start), the sound, its velocity, which hit of how many */
-static struct { uint32_t left, gap_q8, next_q8; uint8_t sound, vel, i, n; } roll;
+/* a ratchet playing (roll[DR_RL(d)]: the hat's, the snare's, each its own): the hits still to come, the frames between
+ * them (Q8), to the next (Q8, from the block's start), the sound, its velocity, which hit of how many */
+typedef struct { uint32_t left, gap_q8, next_q8; uint8_t sound, vel, i, n; } roll_t;
+static roll_t roll[2];
 
 static uint32_t ratchet_vel(uint32_t vel, uint32_t i, uint32_t n)   /* a ratchet's hit i of n: RAMP fades or swells */
 {                                               /* the step's velocity over them (at most to a quarter of it) */
@@ -1385,42 +1419,45 @@ static uint32_t ratchet_vel(uint32_t vel, uint32_t i, uint32_t n)   /* a ratchet
     else if (rp > 64) v -= v * 3 * (rp - 64) * (last - (int32_t)i) / (4 * 63 * last);
     return v < 1 ? 1u : (uint32_t)v;
 }
-static uint32_t roll_vel(void) { return ratchet_vel(roll.vel, roll.i, roll.n); }
+static uint32_t roll_vel(const roll_t *r) { return ratchet_vel(r->vel, r->i, r->n); }
 
-static void roll_block(uint32_t bi)             /* (each block, after the step) the ratchet's next hit, if it is due */
+static void roll_block(uint32_t bi)             /* (each block, after the step) each ratchet's next hit, if it is due */
 {
-    if (!roll.left) return;
-    if (roll.next_q8 < (BLK << 8)) {
-        drum_queue(roll.sound, roll_vel(), bi * BLK + (roll.next_q8 >> 8));
-        roll.i++;
-        roll.left--;
-        roll.next_q8 += roll.gap_q8;
+    uint32_t j;
+    for (j = 0; j < 2u; j++) {
+        roll_t *r = &roll[j];
+        if (!r->left) continue;
+        if (r->next_q8 < (BLK << 8)) {
+            drum_queue(r->sound, roll_vel(r), bi * BLK + (r->next_q8 >> 8));
+            r->i++;
+            r->left--;
+            r->next_q8 += r->gap_q8;
+        }
+        r->next_q8 -= BLK << 8;
     }
-    roll.next_q8 -= BLK << 8;
 }
 
 static void drum_step(const pattern_t *p, uint32_t k, uint32_t bi, uint32_t len)   /* step k's drums (block bi; the */
-{                                               /* step len frames Q8): an accent at full, a hit at 0.7 (the hat's */
-    uint32_t d, h, skip = seq.dr_skip_n == seq.steps ? seq.dr_skip : 0u;   /* accent opens it); the hat's ratchet */
-    roll.left = 0;                              /* over the step */
-    for (d = 0; d < DRUMS; d++)
+{                                               /* step len frames Q8): an accent at full, a hit at 0.7, a ghost */
+    uint32_t d, h, skip = seq.dr_skip_n == seq.steps ? seq.dr_skip : 0u;   /* softly (the hat's accent opens it); */
+    roll[0].left = roll[1].left = 0;            /* the hat's and the snare's ratchets over the step (a flam rolled: */
+    for (d = 0; d < DRUMS; d++)                 /* its first hit the flam, the rest snares) */
         if (skip >> d & 1u)
             continue;
-        else if ((h = drum_at(p, d, k)) == 3u)
-            drum_queue(DR_FLAM_S, 106u, bi * BLK);
-        else if (h) {
-            uint32_t s = d == 2u && h == 2u ? DR_OHAT_S : d == 3u ? DR_CLAP_S : d, v = h == 2u ? 127u : 106u;
-            uint32_t r = d == 2u ? RATCHET[ratchet_at(p, k)] : 1u;
-            roll.sound = (uint8_t)s;
-            roll.vel = (uint8_t)v;
-            roll.i = 0;
-            roll.n = (uint8_t)r;
-            drum_queue(s, d == 2u && r > 1u ? roll_vel() : v, bi * BLK);
-            if (r > 1u) {
-                roll.i = 1;
-                roll.left = r - 1u;
-                roll.gap_q8 = len / r;
-                roll.next_q8 = roll.gap_q8;
+        else if ((h = drum_at(p, d, k)) != DH_NONE) {
+            uint32_t s = d == 2u && h == DH_ACCENT ? DR_OHAT_S : d == 3u ? DR_CLAP_S : d, v = drum_vel(h);
+            uint32_t n = RATCHET[roll_at(p, d, k)];
+            roll_t *r = &roll[DR_RL(d)];
+            r->sound = (uint8_t)s;
+            r->vel = (uint8_t)v;
+            r->i = 0;
+            r->n = (uint8_t)n;
+            drum_queue(h == DH_FLAM ? DR_FLAM_S : s, n > 1u ? roll_vel(r) : v, bi * BLK);
+            if (n > 1u) {
+                r->i = 1;
+                r->left = n - 1u;
+                r->gap_q8 = len / n;
+                r->next_q8 = r->gap_q8;
             }
         }
 }
@@ -1538,17 +1575,27 @@ static int drums_render(int32_t *bus, uint32_t n)   /* the drums into bus (n fra
     return 1;
 }
 
+static void seq_lanes_off(int32_t *v, uint32_t *hold, uint32_t bi, uint32_t held)   /* the lanes' notes end (block */
+{                                               /* bi; held: those held into the next step too) */
+    uint32_t l;
+    for (l = 0; l < SEQ_LANES; l++)
+        if (v[l] >= 0 && (held || !hold[l])) {
+            voice[v[l]].ioff = (uint8_t)bi;
+            v[l] = -1;
+            hold[l] = 0;
+        }
+}
 static void seq_off(uint32_t bi)                /* every lane's note ends (block bi) */
 {
-    uint32_t l;
-    for (l = 0; l < SEQ_LANES; l++) {
-        if (seq.v[l] >= 0) voice[seq.v[l]].ioff = (uint8_t)bi;
-        seq.v[l] = -1;
-        seq.hold[l] = 0;
-    }
+    seq_lanes_off(seq.v, seq.hold, bi, 1u);
+    seq_lanes_off(seq.vb, seq.holdb, bi, 1u);
 }
 
 static uint32_t pat_len(const pattern_t *pt) { return pt->len >= 1u && pt->len <= 64u ? pt->len : 16u; }
+static uint32_t pat_blen(const pattern_t *pt) { return pt->blen >= 1u && pt->blen <= 64u ? pt->blen : pat_len(pt); }
+/* polymetre: DUAL, and part B's length not the pattern's. Then part A's notes play from the pattern's step (as the
+ * drums), part B's from a step of B's own, round its own length; a new pattern (or the song's next round) starts both */
+static int pat_poly(const pattern_t *pt, uint32_t vmode) { return vmode == VM_DUAL && pat_blen(pt) != pat_len(pt); }
 static uint32_t seq_len_of(uint32_t i) { return pat_len(&seqs.pat[i < SEQ_PATS ? i : 0u]); }   /* pattern i's */
 static uint32_t seq_spb(void) { uint32_t s = eg.seq_spb; return s ? s : 4u; }   /* steps a beat (4: not set yet) */
 
@@ -1593,60 +1640,30 @@ static void seq_tick(uint32_t bi, uint32_t len)  /* a step's time: a count-in's 
     seq_step(bi, len);
 }
 
-static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
+/* the lanes of step k of pattern p (the next: step kn of pn) into the voices v (hold: held on into the next); part:
+ * 2 every note, 0 / 1 only part A's / B's (the others rest, as far as these voices go) */
+static void seq_lanes(uint32_t bi, const pattern_t *p, uint32_t k, const pattern_t *pn, uint32_t kn, uint32_t part,
+                      int32_t *vs, uint32_t *hold)
 {
-    const pattern_t *p, *pn;
-    uint32_t k, kn, l, lm, accent, at_bar = seq.n % (4u * seq_spb()) == 0u;   /* (a bar: 4 beats) */
+    uint32_t l, lm = 0, accent = p->trig[k % 64u] == SEQ_ACCENT;
     uint8_t lv[LK_N];
-    if (seq_swap == 1u && (seq_at_bar ? at_bar : seq.at.pos == 0u)) {   /* another patch's sequencer takes over, from
-                                                                          * its top */
-        memcpy(&seqs, &seqs_next, sizeof seqs);
-        seq.at.pos = seq.at.entry = seq.at.rep = 0;
-        seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
-        seq_at_bar = 0;
-        seq_swap = 2;
-    }
-    if (at_bar && seq_qpat >= 0) {              /* LIVE: a pattern, from its top (a song stops: PATTERN mode) */
-        seqs.mode = 0;
-        seqs.cur = (uint8_t)(seq_qpat % (int8_t)SEQ_PATS);
-        seq.at.pat = seqs.cur;
-        seq.at.pos = seq.at.entry = seq.at.rep = 0;
-        seq_qpat = -1;
-    }
-    if (at_bar && seq_barq) {
-        seq_barq = 0;
-        seq_bar_hit = 1;
-    }
-    if (at_bar) lp_bar = 1;                     /* (the looper, waiting for it) */
-    p = &seqs.pat[seq.at.pat % SEQ_PATS];
-    k = seq.at.pos % 64u;
-    accent = p->trig[k] == SEQ_ACCENT;
-    seq.playing = k;
-    seq.playing_pat = seq.at.pat;
-    seq.entry = seq.at.entry;
-    seq.now_at = seq.at;
-    seq.step_at = engine_frames + bi * BLK;
-    seq.step_len = len;
-    seq.at = seq_adv(seq.at);
-    pn = &seqs.pat[seq.at.pat % SEQ_PATS];
-    kn = seq.at.pos % 64u;
-    lm = 0;
-    lk_send[0] = lk_send[1] = -1;
-    for (l = 0; l < PLOCKS; l++) {              /* the step's locks: its notes take them; the sends, this step's */
+    k %= 64u;
+    kn %= 64u;
+    for (l = 0; l < PLOCKS; l++) {              /* the step's locks: its notes take them (the sends: seq_step) */
         uint32_t d = p->lk_dest[l], x = p->lk[l][k];
-        if (!d || d >= LK_N)
-            continue;
-        if (LK_SEND(d)) {
-            if (x) lk_send[d - LK_DSEND] = (int32_t)x - 1;   /* (no lock: the sound's own) */
-        } else if (x) {
+        if (d && d < LK_N && !LK_SEND(d) && x) {
             lm |= 1u << d;
             lv[d] = (uint8_t)(x - 1u);
         }
     }
     for (l = 0; l < SEQ_LANES; l++) {
         uint32_t note, vel, nn, nv, st = seq_lane(p, k, l, &note, &vel), tie_next = seq_lane(pn, kn, l, &nn, &nv) == SEQ_TIE;
-        int32_t v = seq.v[l];
+        int32_t v = vs[l];
         uint32_t dual = eg.vmode == VM_DUAL, sp = dual ? p->lpart[k] >> l & 1u : part_of(note);   /* (its part) */
+        if (part < 2u && sp != part)            /* (the other part's note: not this pass's) */
+            st = SEQ_REST;
+        if (part < 2u && (pn->lpart[kn] >> l & 1u) != part)
+            tie_next = 0;
         if (seq.rec_mute >> l & 1u && ((!dual && !patch.split) || sp == (seq.rec_part >> l & 1u)))
             st = SEQ_REST, tie_next = 0;        /* (a key is recording into this lane: it plays itself; the other */
                                                 /*  part's notes in it play on) */
@@ -1659,7 +1676,7 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
                 if (v >= 0) voice[v].ioff = (uint8_t)bi;
                 v = -1;
             }
-        } else if (v >= 0 && seq.hold[l] && st != SEQ_REST && voice[v].gate) {   /* the last one slides into it */
+        } else if (v >= 0 && hold[l] && st != SEQ_REST && voice[v].gate) {   /* the last one slides into it */
             voice[v].inote = (uint8_t)note;
             voice[v].ivel = (uint8_t)vel;
             voice[v].ilk_m = (uint16_t)lm;
@@ -1682,8 +1699,68 @@ static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; l
                 v = (int32_t)w;
             }
         }
-        seq.hold[l] = v >= 0 && (tie_next || (st != SEQ_REST && p->slide[k]));
-        seq.v[l] = v;
+        hold[l] = v >= 0 && (tie_next || (st != SEQ_REST && p->slide[k]));
+        vs[l] = v;
+    }
+}
+
+static void seq_step(uint32_t bi, uint32_t len)  /* the next step at block bi; len (frames Q8) for its gate */
+{
+    const pattern_t *p, *pn;
+    uint32_t k, kn, kb, kbn, l, poly, restart, at_bar = seq.n % (4u * seq_spb()) == 0u;   /* (a bar: 4 beats) */
+    if (seq_swap == 1u && (seq_at_bar ? at_bar : seq.at.pos == 0u)) {   /* another patch's sequencer takes over, from
+                                                                          * its top */
+        memcpy(&seqs, &seqs_next, sizeof seqs);
+        seq.at.pos = seq.at.entry = seq.at.rep = 0;
+        seq.posb = 0;
+        seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
+        seq_at_bar = 0;
+        seq_swap = 2;
+    }
+    if (at_bar && seq_qpat >= 0) {              /* LIVE: a pattern, from its top (a song stops: PATTERN mode) */
+        seqs.mode = 0;
+        seqs.cur = (uint8_t)(seq_qpat % (int8_t)SEQ_PATS);
+        seq.at.pat = seqs.cur;
+        seq.at.pos = seq.at.entry = seq.at.rep = 0;
+        seq.posb = 0;
+        seq_qpat = -1;
+    }
+    if (at_bar && seq_barq) {
+        seq_barq = 0;
+        seq_bar_hit = 1;
+    }
+    if (at_bar) lp_bar = 1;                     /* (the looper, waiting for it) */
+    p = &seqs.pat[seq.at.pat % SEQ_PATS];
+    k = seq.at.pos % 64u;
+    seq.playing = k;
+    seq.playing_pat = seq.at.pat;
+    seq.entry = seq.at.entry;
+    seq.now_at = seq.at;
+    seq.step_at = engine_frames + bi * BLK;
+    seq.step_len = len;
+    seq.at = seq_adv(seq.at);
+    pn = &seqs.pat[seq.at.pat % SEQ_PATS];
+    kn = seq.at.pos % 64u;
+    poly = pat_poly(p, eg.vmode);
+    kb = poly ? seq.posb % pat_blen(p) : k;
+    restart = seq.at.pat != seq.now_at.pat || (seqs.mode && seq.at.pos == 0u);   /* (B, too, from its first step) */
+    kbn = poly && !restart ? (kb + 1u) % pat_blen(p) : kn;
+    seq.playing_b = (uint8_t)kb;
+    seq.now_b = (uint8_t)kb;
+    seq.next_b = (uint8_t)kbn;
+    lk_send[0] = lk_send[1] = -1;
+    for (l = 0; l < PLOCKS; l++) {              /* the step's sends (part A's step's) */
+        uint32_t d = p->lk_dest[l], x = p->lk[l][k];
+        if (d && d < LK_N && LK_SEND(d) && x) lk_send[d - LK_DSEND] = (int32_t)x - 1;   /* (no lock: the sound's own) */
+    }
+    if (!poly) {                                /* every lane's note from the step (its part: the note's) */
+        seq_lanes(bi, p, k, pn, kn, 2u, seq.v, seq.hold);
+        seq_lanes_off(seq.vb, seq.holdb, bi, 1u);   /* (B's own, if it had just had them) */
+        seq.posb = (uint8_t)kn;                 /* (B in step with A, should it get a length of its own) */
+    } else {                                    /* part A's from the step, part B's from B's own */
+        seq_lanes(bi, p, k, pn, kn, 0u, seq.v, seq.hold);
+        seq_lanes(bi, p, kb, restart ? pn : p, kbn, 1u, seq.vb, seq.holdb);
+        seq.posb = (uint8_t)kbn;
     }
     drum_step(p, k, bi, len);                   /* the drums' lanes */
     seq.gate_left = (int32_t)(((uint64_t)len * (uint32_t)eg.seq_gate) >> 23);
@@ -1698,7 +1775,7 @@ static void seq_block_run(uint32_t bi, uint32_t due)   /* a block of the sequenc
     if (!eg.seq_play) {                         /* stopped: its notes go */
         seq_off(bi);
         seq.was = 0;
-        roll.left = 0;
+        roll[0].left = roll[1].left = 0;
         lk_send[0] = lk_send[1] = -1;
         return;
     }
@@ -1707,6 +1784,7 @@ static void seq_block_run(uint32_t bi, uint32_t due)   /* a block of the sequenc
         l2_restart = 1;                         /* (LFO 2 too) */
         seq.at.pos = seq.at.entry = seq.at.rep = 0;
         seq.at.pat = (uint8_t)((seqs.mode ? seqs.song_pat[0] : seqs.cur) % SEQ_PATS);
+        seq.posb = 0;
         seq.n = 0;
         seq.ci = seq.want_ci && !eg.arp_midi ? 4u * seq_spb() : 0u;   /* (a bar) */
         seq.want_ci = 0;
@@ -1718,9 +1796,8 @@ static void seq_block_run(uint32_t bi, uint32_t due)   /* a block of the sequenc
     }
     seq.gate_left -= (int32_t)BLK;              /* the gate (a slide or a tie holds a lane into the next step) */
     if (seq.gate_left <= 0) {
-        uint32_t l;
-        for (l = 0; l < SEQ_LANES; l++)
-            if (seq.v[l] >= 0 && !seq.hold[l]) { voice[seq.v[l]].ioff = (uint8_t)bi; seq.v[l] = -1; }
+        seq_lanes_off(seq.v, seq.hold, bi, 0u);
+        seq_lanes_off(seq.vb, seq.holdb, bi, 0u);
     }
     if (eg.arp_midi) {                          /* on the MIDI clock: the step's tick (an odd one swung later) */
         uint32_t slen = mc.period_q8 ? mc.period_q8 * (24u / seq_spb())
@@ -3096,16 +3173,19 @@ static void engine_seq_skip_drum(uint32_t d, uint32_t ord)   /* drum d recorded 
 }
 
 /* the step a note played now falls on (recording): the one playing, or the next once past its middle; and its count
- * (seq.steps: the one playing is steps - 1). 0: the sequencer is not playing */
-static int engine_seq_now(seqpos_t *at, uint32_t *ord)
+ * (seq.steps: the one playing is steps - 1); kb (if asked): part B's step then (pat_poly: its own; else at's). 0: the
+ * sequencer is not playing */
+static int engine_seq_now_b(seqpos_t *at, uint32_t *ord, uint32_t *kb)
 {
-    uint32_t n, len;
+    uint32_t n, len, bc, bn;
     int32_t t;
     seqpos_t cur, nx;
     do {                                        /* (a copy no step was half-way through) */
         n = seq.steps;
         cur = seq.now_at;
         nx = seq.at;
+        bc = seq.now_b;
+        bn = seq.next_b;
         t = (int32_t)(engine_frames - seq.step_at);   /* (under 0: the step starts later in this render) */
         len = seq.step_len;
     } while (n != seq.steps);
@@ -3114,14 +3194,17 @@ static int engine_seq_now(seqpos_t *at, uint32_t *ord)
             return 0;
         *at = nx;
         *ord = n;
+        if (kb) *kb = nx.pos;
         return 1;
     }
     if (!eg.seq_play || !seq.was || !n)
         return 0;
-    if (t > 0 && ((uint64_t)t << 9) > len) { *at = nx; *ord = n; }   /* past half the step (len: frames Q8) */
+    if (t > 0 && ((uint64_t)t << 9) > len) { *at = nx; *ord = n; bc = bn; }   /* past half the step (len: frames Q8) */
     else { *at = cur; *ord = n - 1u; }
+    if (kb) *kb = bc;
     return 1;
 }
+static int engine_seq_now(seqpos_t *at, uint32_t *ord) { return engine_seq_now_b(at, ord, 0); }
 
 static void engine_sync(uint32_t midi)          /* the arp's clock: its own (0) or the MIDI clock (1) */
 {

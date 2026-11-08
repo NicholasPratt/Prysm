@@ -29,6 +29,25 @@ static void setup(uint32_t ramp)                /* 240 BPM, 1/32 steps (1378 fra
     engine_seq_play(1);
 }
 
+static uint32_t starts[DRUMS];                  /* (run_both: each drum's starts) */
+static void run_both(uint32_t frames)           /* renders of a block each, the snare's and the hat's starts counted */
+{
+    static int32_t blk[2u * BLK];
+    static const int8_t *was[DRUMS];
+    static uint32_t prev[DRUMS];
+    uint32_t t, d;
+    memset(starts, 0, sizeof starts);
+    memset(was, 0, sizeof was);
+    for (t = 0; t < frames; t += BLK) {
+        engine_render(blk, BLK);
+        for (d = 1; d <= 2u; d++) {
+            if (drv[d].d && (!was[d] || drv[d].pos_q16 < prev[d])) starts[d]++;
+            was[d] = drv[d].d;
+            prev[d] = drv[d].pos_q16;
+        }
+    }
+}
+
 static uint32_t hit_at[16], hit_amp[16], hits;
 static void run_blocks(uint32_t frames)         /* renders of a block each, the hat's hits noted (when, how loud) */
 {
@@ -82,6 +101,28 @@ int main(void)
     for (i = 0, ok = 1; i < 2u * 8192u; i++) ok &= a[i] == b[i];
     CHECK(ok, "renders of 512 frames (two hits in one) sound as renders of a block each");
 
+    setup(64);                                  /* the snare's roll: 4 hits; the hat's 8 on the same step, each its own */
+    step = eg.seq_len_q8 >> 8;
+    drum_put(&seqs.pat[0], 1u, 0, DH_HIT);
+    roll_put(&seqs.pat[0], 1u, 0, 3u);          /* (RATCHET[3]: 4) */
+    run_both(step + step / 2u);
+    CHECK(starts[1] == 4u && starts[2] == 8u, "the snare's ROLL 4 and the hat's ROLL 8 on one step: %u and %u hits",
+          (unsigned)starts[1], (unsigned)starts[2]);
+    setup(64);
+    drum_put(&seqs.pat[0], 2u, 0, 0);           /* (the hat away) */
+    drum_put(&seqs.pat[0], 1u, 0, DH_FLAM);
+    roll_put(&seqs.pat[0], 1u, 0, 2u);          /* (RATCHET[2]: 3) */
+    run_both(step + step / 2u);
+    CHECK(starts[1] == 3u && starts[2] == 0u, "a flam rolled 3: the flam, then two snares (%u)", (unsigned)starts[1]);
+    setup(64);
+    drum_put(&seqs.pat[0], 1u, 0, DH_GHOST);
+    roll_put(&seqs.pat[0], 1u, 0, 1u);
+    seqs.dr_ghost = 30;
+    run_both(BLK * 2u);
+    CHECK(drv[1].amp == (int32_t)((PR_CURVE_Q15[seqs.dr_lvl[1]] * PR_CURVE_Q15[30]) >> 15),
+          "a ghost's roll: at the kit's GHOST velocity (30)");
+    CHECK(roll_at(&seqs.pat[0], 0u, 0) == 0 && roll_at(&seqs.pat[0], 3u, 0) == 0, "the kick, the clap: no rolls");
+
     seqs_init();                                /* the keys on the ROLL row: OFF 2 3 4 6 8 in turn, a hit with it */
     page = PG_DRUM;
     row[PG_DRUM] = DR_ROLL;
@@ -90,9 +131,16 @@ int main(void)
     CHECK(drum_at(seq_ed(), 2u, 1u) == 1u && RATCHET[ratchet_at(seq_ed(), 1u)] == 2u, "ROLL, step 2's key: a hit, ROLL 2");
     for (i = 0; i < 5u; i++) ui_drum_key(2);
     CHECK(ratchet_at(seq_ed(), 1u) == 0 && drum_at(seq_ed(), 2u, 1u) == 1u, "... five more: OFF again, the hit stays");
-    hat_roll(1u, 3u);
+    drum_roll(2u, 1u, 3u);
     drum_put(seq_ed(), 2u, 1u, 0);
     CHECK(ratchet_at(seq_ed(), 1u) == 0, "the hit taken away: its ratchet too");
+    dr_sel = 1;                                 /* the snare chosen: the ROLL row's keys roll it */
+    ui_drum_key(4);                             /* (A3: step 3) */
+    CHECK(drum_at(seq_ed(), 1u, 2u) == DH_HIT && RATCHET[roll_at(seq_ed(), 1u, 2u)] == 2u &&
+          drum_at(seq_ed(), 2u, 2u) == DH_NONE && !ratchet_at(seq_ed(), 2u), "the snare chosen, A3: the snare's ROLL 2 there, not the hat's");
+    drum_put(seq_ed(), 1u, 2u, 0);
+    CHECK(roll_at(seq_ed(), 1u, 2u) == 0, "the snare's hit taken away: its ratchet too");
+    dr_sel = 0;
 
     {                                           /* a sequencer of version 3 (1.3's): its patterns, no ratchets */
         static uint8_t v3[SEQS_V3_SIZE];

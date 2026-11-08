@@ -222,7 +222,7 @@ function showTab(n) {
   lastPatch = lastSeqs = null;                             // (draw every value afresh)
 }
 const rowIndex = (pg, r) => {                   // the row's place on the FM-1 (the SEQ page: only its SONG row has a knob of the sound)
-  if (pg.name === "SEQ") return ["STEP", "CHORD", "PART", "LOCK", "PATTERN", "EDIT", "PARTS", "CLICK", "SONG", "ENTRY"].indexOf(r.name);
+  if (pg.name === "SEQ") return ["STEP", "CHORD", "PART", "LOCK", "PATTERN", "POLY", "EDIT", "PARTS", "CLICK", "SONG", "ENTRY"].indexOf(r.name);
   if (r.name.startsWith("B ")) return pg.rows.findIndex((x) => x.name === r.name.slice(2));   // (part B's: its row's)
   return pg.rows.indexOf(r);
 };
@@ -237,7 +237,8 @@ function seqLayout() {
   const L = M.UTF8ToString(M._web_seq_layout()).split("|").map(Number);
   const k = ["pat", "patSize", "len", "note", "trig", "slide", "div", "gate", "cur", "mode", "songLen", "songPat", "songRep",
              "size", "pats", "entries", "vel", "xnote", "xvel", "lanes", "dhit", "dacc", "drums", "drLvl", "drTune", "drDec",
-             "drDrive", "drCrush", "drDly", "drRev", "drFlt", "dret", "lkDest", "lk", "locks", "drRamp", "drKit", "kits"];
+             "drDrive", "drCrush", "drDly", "drRev", "drFlt", "dret", "lkDest", "lk", "locks", "drRamp", "drKit", "kits",
+             "dgho", "sret", "drGhost", "blen"];
   SQ = Object.fromEntries(k.map((n, i) => [n, L[i]]));
 }
 const patAt = (sq, p) => SQ.pat + (p % SQ.pats) * SQ.patSize;   // where pattern p starts
@@ -256,6 +257,9 @@ function seqUI() {
   E.len = el("input", { type: "range", min: 1, max: 64, title: "the pattern's length" });
   E.len.oninput = () => seqSet(patAt(seqs(), seqs()[SQ.cur]) + SQ.len, +E.len.value);
   E.lenV = el("span");
+  E.blen = el("input", { type: "range", min: 0, max: 64, title: "DUAL: part B's own length (0: the pattern's), for polymetre" });
+  E.blen.oninput = () => seqSet(patAt(seqs(), seqs()[SQ.cur]) + SQ.blen, +E.blen.value);
+  E.blenV = el("span");
   E.div = el("select", { title: "the step (all patterns)" });
   DIVS.forEach((n, i) => E.div.append(el("option", { value: i, textContent: n })));
   E.div.onchange = () => seqSet(SQ.div, +E.div.value);
@@ -269,7 +273,8 @@ function seqUI() {
     const a = patAt(seqs(), seqs()[SQ.cur]);
     for (let j = 0; j < SQ.patSize; j++) seqSet(a + j, seqClip.b[j]);
   };
-  bar.append(el("label", { textContent: "LENGTH " }, [E.len, E.lenV]), el("label", { textContent: "DIV " }, [E.div]),
+  bar.append(el("label", { textContent: "LENGTH " }, [E.len, E.lenV]), el("label", { textContent: "B LEN " }, [E.blen, E.blenV]),
+             el("label", { textContent: "DIV " }, [E.div]),
              el("label", { textContent: "GATE " }, [E.gate, E.gateV]), cp, pp);
   // the steps: 4 rows of 16, each with copy / paste / clear
   const grid = el("div");
@@ -347,12 +352,15 @@ function refreshSeq(sq) {                       // the SEQ tab from the patterns
   E.pats.forEach((b, i) => b.classList.toggle("on", i === cur));
   if (document.activeElement !== E.len) E.len.value = len;
   E.lenV.textContent = " " + len;
+  const bl = sq[a + SQ.blen], vis = bl && bl <= 64 ? Math.max(len, bl) : len;   // (B's own length: DUAL's)
+  if (document.activeElement !== E.blen) E.blen.value = bl;
+  E.blenV.textContent = bl && bl !== len ? " " + bl : " = A";
   E.div.value = sq[SQ.div];
   if (document.activeElement !== E.gate) E.gate.value = sq[SQ.gate];
   E.gateV.textContent = " " + Math.round(5 + sq[SQ.gate] * 95 / 127) + "%";
   E.cells.forEach((c, i) => {
     const t = sq[a + SQ.trig + i] & 3;
-    c.className = "cell " + TRIG_CLASS[t] + (sq[a + SQ.slide + i] ? " slide" : "") + (i >= len ? " past" : "") +
+    c.className = "cell " + TRIG_CLASS[t] + (sq[a + SQ.slide + i] ? " slide" : "") + (i >= vis ? " past" : "") +
                   (pl !== 0xFFFF && (pl >> 8) === cur && (pl & 255) === i ? " play" : "");
     const chord = [];                           // the chord's other notes (lanes 1 ..)
     for (let l = 0; l < SQ.lanes - 1; l++) {
@@ -373,16 +381,22 @@ function refreshSeq(sq) {                       // the SEQ tab from the patterns
   });
 }
 
-// ---- the DRUM tab: the drums' lanes of the pattern edited (bits: dhit, dacc, 8 bytes a drum; an accent with no hit:
-// a flam, the snare's), and the kit
+// ---- the DRUM tab: the drums' lanes of the pattern edited (bits: dhit, dacc, dgho, 8 bytes a drum; an accent with no
+// hit: a flam, the snare's; a ghost: a soft hit), and the kit
 let drEls = null;
 const DRUMS = ["KICK", "SNARE", "HAT", "CLAP"];
 const KITS = ["LO-FI", "TR", "BOOM"];           // (prysm_drums.h's; a kit of your own shows as its number)
-const drumAt = (sq, a, d, k) => { const b = 1 << (k & 7), o = d * 8 + (k >> 3); return sq[a + SQ.dhit + o] & b ? (sq[a + SQ.dacc + o] & b ? 2 : 1) : sq[a + SQ.dacc + o] & b ? 3 : 0; };
-function drumPut(a, d, k, v) {                  // step k of drum d (in the pattern at a): 0 none, 1 a hit, 2 an accent, 3 a flam
+const drumAt = (sq, a, d, k) => {
+  const b = 1 << (k & 7), o = d * 8 + (k >> 3);
+  return sq[a + SQ.dhit + o] & b ? (sq[a + SQ.dacc + o] & b ? 2 : 1) : sq[a + SQ.dacc + o] & b ? 3 : sq[a + SQ.dgho + o] & b ? 4 : 0;
+};
+// a click: a hit, an accent, (the snare) a flam, a ghost, none
+const drumNext = (d, h) => { h = (h + 1) % 5; return h === 3 && d !== 1 ? 4 : h; };
+function drumPut(a, d, k, v) {                  // step k of drum d (in the pattern at a): 0 none, 1 a hit, 2 an accent, 3 a flam, 4 a ghost
   const b = 1 << (k & 7), o = d * 8 + (k >> 3);
   seqSet(a + SQ.dhit + o, v === 1 || v === 2 ? seqs()[a + SQ.dhit + o] | b : seqs()[a + SQ.dhit + o] & ~b);
-  seqSet(a + SQ.dacc + o, v >= 2 ? seqs()[a + SQ.dacc + o] | b : seqs()[a + SQ.dacc + o] & ~b);
+  seqSet(a + SQ.dacc + o, v === 2 || v === 3 ? seqs()[a + SQ.dacc + o] | b : seqs()[a + SQ.dacc + o] & ~b);
+  seqSet(a + SQ.dgho + o, v === 4 ? seqs()[a + SQ.dgho + o] | b : seqs()[a + SQ.dgho + o] & ~b);
 }
 function drumUI() {
   const box = el("div", { className: "prow" });
@@ -396,7 +410,7 @@ function drumUI() {
   }
   DRUMS.forEach((name, d) => {
     const c = el("button", { textContent: "Clear " + name });
-    c.onclick = () => { const a = patAt(seqs(), seqs()[SQ.cur]); for (let j = 0; j < 8; j++) { seqSet(a + SQ.dhit + d * 8 + j, 0); seqSet(a + SQ.dacc + d * 8 + j, 0); } };
+    c.onclick = () => { const a = patAt(seqs(), seqs()[SQ.cur]); for (let j = 0; j < 8; j++) for (const f of [SQ.dhit, SQ.dacc, SQ.dgho]) seqSet(a + f + d * 8 + j, 0); };
     bar.append(c);
   });
   const grid = el("div");
@@ -405,7 +419,7 @@ function drumUI() {
       const row = el("div", { className: "seqrow" }, [el("span", { textContent: name[0], className: "rowno", title: name })]);
       for (let c = 0; c < 16; c++) {
         const k = r * 16 + c, cell = el("div", { className: "cell drum" });
-        cell.onclick = (ev) => { const a = patAt(seqs(), seqs()[SQ.cur]); drumPut(a, d, k, ev.shiftKey ? 0 : (drumAt(seqs(), a, d, k) + 1) % (d === 1 ? 4 : 3)); };
+        cell.onclick = (ev) => { const a = patAt(seqs(), seqs()[SQ.cur]); drumPut(a, d, k, ev.shiftKey ? 0 : drumNext(d, drumAt(seqs(), a, d, k))); };
         E.cells.push({ cell, d, k });
         row.append(cell);
       }
@@ -428,6 +442,7 @@ function drumUI() {
   });
   knob("DRIVE", SQ.drDrive, 127, (v) => v);
   knob("CRUSH", SQ.drCrush, 127, (v) => v);
+  knob("GHOST", SQ.drGhost, 127, (v) => v);      // (a ghost step's velocity)
   knob("DELAY SEND", SQ.drDly, 127, (v) => v);
   knob("REVERB SEND", SQ.drRev, 127, (v) => v);
   knob("KIT", SQ.drKit, SQ.kits - 1, (v) => KITS[v] || "KIT " + (v + 1));
@@ -442,7 +457,7 @@ function refreshDrum(sq) {                      // the DRUM tab from the pattern
   E.pats.forEach((b, i) => b.classList.toggle("on", i === cur));
   for (const { cell, d, k } of E.cells) {
     const h = drumAt(sq, a, d, k);
-    cell.className = "cell drum" + (h === 3 ? " flam" : h === 2 ? " acc" : h ? " note" : "") + (k >= len ? " past" : "") +
+    cell.className = "cell drum" + ["", " note", " acc", " flam", " ghost"][h] + (k >= len ? " past" : "") +
                      (pl !== 0xFFFF && (pl >> 8) === cur && (pl & 255) === k ? " play" : "");
   }
   for (const x of E.knobs) {

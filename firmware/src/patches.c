@@ -140,7 +140,7 @@ static struct {
  * (SEQS_VERSION 1) .. format 13's and SEQS_VERSION 4; or a bank alone (formats 1 .. 9: then the patterns start empty,
  * and the sound that comes back at power-on brings its pattern in as pattern 1: seqs_from_slot, ui.c). SEQS_VERSION 2
  * had no drums (their lanes start empty, the kit as seqs_init has it); 3 no ratchets; 4 three drums and no locks; 5 no
- * notes' parts (every one on part A) */
+ * notes' parts (every one on part A); 6 no ghosts (the drums' soft hits), no snare rolls */
 #define SEQS_V1_SIZE 828u                       /* (seqs_t as SEQS_VERSION 1 had it: patterns of lane 0 alone) */
 #define SEQS_V1_PAT 196u                        /* (its pattern_t: len, pad, note, trig, slide) */
 #define SEQS_V2_SIZE 2620u                      /* (version 2's: patterns with chords, no drums) */
@@ -153,9 +153,13 @@ static struct {
 #define SEQS_V4_DRUMS 3u
 #define SEQS_V5_PAT 872u                        /* (version 5's pattern: everything before lpart) */
 #define SEQS_V5_SIZE 3556u                      /* (version 5's: the parts' lanes not yet) */
+#define SEQS_V6_PAT 936u                        /* (version 6's pattern: everything before dgho) */
+#define SEQS_V6_SIZE 3812u                      /* (version 6's: no ghosts, no snare rolls; GHOST was padding) */
 _Static_assert(__builtin_offsetof(pattern_t, lpart) == SEQS_V5_PAT, "a version 5 pattern is a prefix of pattern_t");
-_Static_assert(SEQS_V5_SIZE == 4u + SEQ_PATS * SEQS_V5_PAT + (sizeof(seqs_t) - __builtin_offsetof(seqs_t, div)),
-               "version 5: the patterns, then the rest as it is now");
+_Static_assert(__builtin_offsetof(pattern_t, dgho) == SEQS_V6_PAT, "a version 6 pattern is a prefix of pattern_t");
+_Static_assert(SEQS_V5_SIZE == 4u + SEQ_PATS * SEQS_V5_PAT + (sizeof(seqs_t) - __builtin_offsetof(seqs_t, div)) &&
+               SEQS_V6_SIZE == 4u + SEQ_PATS * SEQS_V6_PAT + (sizeof(seqs_t) - __builtin_offsetof(seqs_t, div)),
+               "versions 5 and 6: the patterns, then the rest as it is now");
 _Static_assert(__builtin_offsetof(pattern_t, vel) == SEQS_V1_PAT, "a version 1 pattern is a prefix of pattern_t");
 _Static_assert(__builtin_offsetof(pattern_t, dhit) == SEQS_V2_PAT, "a version 2 pattern is a prefix of pattern_t");
 _Static_assert(__builtin_offsetof(seqs_t, dr_lvl) - __builtin_offsetof(seqs_t, div) == SEQS_TAIL,
@@ -170,8 +174,9 @@ _Static_assert(SEQS_V2_PAT + 2u * SEQS_V4_DRUMS * 8u == SEQS_V3_PAT && SEQS_V3_P
 #define STORE_OLD (BANK_SIZE(PATCH_V13_SIZE) + SEQS_V4_SIZE)   /* the biggest older store (1.3's) */
 #define SEQ_OWN PATCH_SLOTS                     /* (the store's own sequencer: the seqstore after the slots') */
 _Static_assert(BANK_SIZE(sizeof(patch_t)) == sizeof bank, "the bank has no padding");
-_Static_assert(STORE_OLD >= sizeof bank && STORE_OLD >= sizeof(seqs_t), "store_buf holds an older store, the bank, a sequencer");
-static uint8_t store_buf[STORE_OLD];
+#define STORE_BUF (STORE_OLD > sizeof(seqs_t) ? STORE_OLD : sizeof(seqs_t))   /* (a sequencer: bigger since 7) */
+_Static_assert(STORE_OLD >= sizeof bank, "store_buf holds an older store, the bank, a sequencer");
+static uint8_t store_buf[STORE_BUF];
 static uint8_t seqs_fresh;                      /* the patterns did not come from the store */
 static uint8_t seqs_moved;                      /* the store's own sequencer came from an older store, after its bank */
 static uint32_t old_size;                       /* the bank was converted from patches of this size, with no patterns */
@@ -201,16 +206,18 @@ static int seqs_write(void)                     /* the sequencer playing, to its
 
 static uint32_t seqs_size(uint32_t version)     /* a sequencer of that version: its bytes (0: no such version) */
 {
-    static const uint16_t SIZE[SEQS_VERSION] = {0, SEQS_V1_SIZE, SEQS_V2_SIZE, SEQS_V3_SIZE, SEQS_V4_SIZE, SEQS_V5_SIZE};
+    static const uint16_t SIZE[SEQS_VERSION] = {0, SEQS_V1_SIZE, SEQS_V2_SIZE, SEQS_V3_SIZE, SEQS_V4_SIZE, SEQS_V5_SIZE,
+                                                SEQS_V6_SIZE};
     return version == SEQS_VERSION ? (uint32_t)sizeof(seqs_t) : version < SEQS_VERSION ? SIZE[version] : 0u;
 }
 
 /* s from q, a sequencer's bytes as version had them (q apart from s): the patterns, the song, the kit; what the
  * version had not, as seqs_blank has it (version 1: the chords' lanes empty; 2: no drums; 3: no ratchets; 4: no
- * clap, no locks). 0 = done */
+ * clap, no locks; 5: no parts; 6: no ghosts, no snare rolls). 0 = done */
 static int seqs_conv(seqs_t *s, const uint8_t *q, uint32_t version)
 {
-    static const uint16_t PAT[SEQS_VERSION] = {0, SEQS_V1_PAT, SEQS_V2_PAT, SEQS_V3_PAT, SEQS_V4_PAT, SEQS_V5_PAT};
+    static const uint16_t PAT[SEQS_VERSION] = {0, SEQS_V1_PAT, SEQS_V2_PAT, SEQS_V3_PAT, SEQS_V4_PAT, SEQS_V5_PAT,
+                                               SEQS_V6_PAT};
     uint32_t i, d, ps;
     const uint8_t *t;
     if (version == SEQS_VERSION) {
@@ -221,11 +228,13 @@ static int seqs_conv(seqs_t *s, const uint8_t *q, uint32_t version)
         return -1;
     seqs_blank(s);
     ps = PAT[version];
-    if (version == 5u) {                        /* (every lane's notes on part A) */
+    if (version >= 5u) {                        /* (a prefix of the pattern: 5, every lane's notes on part A; 6, no */
+                                                /* ghosts) */
         for (i = 0; i < SEQ_PATS; i++)
             memcpy(&s->pat[i], q + 4u + i * ps, ps);
         memcpy((uint8_t *)s + __builtin_offsetof(seqs_t, div), q + 4u + SEQ_PATS * ps,
                sizeof(seqs_t) - __builtin_offsetof(seqs_t, div));
+        s->dr_ghost = DR_GHOST_VEL;             /* (padding then) */
         s->version = SEQS_VERSION;
         return 0;
     }

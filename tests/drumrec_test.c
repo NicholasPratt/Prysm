@@ -68,6 +68,31 @@ int main(void)
     ui_drum_key(KEY_SNARE);
     for (n = 0; n < 64u && (n == 0u || n == 3u || n == 6u || !drum_at(p, 1, n)); n++) ;
     CHECK(n == 64u, "stopped: nothing recorded (the snare on steps 1, 4, 7 alone)");
+
+    for (n = 0; n < 64u; n++) { drum_put(p, 0, n, 0); drum_put(p, 1, n, 0); drum_put(p, 2, n, 0); }
+    engine_seq_play(1);                         /* MIDI channel 10 while REC: by its velocity */
+    run_frames(2u * BLK);
+    ui_drum_midi(DR_SNARE_S, 30);
+    run_frames(STEP_F);
+    ui_drum_midi(DR_SNARE_S, 100);
+    run_frames(STEP_F);
+    ui_drum_midi(DR_SNARE_S, 127);
+    run_frames(STEP_F);
+    ui_drum_midi(DR_OHAT_S, 90);
+    ui_drum_midi(DR_KICK_S, 60);
+    CHECK(drum_at(p, 1, 0) == DH_GHOST && drum_at(p, 1, 1) == DH_HIT && drum_at(p, 1, 2) == DH_ACCENT,
+          "MIDI snares at 30, 100, 127: a ghost, a hit, an accent");
+    CHECK(drum_at(p, 2, 3) == DH_ACCENT && drum_at(p, 0, 3) == DH_GHOST, "the open hat: the hat's accent; a kick at 60: a ghost");
+    seqs.dr_ghost = 90;                         /* GHOST up near a hit's: 60 is nearer the ghost still, 100 not */
+    run_frames(STEP_F);
+    ui_drum_midi(DR_SNARE_S, 60);
+    run_frames(STEP_F);
+    ui_drum_midi(DR_SNARE_S, 100);
+    CHECK(drum_at(p, 1, 4) == DH_GHOST && drum_at(p, 1, 5) == DH_HIT, "GHOST at 90: a snare at 60 a ghost, at 100 a hit");
+    seq_rec = 0;
+    run_frames(STEP_F);
+    ui_drum_midi(DR_SNARE_S, 30);
+    CHECK(drum_at(p, 1, 6) == DH_NONE, "REC off: MIDI drums not recorded");
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
 }

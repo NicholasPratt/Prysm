@@ -292,6 +292,35 @@ int main(void)
               got.pat[0].xnote[0][0] == 64 && got.pat[0].lpart[0] == 0 && got.song_len == 7 &&
               got.version == SEQS_VERSION, "a version 5 sequencer reads: its notes, its song, every lane on part A");
     }
+    {                                           /* a version 6 sequencer: its drums, its parts, no ghosts */
+        static uint8_t old6[SEQS_V6_SIZE];
+        static seqs_t got;
+        uint32_t i;
+        two_lanes();
+        seqs.pat[2].lpart[7] = 1u;
+        drum_put(&seqs.pat[2], 1, 12, DH_FLAM);
+        drum_put(&seqs.pat[2], 0, 3, DH_ACCENT);
+        memcpy(old6, &seqs, 4u);
+        for (i = 0; i < SEQ_PATS; i++) {
+            memset(&seqs.pat[i].dgho, 0xFF, sizeof seqs.pat[i].dgho);
+            memset(&seqs.pat[i].sret, 0xFF, sizeof seqs.pat[i].sret);
+            memcpy(old6 + 4u + i * SEQS_V6_PAT, &seqs.pat[i], SEQS_V6_PAT);
+        }
+        seqs.dr_ghost = 0;                      /* (padding in version 6) */
+        memcpy(old6 + 4u + SEQ_PATS * SEQS_V6_PAT, (uint8_t *)&seqs + __builtin_offsetof(seqs_t, div),
+               sizeof(seqs_t) - __builtin_offsetof(seqs_t, div));
+        CHECK(seqs_size(6) == SEQS_V6_SIZE && seqs_conv(&got, old6, 6) == 0 && got.pat[0].note[0] == 60 &&
+              got.pat[2].lpart[7] == 1u && drum_at(&got.pat[2], 1, 12) == DH_FLAM &&
+              drum_at(&got.pat[2], 0, 3) == DH_ACCENT && drum_at(&got.pat[2], 2, 0) == DH_NONE &&
+              got.pat[3].dgho[1][0] == 0 && roll_at(&got.pat[3], 1, 5) == 0 && got.dr_ghost == DR_GHOST_VEL &&
+              got.version == SEQS_VERSION,
+              "a version 6 sequencer reads: its notes, parts, flams and accents; no ghosts, no snare rolls, GHOST 48");
+        for (i = 0; i < SEQ_PATS; i++) {
+            memset(&seqs.pat[i].dgho, 0, sizeof seqs.pat[i].dgho);
+            memset(&seqs.pat[i].sret, 0, sizeof seqs.pat[i].sret);
+        }
+        seqs.dr_ghost = DR_GHOST_VEL;
+    }
     {                                           /* the looper: a note recorded on part B plays back on B */
         uint32_t v, b_ok = 0, n;
         p = PATCH_INIT;

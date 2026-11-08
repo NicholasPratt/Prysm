@@ -93,8 +93,8 @@ int main(void)
             const char *l = DPRE[k].lane[d];
             ok &= strlen(l) == 16u && strlen(DPRE[k].name) <= 8u;
             for (i = 0; i < 16u; i++)
-                ok &= l[i] == '.' || l[i] == 'x' || l[i] == 'X' || (l[i] == 'f' && d == 1u) ||
-                      (d == 2u && (l[i] == '2' || l[i] == '3' || l[i] == '4' || l[i] == '6' || l[i] == '8'));
+                ok &= l[i] == '.' || l[i] == 'x' || l[i] == 'X' || l[i] == 'g' || (l[i] == 'f' && d == 1u) ||
+                      (DR_ROLLS(d) && (l[i] == '2' || l[i] == '3' || l[i] == '4' || l[i] == '6' || l[i] == '8'));
         }
         ok &= DPRE[k].lane[0][0] == 'x';        /* (each starts on a kick) */
     }
@@ -115,6 +115,57 @@ int main(void)
         CHECK(p2->len == 32u && p2->trig[5] == SEQ_NOTE && p2->note[5] == 67, "... the notes and the length stay");
         ud_swap();
         CHECK(!memcmp(&was, p2, sizeof was), "UNDO: the pattern as it was");
+    }
+
+    /* ---- ghosts: a soft hit, a state of its own (its own bit), in the presses' round */
+    {
+        pattern_t *g = &seqs.pat[3];
+        uint32_t h, d, n;
+        memset(g, 0, sizeof *g);
+        g->len = 16;
+        for (d = 0, ok = 1; d < DRUMS; d++)
+            for (h = DH_NONE; h < DH_N; h++) {
+                if (h == DH_FLAM && d != 1u) continue;
+                drum_put(g, d, 9, h);
+                ok &= drum_at(g, d, 9) == h && drum_at(g, d, 8) == DH_NONE && drum_at(g, d, 10) == DH_NONE;
+            }
+        CHECK(ok, "every drum: none, hit, accent, (the snare's) flam, ghost each put and read back, its neighbours none");
+        drum_put(g, 1, 5, DH_GHOST);
+        drum_put(g, 1, 5, DH_ACCENT);
+        CHECK(drum_at(g, 1, 5) == DH_ACCENT && !(g->dgho[1][0] >> 5 & 1u), "a ghost overwritten: its bit gone");
+        for (h = DH_NONE, n = 0; n < 5u; n++) h = drum_next(1, h);
+        CHECK(drum_next(1, DH_NONE) == DH_HIT && drum_next(1, DH_ACCENT) == DH_FLAM && drum_next(1, DH_FLAM) == DH_GHOST &&
+              drum_next(1, DH_GHOST) == DH_NONE && h == DH_NONE, "the snare's round: hit, accent, flam, ghost, none");
+        CHECK(drum_next(0, DH_ACCENT) == DH_GHOST && drum_next(2, DH_ACCENT) == DH_GHOST && drum_next(3, DH_GHOST) == DH_NONE,
+              "the others': hit, accent, ghost, none (no flam)");
+        CHECK(drum_vel(DH_GHOST) < drum_vel(DH_HIT) && drum_vel(DH_HIT) < drum_vel(DH_ACCENT), "a ghost plays softest");
+        seqs.dr_ghost = 20;
+        CHECK(drum_vel(DH_GHOST) == 20u && drum_vel(DH_HIT) == DR_HIT_VEL, "the KIT row's GHOST: a ghost's velocity");
+        seqs.dr_ghost = DR_GHOST_VEL;
+        for (k = 0; k < DPRE_N && strcmp(DPRE[k].name, "FUNK"); k++) ;
+        dr_pre = (uint8_t)k;
+        seqs.cur = 3;
+        drum_preset();
+        CHECK(k < DPRE_N && drum_at(g, 1, 2) == DH_GHOST && drum_at(g, 1, 4) == DH_HIT && drum_at(g, 1, 18) == DH_GHOST &&
+              drum_at(g, 2, 14) == DH_ACCENT, "FUNK loaded: the snare's ghosts (g), its backbeat, repeated");
+        dr_lane = 2;                            /* the snare's ghosts onto the hat: ghosts there too */
+        drum_copy(0);
+        dr_lane = 3;
+        drum_copy(1);
+        CHECK(drum_at(g, 2, 2) == DH_GHOST && drum_at(g, 2, 4) == DH_HIT, "the SNARE onto the HAT: its ghosts stay ghosts");
+        for (k = 0; k < DPRE_N && strcmp(DPRE[k].name, "TRAP RLL"); k++) ;
+        dr_pre = (uint8_t)k;
+        drum_preset();
+        CHECK(k < DPRE_N && drum_at(g, 1, 14) == DH_HIT && RATCHET[roll_at(g, 1, 14)] == 4u &&
+              RATCHET[roll_at(g, 2, 11)] == 2u && roll_at(g, 1, 11) == 0, "TRAP RLL loaded: the snare's roll of 4, the hat's of 2");
+        dr_lane = 2;                            /* the snare's roll onto the hat, onto the kick */
+        drum_copy(0);
+        dr_lane = 3;
+        drum_copy(1);
+        CHECK(RATCHET[roll_at(g, 2, 14)] == 4u && roll_at(g, 2, 11) == 0, "the SNARE onto the HAT: its roll rolls there");
+        dr_lane = 1;
+        drum_copy(1);
+        CHECK(drum_at(g, 0, 14) == DH_HIT && roll_at(g, 0, 14) == 0, "... onto the KICK: the hit, no roll");
     }
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

@@ -62,6 +62,7 @@ static int ed_seq_set(uint32_t off, uint32_t v)
     if (off >= p0 && off < pe) {                /* a pattern: its length, notes, triggers, slides, the chords' lanes */
         uint32_t f = (off - p0) % sizeof(pattern_t);
         if (f == __builtin_offsetof(pattern_t, len)) lo = 1, hi = 64;
+        else if (f == __builtin_offsetof(pattern_t, blen)) hi = 64;   /* (0: the pattern's) */
         else if (f >= __builtin_offsetof(pattern_t, note) && f < __builtin_offsetof(pattern_t, trig)) hi = 127;
         else if (f >= __builtin_offsetof(pattern_t, trig) && f < __builtin_offsetof(pattern_t, slide)) hi = SEQ_TRIGS - 1u;
         else if (f >= __builtin_offsetof(pattern_t, slide) && f < __builtin_offsetof(pattern_t, vel)) hi = 1;
@@ -71,6 +72,8 @@ static int ed_seq_set(uint32_t off, uint32_t v)
         else if (f >= __builtin_offsetof(pattern_t, dhit) && f < __builtin_offsetof(pattern_t, lk_dest)) hi = 255;   /* (the */
                                                 /* drums: bits; the ratchets: nibbles) */
         else if (f >= __builtin_offsetof(pattern_t, lk_dest) && f < __builtin_offsetof(pattern_t, pad5)) hi = LK_N - 1u;
+        else if (f >= __builtin_offsetof(pattern_t, dgho) && f < sizeof(pattern_t)) hi = 255;   /* (the ghosts: bits; */
+                                                /* the snare's ratchets: nibbles) */
         else if (f >= __builtin_offsetof(pattern_t, lk) && f < sizeof(pattern_t)) hi = 128;   /* (0: none, else + 1) */
         else return 0;                          /* (padding) */
     } else if (off == __builtin_offsetof(seqs_t, div)) hi = DIV_N - 1u;
@@ -83,6 +86,7 @@ static int ed_seq_set(uint32_t off, uint32_t v)
     else if (off >= __builtin_offsetof(seqs_t, dr_tune) && off < __builtin_offsetof(seqs_t, dr_dec)) hi = 48;
     else if (off >= __builtin_offsetof(seqs_t, dr_lvl) && off <= __builtin_offsetof(seqs_t, dr_ramp)) hi = 127;   /* (the kit) */
     else if (off == __builtin_offsetof(seqs_t, dr_kit)) hi = DR_KITS - 1u;
+    else if (off == __builtin_offsetof(seqs_t, dr_ghost)) hi = 127;
     else
         return 0;                               /* (the version, padding, or past the end) */
     if (v < lo || v > hi)

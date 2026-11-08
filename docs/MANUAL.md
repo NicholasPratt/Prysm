@@ -591,6 +591,7 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 | PART | the step's note's part: A / B (DUAL) | the 2nd note's | the 3rd's | the 4th's |
 | LOCK | LANE1: the parameter of the pattern's first lock lane (OFF: none) | VAL1: the step's value (-- none) | LANE2 | VAL2 |
 | PATTERN | the pattern edited: P1 .. P4 | its length: 1 .. 64 | step: 1/4 .. 1/32 (all patterns) | gate (all patterns) |
+| POLY | A LEN: the pattern's length (as LENGTH) | B LEN (DUAL): part B's own, 1 .. 64, or = A | | |
 | EDIT | the row: 1 .. 4, or ALL | COPY | PASTE | CLEAR |
 | PARTS | MUTE1: part 1 PLAY / MUTE | MUTE2: part 2 | CLR1: clear part 1 | CLR2: clear part 2 |
 | CLICK | the metronome: OFF, ON, REC (only while recording) | its level | | |
@@ -658,6 +659,16 @@ the STEP and CHORD rows, or CLEAR a row.
   Here **MUTE1** / **MUTE2** and **CLR1** / **CLR2** are parts A and B. In SINGLE, SPLIT and LAYER a note's part is
   kept but not used. The arpeggiator plays the part you are editing; the looper keeps each note on the part it was
   played on.
+- **Polyrhythms** (POLY row, DUAL): give part B a length of its own with **B LEN** and its notes loop round it
+  while part A's loop round the pattern's (**A LEN**, the same as LENGTH). With A at 16 and B at 12 the two drift
+  apart and line up again every 48 steps; B at 7, 5 or 20 against A's 16 makes longer cycles still. B can be
+  longer than A: its steps past A's length play only B's notes. On the page, a white line marks where A ends and a
+  teal one where B ends, and while it plays B's step has a teal mark beside A's white one. The **drums** follow
+  part A (the pattern's length). In PATTERN mode B runs free and never restarts while the pattern repeats. In SONG
+  mode each entry, and each repeat of it, starts both parts from their first step. Recording a note on part B puts
+  it on B's own step, and step entry on part B wraps round B's length. Copying a whole pattern (EDIT, ROW ALL) takes
+  both lengths. In SINGLE, SPLIT and LAYER, and with B LEN at = A, everything plays round the one length as
+  before.
 - **The song** (SONG and ENTRY rows): set MODE to SONG, its LENGTH to the number of entries, then for each entry its
   pattern and how many times it plays. PLAY then plays the entries in turn and starts again after the last.
 - **INIT** (SONG row) starts over: all four patterns empty, the song P1, P2, P3, P4 once each, PATT mode. It asks
@@ -695,17 +706,17 @@ slot's sequencer: LOAD brings it in, SOUND leaves the beat going. Kits of your o
 from WAV files (`tools/gen_drums.py --kit NAME=DIR`, then build): only use sounds you have the rights to.
 
 The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, a
-hat step with a roll cut into its hits, past the pattern's length dots; the drum you are editing named bright; a mark
+ghost a small grey square, a hat or snare step with a roll cut into its hits, past the pattern's length dots; the drum you are editing named bright; a mark
 under the step playing. Below, that drum's sound as it will play (its length tuned, DECAY over it), on the ROLL row the
 step's hits, each as loud as it plays, or on the BUS row its settings.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| STEP | the drum: KICK / SNARE / HAT / CLAP | the step (the cursor) | its HIT: --, HIT, ACCENT (the snare: FLAM too) | CLEAR the drum's lane (asks: SAVE) |
-| ROLL | the step (the cursor) | the hat step's ROLL: OFF, 2, 3, 4, 6, 8 hits | RAMP: EVEN; down: FADE; up: SWELL | |
+| STEP | the drum: KICK / SNARE / HAT / CLAP | the step (the cursor) | its HIT: --, HIT, ACCENT, (the snare) FLAM, GHOST | CLEAR the drum's lane (asks: SAVE) |
+| ROLL | the step (the cursor) | the step's ROLL: OFF, 2, 3, 4, 6, 8 hits | RAMP: EVEN; down: FADE; up: SWELL | DRUM: HAT or SNARE |
 | KICK, SNARE, HAT, CLAP | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
 | BUS | DRIVE | CRUSH: fewer bits and a lower rate still | DELAY send | REVERB send |
-| KIT | LO-FI, TR, BOOM (and any of your own) | PRESET: a beat (below) | LOAD it (turn; asks: SAVE) | |
+| KIT | LO-FI, TR, BOOM (and any of your own) | PRESET: a beat (below) | LOAD it (turn; asks: SAVE) | GHOST: a ghost's velocity (48) |
 | EDIT | the pattern: P1 .. P4 | LANE: ALL, KICK, SNARE, HAT, CLAP | COPY (turn) | PASTE (turn; asks: SAVE) |
 
 **Copying drum patterns** (EDIT row): pick the pattern with KNOB1 and the LANE with KNOB2, turn **COPY**, pick
@@ -713,12 +724,12 @@ another pattern and turn **PASTE**. Only the drums change; the pattern's notes a
 fills the pattern's length, repeated if it was shorter (a 16-step beat pasted into a 32-step pattern plays twice), and
 steps past the length are left alone. With LANE on ALL, all four drums go to their own lanes. Copy one lane and paste
 it into another to move a part, such as the kick's beat onto the snare (a flam becomes an accent off the snare, and
-rolls stay on the hat). Copy one lane and paste with LANE on ALL to put it back in its own lane. The drum clipboard is
+rolls go only onto the hat or the snare; ghosts stay ghosts). Copy one lane and paste with LANE on ALL to put it back in its own lane. The drum clipboard is
 separate from the SEQ page's, which copies notes and drums together.
 
 **Preset beats** (KIT row): turn **PRESET** to pick a beat (nothing changes yet), then turn **LOAD** to write it into
 the pattern you are editing (the header's P1 .. P4). A preset fills all four drum lanes: hits, accents (open hats),
-flams and hat rolls. Each is 16 steps, repeated over a longer pattern (32 steps: twice). The notes, the pattern's
+flams, ghost notes and hat rolls. Each is 16 steps, repeated over a longer pattern (32 steps: twice). The notes, the pattern's
 length, the kit, the levels and the tempo stay as they are. Loading while the sequencer plays swaps the beat at once.
 If you didn't want it, UNDO (PATCH screen) brings the drums back.
 
@@ -728,29 +739,42 @@ If you didn't want it, UNDO (PATCH screen) brings the drums back.
 | Hip-hop, trap | BOOM BAP, BOOMBAP2, LO-FI HH, TRAP 1, TRAP 2 (hat rolls), DRILL |
 | UK, breaks | UKG 2STP, UKG 4X4, DNB, JUNGLE, DUBSTEP, BREAKS, ELECTRO, JERSEY |
 | Latin, Afro | DEMBOW (reggaeton), DANCEHL, AFROBEAT, AMAPIANO |
+| Ghost notes | FUNK, NEO SOUL, DNB GHST, SHUFFLE (the snare's ghosts between the backbeats) |
+| Snare rolls | TRAP RLL (a snare roll of 4 into the bar) |
 
 Set the tempo to suit: around 120-128 BPM for house and techno, 130-140 for UK garage and Jersey club, 140 for trap,
 drill and dubstep (written half-time, snare on the third beat), 170-175 for DnB and jungle, 85-95 for boom bap and
-lo-fi, 90-110 for dembow, dancehall, afrobeats and amapiano.
+lo-fi, 140 for TRAP RLL, 95-110 for funk, 70-90 for neo soul and the shuffle, 90-110 for dembow, dancehall, afrobeats and amapiano.
 
 **On the DRUM page the keys are the drum machine's**, as on a TR (they play no notes here):
 
 - The **16 white keys** (F3 .. G5) are the 16 steps on screen. Press one: a hit; again: an accent; (the snare) again: a
-  flam; again: none. Their **LEDs** show the lane (an accent blinks, a flam faster; the step playing flips its LED as
-  it passes).
+  flam; again: a ghost; again: none. Their **LEDs** show the lane (an accent blinks, a flam faster, a ghost glints
+  briefly; the step playing flips its LED as it passes).
 - **F#3, G#3, A#3, C#4** (the first four black keys) pick KICK, SNARE, HAT and CLAP, and play it.
 - **Recording drums in real time**: on the DRUM page, press **REC** (the header says DRUM P1 REC; the page stays) and
   **PLAY** (with the count-in if REC came first), then tap **F#3, G#3, A#3, C#4** in time. Each hit lands on the nearest
   step, as notes do (the one playing, or the next if you are past its middle), and you hear it once, as you hit it.
-  Recording overdubs: a hit, accent, flam or roll already there stays. Add accents and flams with the white keys.
+  Recording overdubs: a hit, accent, flam, ghost or roll already there stays. Add accents, flams and ghosts with the
+  white keys.
+- **Recording from a MIDI drum pad** (channel 10, General MIDI notes: 36 kick, 38 snare, 42 closed hat, 46 open hat,
+  39 clap): with REC on and the sequencer playing, each hit is recorded by how hard it was played: a soft one (nearer
+  the KIT row's GHOST than a normal hit) as a **ghost**, a hard one (over ~116) as an **accent**, the rest as hits; the
+  open hat is the hat's accent. As with the keys, a step that already has something keeps it.
 - **F#4 / G#4**: the 16 steps before / after, for patterns longer than 16 (KNOB2, the step, does it too).
-- On the **ROLL** row the white keys set the hat's rolls instead: each press the next, OFF, 2, 3, 4, 6, 8, then OFF
-  (on an empty step it puts a hit there too). A step with a roll flickers its LED.
+- On the **ROLL** row the white keys set rolls instead, the hat's or, with SNARE chosen (KNOB4, or G#3), the
+  snare's: each press the next, OFF, 2, 3, 4, 6, 8, then OFF (on an empty step it puts a hit there too). A step with
+  a roll flickers its LED.
 
 - **Accents** play at full level, hits a little softer; the hat's accent is the **open hat**, and the next hat (open
   or closed) cuts it off, as on an 808.
+- **A ghost** is a soft hit (velocity 48, under a hit's 106; the KIT row's **GHOST** sets it): the quiet notes between the backbeats that make a
+  groove swing. Any drum can have them (a ghosted hat is the closed one), though the snare is where they are usual; a
+  rolled ghost (hat or snare) plays its roll that softly too.
 - **A flam** (the snare's) is two snares: a hit, then ~20 ms later a softer one, the first ringing on under it.
-- **A roll** (the hat's, also called a ratchet) plays the step 2 .. 8 times, evenly over its length: the trap hat. 3
+- **A roll** (the hat's or the snare's, also called a ratchet) plays the step 2 .. 8 times, evenly over its length:
+  the trap hat, the snare fill. The hat and the snare roll on their own, both on one step if you like. A rolled flam
+  plays the flam first, then plain snares. 3
   and 6 are triplets; on a 1/16 step, 2 is a 1/32 and 4 a 1/64. Each hit cuts the one before off (an open hat's too);
   a swung step spreads them over its swung length. **RAMP** shapes the hits: EVEN, all at the step's level; FADE, each
   softer than the last (at most to a quarter); SWELL, rising into it. RAMP is one for every roll in the sequencer,
