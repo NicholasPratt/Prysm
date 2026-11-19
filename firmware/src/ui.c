@@ -103,7 +103,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_SBLEN,                                 /* (the POLY row: part B's own length, 0: the pattern's) */
        K_PAN,                                   /* (a part's place: L 64 .. C .. R 63) */
        K_ETIME,                                 /* (an envelope's time: 1 ms .. 10 s, as the engine has it: PR_ENV_US) */
-       K_HOME };                                /* (SETUP: what HOME opens first, LIVE or the SCOPE) */
+       K_HOME,                                  /* (SETUP: what HOME opens first, LIVE or the SCOPE) */
+       K_MMDEST };                              /* (a matrix route's destination: the LFO's, and DLYTIME) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -196,13 +197,13 @@ static const row_t FENV_ROWS[] = {               /* (the filter's envelope; its 
 static const row_t MENV_ROWS[] = {
     {"ENV", {{"A", PO(menv_a), 127, K_ETIME}, {"D", PO(menv_d), 127, K_ETIME},
              {"S", PO(menv_s), 127, K_NUM}, {"R", PO(menv_r), 127, K_ETIME}}, LIT_ENV},
-    {"DEST", {{"DEST", PO(menv_dest), DEST_N - 1u, K_DEST}, {"AMT", PO(menv_amt), 127, K_BIP},   /* (DEST, AMT: */
+    {"DEST", {{"DEST", PO(menv_dest), DEST_DLYTIME, K_DEST}, {"AMT", PO(menv_amt), 127, K_BIP},   /* (DEST, AMT: */
               NOPRM, {"LOOP", PO(menv_loop), 1, K_ONOFF}}, LIT_CURVE},   /* where the LFOs have them) */
 };
 static const row_t MENV2_ROWS[] = {
     {"ENV", {{"A", PO(menv2_a), 127, K_ETIME}, {"D", PO(menv2_d), 127, K_ETIME},
              {"S", PO(menv2_s), 127, K_NUM}, {"R", PO(menv2_r), 127, K_ETIME}}, LIT_ENV},
-    {"DEST", {{"DEST", PO(menv2_dest), DEST_N - 1u, K_DEST}, {"AMT", PO(menv2_amt), 127, K_BIP},
+    {"DEST", {{"DEST", PO(menv2_dest), DEST_DLYTIME, K_DEST}, {"AMT", PO(menv2_amt), 127, K_BIP},
               {"PART", PO(me2_part), PT_N - 1u, K_PTGT}, {"LOOP", PO(menv2_loop), 1, K_ONOFF}}, LIT_CURVE},
 };
 static const row_t LFO_ROWS[] = {
@@ -218,8 +219,8 @@ static const row_t LFO2_ROWS[] = {               /* (one for all the voices; SYN
               {"PART", PO(l2_part), PT_N - 1u, K_PTGT}, NOPRM},
      LIT_L2 | LIT_ENV},
 };
-static const row_t MATRIX_ROWS[] = {            /* (each route: a source onto one of the LFO's destinations) */
-#define MM_ROW(n, i) {n, {{"SRC", PO(mm_src[i]), MM_N - 1u, K_MMSRC}, {"DEST", PO(mm_dest[i]), DEST_N - 1u, K_LDEST}, \
+static const row_t MATRIX_ROWS[] = {            /* (each route: a source onto one of the LFO's destinations, or DLYTIME) */
+#define MM_ROW(n, i) {n, {{"SRC", PO(mm_src[i]), MM_N - 1u, K_MMSRC}, {"DEST", PO(mm_dest[i]), DEST_DLYTIME, K_MMDEST}, \
                       {"AMT", PO(mm_amt[i]), 127, K_BIP}, {"TIME", PO(mm_time[i]), 127, K_MMTIME}}, LIT_ENV}
     MM_ROW("MOD 1", 0), MM_ROW("MOD 2", 1), MM_ROW("MOD 3", 2), MM_ROW("MOD 4", 3),
 #undef MM_ROW
@@ -730,7 +731,8 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_MODE: put(s, MODE_NAME[*v < MODE_N ? *v : 0u]); break;
     case K_SEMI: case K_MPIT: put(snum(s, (int32_t)*v - 24), "st"); break;
     case K_LFOW: put(s, LFO_NAME[*v < LFO_N ? *v : 0u]); break;
-    case K_DEST: case K_LDEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
+    case K_LDEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
+    case K_DEST: case K_MMDEST: put(s, DEST_NAME[*v < DEST_N || *v == DEST_DLYTIME ? *v : 0u]); break;
     case K_L2DEST: put(s, DEST_NAME[*v < DEST2_N ? *v : 0u]); break;
     case K_L2SYNC: put(s, L2SYNC_NAME[*v < L2SYNC_N ? *v : 0u]); break;
     case K_ONOFF: put(s, *v ? "ON" : "OFF"); break;
@@ -1725,7 +1727,7 @@ static void gfx_matrix(uint32_t lit)
     uint32_t r, sel = row[PG_MATRIX];
     for (r = 0; r < MM_SLOTS; r++) {
         int32_t y = 4 + (int32_t)r * 30, d = (int32_t)(edit.mm_amt[r] & 127u) - 64, m = 180;
-        uint32_t on = edit.mm_src[r] && edit.mm_src[r] < MM_N && d && DEST_LFO_OK(edit.mm_dest[r]) && edit.mm_dest[r];
+        uint32_t on = edit.mm_src[r] && edit.mm_src[r] < MM_N && d && DEST_MM_OK(edit.mm_dest[r]) && edit.mm_dest[r];
         uint16_t c = r == sel && (lit & LIT_ENV) ? C_BRIGHT : on ? C_MID : C_FAINT;
         char t[8];
         num(t, r + 1u);
@@ -1736,7 +1738,7 @@ static void gfx_matrix(uint32_t lit)
         cv_line(94, y + 12, 104, y + 12, on ? C_MID : C_FAINT);   /* the arrow */
         cv_line(104, y + 12, 101, y + 9, on ? C_MID : C_FAINT);
         cv_line(104, y + 12, 101, y + 15, on ? C_MID : C_FAINT);
-        cv_text(108, y + 4, &FONT_S, DEST_NAME[edit.mm_dest[r] < DEST_N ? edit.mm_dest[r] : 0u], c);
+        cv_text(108, y + 4, &FONT_S, DEST_NAME[DEST_MM_OK(edit.mm_dest[r]) ? edit.mm_dest[r] : 0u], c);
         cv_rect(m - 2, y + 22, 58, 1, C_BOX);   /* the amount, from the middle */
         cv_rect(m + 26, y + 19, 1, 7, C_FAINT);
         cv_rect(d < 0 ? m + 26 + d * 28 / 64 : m + 26, y + 21, (d < 0 ? -d : d) * 28 / 64 + 1, 3, on ? c : C_FAINT);
@@ -3517,11 +3519,16 @@ static int ui_input(uint32_t buttons)
             int32_t mn = p->kind == K_SLEN || p->kind == K_SONGLEN || p->kind == K_SEREP ? 1 : 0;
             x = x < mn ? mn : x > p->max ? p->max : x;
         }
-        if ((p->kind == K_LDEST || p->kind == K_L2DEST) && (x == DEST_LFORATE || x == DEST_LFOAMT))
+        if ((p->kind == K_DEST || p->kind == K_MMDEST) && x >= (int32_t)DEST_N && x < (int32_t)DEST_DLYTIME)
+            /* the mod envelopes, the matrix: the LFO's, then DLYTIME (the rest LFO 2's alone) */
+            x = d > 0 ? DEST_DLYTIME : DEST_N - 1u;
+        if ((p->kind == K_LDEST || p->kind == K_L2DEST || p->kind == K_MMDEST) && (x == DEST_LFORATE || x == DEST_LFOAMT))
             /* the LFOs: past the mod envelope's own (LFORATE, LFOAMT) */
             x = d > 0 ? DEST_SPREAD : DEST_MIX;
         if (p->kind == K_LDEST && x == DEST_LFOSHAPE)   /* (the LFO: not its own shape) */
             x = DEST_LFOSHAPE - 1;
+        if (p->kind == K_MMDEST && x == DEST_LFOSHAPE)  /* (the matrix: not the LFO's shape either) */
+            x = d > 0 ? DEST_DLYTIME : DEST_LFOSHAPE - 1;
         if (p->kind == K_DHIT && x == DH_FLAM && dr_sel != 1u)   /* (a flam: the snare's alone) */
             x = d > 0 ? DH_GHOST : DH_ACCENT;
         if (x == *v)

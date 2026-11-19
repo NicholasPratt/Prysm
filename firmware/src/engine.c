@@ -77,7 +77,9 @@ static const char *const DEST_NAME[DEST2_N] = {"OFF", "PITCH", "PITCH2", "WAVE1"
 #define DEST_V9_N 16u                           /* (format 9's DEST_N: its LFO 2 destinations from here are 3 lower) */
 #define DEST_V10_N 18u                          /* (format 10's: from here 1 lower) */
 #define DEST_LFO2_OK(d) ((d) < DEST2_N && (d) != DEST_LFORATE && (d) != DEST_LFOAMT)  /* LFO 2's: those, and more */
-/* the mod matrix: MM_SLOTS routes, each a source onto one of the LFO's destinations (DEST_LFO_OK), by an amount */
+#define DEST_ME_OK(d) ((d) < DEST_N || (d) == DEST_DLYTIME)   /* the mod envelopes': the LFO's, its own, the delay's time */
+#define DEST_MM_OK(d) (DEST_LFO_OK(d) || (d) == DEST_DLYTIME)  /* the matrix's: the LFO's, and the delay's time */
+/* the mod matrix: MM_SLOTS routes, each a source onto one of the LFO's destinations or DLYTIME (DEST_MM_OK), by an amount */
 #define MM_SLOTS 4u
 enum { MM_OFF, MM_LFO, MM_LFO2, MM_MENV1, MM_MENV2, MM_VEL, MM_KEY, MM_WHEEL, MM_RAND,
        MM_KICK, MM_SNARE, MM_HAT, MM_CLAP,      /* (format 16: a drum's hits, each an envelope over the route's TIME) */
@@ -147,7 +149,7 @@ typedef struct {
     /* (added in patch format 4: the mod envelope) */
     uint8_t menv_a, menv_d, menv_s, menv_r;     /* ADSR */
     uint8_t menv_loop;                          /* 1: attack-decay over and over until the key is let go */
-    uint8_t menv_dest;                          /* DEST_OFF .. DEST_LFOAMT */
+    uint8_t menv_dest;                          /* DEST_OFF .. DEST_N - 1, DLYTIME */
     uint8_t menv_amt;                           /* 64 = none; bipolar */
     /* (added in patch format 5: velocity, from MIDI; the FM-1's own keys play at full velocity, so these change
      * nothing for them) */
@@ -196,7 +198,7 @@ typedef struct {
     uint8_t split_oct[2];                       /* each side's octave: 0..4 = -2 .. +2 (2: as played) */
     /* (added in patch format 14: the mod matrix, MOD FX, CRUSH) */
     uint8_t mm_src[MM_SLOTS];                   /* MM_OFF .. MM_RAND */
-    uint8_t mm_dest[MM_SLOTS];                  /* DEST_OFF .. DEST_N - 1 (not the LFO's own: LFORATE, LFOAMT, LFOSHAPE) */
+    uint8_t mm_dest[MM_SLOTS];                  /* DEST_OFF .. DEST_N - 1 (not the LFO's own: LFORATE, LFOAMT, LFOSHAPE), DLYTIME */
     uint8_t mm_amt[MM_SLOTS];                   /* 64 = none; bipolar */
     uint8_t mfx_type;                           /* MFX_OFF .. MFX_FLANGER */
     uint8_t mfx_rate, mfx_depth;                /* the sweep: 0.05 .. 40 Hz; how far */
@@ -521,6 +523,7 @@ typedef struct {
     int32_t n_g;                                /* WHITE, PINK, BROWN: the tone's one-pole, Q15 (32767: open) */
     uint32_t n_thr;                             /* CRACKLE: a crackle's chance a frame (of 2^32) */
     uint8_t mm_n;                               /* the mod matrix: its routes in use (the first mm_n of these) */
+    uint8_t dly_mod;                            /* a mod envelope or a matrix route on DLYTIME (the newest note's) */
     uint8_t mm_src[MM_SLOTS], mm_dest[MM_SLOTS];
     int32_t mm_amt[MM_SLOTS];                   /* Q15, signed (squared, as the LFO's) */
     int32_t mm_dk[MM_SLOTS];                    /* a drum source's fall: a block's step (Q15; linear, all of it in TIME) */
@@ -591,6 +594,7 @@ static struct {
     uint32_t lfo_ph, lfo_rng;                   /* its LFO (retrig on): phase, S&H's random sequence */
     int32_t lfo_sh, lfo_fade;                   /* the S&H value held; the fade-in (Q24) */
     int32_t rate16;                             /* the mod envelope's move of its LFO's rate, 1/16 semitones */
+    int32_t dly_pz;                             /* its mod envelopes' and matrix's move of the delay's time (DLYTIME) */
     uint8_t note;
     uint8_t omask;                              /* the oscillators it plays (bit o): the split's side, or both */
     int8_t shift;                               /* its side's octave, semitones (voice_tune) */
@@ -621,6 +625,8 @@ static int32_t lfo_sh;
 static uint32_t lfob_ph, lfob_rng = 0x6A09E667u;  /* part B's free-running LFO (its own rate; not SINGLE) */
 static int32_t lfob_sh;
 static int32_t lfo_rate16;                      /* its rate moved by the newest note's mod envelope (last render) */
+static int32_t dly_mpz;                         /* the delay's time moved by the newest note's mod envelopes and matrix
+                                                 * routes (DLYTIME: the effect is shared), knob steps; held after it */
 static uint32_t l2_ph, l2_rng = 0x6C8E9CF5u;    /* LFO 2 (free-running, one for all) */
 static int32_t l2_sh;
 static volatile int32_t bend16;                 /* MIDI pitch bend, 1/16 semitones (the main loop's: engine_bend) */
@@ -980,6 +986,7 @@ typedef struct {
     int32_t amp;                                /* amp: a factor, Q15 */
     int32_t mix;                                /* towards osc 2 (+) or osc 1 (-), Q15 */
     int32_t spread;                             /* the comb's spread, + -127..127 */
+    int32_t dtime;                              /* the delay's time, + -127..127 (fx_render: the newest note's) */
     int32_t vmod;                               /* velocity's factor on the mod amounts, Q15 */
 } lfo_mod_t;
 
@@ -1011,6 +1018,7 @@ static void mod_add(lfo_mod_t *m, uint32_t dest, int32_t a, int32_t s, int uni)
     case DEST_MIX: m->mix += x; break;
     case DEST_SPREAD: m->spread += pz; break;                            /* +- the whole knob */
     case DEST_DETUNE: m->pitch16[1] += (x * 16) >> 15; break;            /* osc 2: +-1 semitone */
+    case DEST_DLYTIME: m->dtime += pz; break;                            /* +- the whole knob */
     default: break;
     }
 }
@@ -2383,13 +2391,15 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                 l = clip15(l);
             }
             lfo_mods(pe, l, &m);
-            if (DEST_LFO_OK(pe->me_dest[0]))     /* any of the LFO's destinations */
+            if (DEST_LFO_OK(pe->me_dest[0]) || pe->me_dest[0] == DEST_DLYTIME)   /* any of the LFO's destinations */
                 mod_add(&m, pe->me_dest[0], me_amt, me, 1);
-            if (DEST_LFO_OK(md2))
+            if (DEST_LFO_OK(md2) || md2 == DEST_DLYTIME)
                 mod_add(&m, md2, ma2, me2, 1);
-            mod_add(&m, l2d, l2a, g2[bi], 0);   /* LFO 2 (on the LFO's destinations; DETUNE) */
+            mod_add(&m, l2d == DEST_DLYTIME ? DEST_OFF : l2d, l2a, g2[bi], 0);   /* LFO 2 (on the LFO's destinations;
+                                                                                  * DETUNE; its DLYTIME: fx_render's) */
             if (eg.mm_n)                        /* the mod matrix */
                 mm_mods(&m, v, bi, l, g2[bi], me, me2);
+            voice[v].dly_pz = m.dtime;          /* (DLYTIME: the newest note's, below) */
             m.pitch16[0] += bend16;             /* pitch bend: every note (and the comb's keytrack with it) */
             m.pitch16[1] += bend16;
             m.vmod = 32767;                     /* velocity: softer notes quieter (by its square), darker, less bright */
@@ -2698,6 +2708,8 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
         for (v = 0; v < NV; v++)
             if (voice[v].amp.st && voice[v].age >= best) { best = voice[v].age; newest = v; }
         lfo_rate16 = newest < NV ? voice[newest].rate16 : 0;
+        if (!eg.dly_mod) dly_mpz = 0;           /* ... and the delay's time (none sounding: as the last one left it) */
+        else if (newest < NV) dly_mpz = voice[newest].dly_pz;
     }
     {                                           /* the drums: some into the effects, then all of it dry */
         static int32_t bus[MAXBLK * BLK];
@@ -2841,7 +2853,7 @@ static void derive_part(volatile eng_t *e, const patch_t *p, uint32_t part)
         e->me_sus[0] = (int32_t)((m[2] & 127u) * (uint32_t)(ENV_FULL / 127));
         e->me_rel[0] = PR_ENV_EXP[m[3] & 127u];
         e->me_loop[0] = m[4] ? 1u : 0u;
-        e->me_dest[0] = m[5] < DEST_N ? (uint8_t)(part ? dest_b(m[5]) : m[5]) : DEST_OFF;
+        e->me_dest[0] = DEST_ME_OK(m[5]) ? (uint8_t)(part ? dest_b(m[5]) : m[5]) : DEST_OFF;
         e->me_amt[0] = e->me_dest[0] == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
     e->vel_amp = (int32_t)(p->vel_amp & 127u) * 32767 / 127;
@@ -2937,14 +2949,14 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
         eg.me_sus[k] = (int32_t)((e[2] & 127u) * (uint32_t)(ENV_FULL / 127));
         eg.me_rel[k] = PR_ENV_EXP[e[3] & 127u];
         eg.me_loop[k] = e[4] ? 1u : 0u;
-        eg.me_dest[k] = e[5] < DEST_N ? e[5] : DEST_OFF;
+        eg.me_dest[k] = DEST_ME_OK(e[5]) ? e[5] : DEST_OFF;
         eg.me_amt[k] = eg.me_dest[k] == DEST_OFF ? 0 : d < 0 ? -q : q;
     }
     {                                           /* the mod matrix: its routes in use, packed */
         uint32_t n = 0;
         for (k = 0; k < MM_SLOTS; k++) {
             int32_t d = (int32_t)(patch.mm_amt[k] & 127u) - 64, mag = d < 0 ? -d : d, q = PR_CURVE_Q15[mag * 127 / 64];
-            if (!patch.mm_src[k] || patch.mm_src[k] >= MM_N || !DEST_LFO_OK(patch.mm_dest[k]) ||
+            if (!patch.mm_src[k] || patch.mm_src[k] >= MM_N || !DEST_MM_OK(patch.mm_dest[k]) ||
                 patch.mm_dest[k] == DEST_OFF || !d)
                 continue;
             eg.mm_src[n] = patch.mm_src[k];
@@ -2954,6 +2966,9 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
             n++;
         }
         eg.mm_n = (uint8_t)n;
+        eg.dly_mod = eg.me_dest[0] == DEST_DLYTIME || eg.me_dest[1] == DEST_DLYTIME || eb.me_dest[0] == DEST_DLYTIME;
+        for (k = 0; k < n; k++)
+            if (eg.mm_dest[k] == DEST_DLYTIME) eg.dly_mod = 1;
     }
     {
         uint32_t bpm = 40u + (patch.arp_bpm <= 200u ? patch.arp_bpm : 80u);

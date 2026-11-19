@@ -130,6 +130,38 @@ int main(void)
     CHECK(a0 < a1 && a1 < b0, "VELO -> CUTOFF (-64): a hard note darker than a soft one (%llu vs %llu; none %llu)",
           (unsigned long long)a0, (unsigned long long)a1, (unsigned long long)b0);
 
+    /* ---- DLYTIME from the matrix and the mod envelopes: the newest note's, onto the shared delay */
+    {
+        int32_t hard, soft, held, gone, menv, l2;
+        uint32_t t0, t1;
+        fresh();
+        edit.dly_mix = 80; edit.dly_time = 20;
+        edit.mm_src[0] = MM_VEL; edit.mm_dest[0] = DEST_DLYTIME; edit.mm_amt[0] = 127;
+        engine_set(&edit);
+        CHECK(eg.mm_n == 1u && eg.dly_mod, "the matrix: a route on DLYTIME packed");
+        t0 = dly_time_q8;
+        engine_note_on_vel(48, 127); run(4000, 0); hard = dly_mpz; engine_note_off(48); run(30000, 0);
+        engine_note_on_vel(48, 30); run(4000, 0); soft = dly_mpz; t1 = dly_time_q8;
+        engine_note_off(48); run(60000, 0); held = dly_mpz;
+        CHECK(hard > 100 && soft > 0 && soft < hard && t1 > t0,
+              "VELO -> DLYTIME: a hard note's time longer than a soft one's (%d vs %d knob steps; %u -> %u)",
+              (int)hard, (int)soft, (unsigned)(t0 >> 8), (unsigned)(t1 >> 8));
+        CHECK(held == soft, "... the notes gone: the delay's time as the last one left it (%d)", (int)held);
+        edit.mm_src[0] = MM_OFF;
+        engine_set(&edit);
+        run(BLK, 0); gone = dly_mpz;
+        CHECK(!eg.dly_mod && gone == 0, "... the route OFF: the knob's own time again (%d)", (int)gone);
+        edit.menv_dest = DEST_DLYTIME; edit.menv_amt = 0; edit.menv_a = 0; edit.menv_s = 127;
+        engine_set(&edit);
+        engine_note_on(48); run(4000, 0); menv = dly_mpz; engine_note_off(48); run(30000, 0);
+        CHECK(eg.dly_mod && menv < -100, "M.ENV 1 -> DLYTIME (-64): the time down while held (%d)", (int)menv);
+        edit.menv_dest = DEST_OFF; edit.menv_amt = 64;
+        edit.lfo2_dest = DEST_DLYTIME; edit.lfo2_amt = 127;
+        engine_set(&edit);
+        engine_note_on(48); run(4000, 0); l2 = dly_mpz; engine_note_off(48); run(30000, 0);
+        CHECK(!eg.dly_mod && l2 == 0, "LFO 2 -> DLYTIME: fx_render's own, not counted twice (%d)", (int)l2);
+    }
+
     /* ---- MOD FX, CRUSH: off, the sound as it was; on, changed */
     a0 = apart(fx_case, 0);
     CHECK(a0 == apart(fx_case, 1), "MOD FX's MIX 0, CRUSH off: the sound bit for bit as without");

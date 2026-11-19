@@ -16,8 +16,12 @@ const PLUGIN = typeof window.prysm_hello === "function";
 const BTNS = [["OCT-", 0], ["OCT+", 1], ["EDIT", 6], ["ENV", 4], ["LFO", 5], ["GLO", 7], ["FX", 2],
               ["ARP", 10], ["SEQ", 11], ["SELECT", 3], ["HOME", 8], ["SAVE", 9], ["PLAY", 12], ["REC", 13]];
 const ENCS = [["SELECT", 0], ["ALGO", 1], ["KNOB1", 2], ["KNOB2", 3], ["KNOB3", 4], ["KNOB4", 5], ["PRESETS", 6]];
-const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58, 90, 92, 94]);   // ui.c's K_ kinds shown as a list
+const CHOICE = new Set([4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58, 90, 92, 94, 101]);   // ui.c's K_ kinds shown as a list
 const LFO_ONLY_NOT = new Set([13, 14]);         // LFORATE, LFOAMT: the mod envelope's own, not the LFOs'
+const LFO2_ONLY = (v) => v >= 19 && v < 30;     // RES .. DELAY: LFO 2's alone (the mod envelopes and the matrix: up to DLYTIME, 30)
+const destSkip = (kind, v) =>                   // a DEST list's values that are not its own (ui.c: K_DEST 12, K_LDEST 33, K_L2DEST 34, K_MMDEST 101)
+  ((kind === 33 || kind === 34 || kind === 101) && LFO_ONLY_NOT.has(v)) || (kind === 101 && v === 18) ||
+  ((kind === 12 || kind === 101) && LFO2_ONLY(v));
 const KEYMAP = "awsedftgyhujkolp;'";            // C4 (key 7) up
 const NOTE = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const noteName = (n) => NOTE[n % 12] + (Math.floor(n / 12) - 1);
@@ -207,7 +211,7 @@ function showTab(n) {
       if (CHOICE.has(p.kind)) {
         input = el("select");
         for (let v = p.min; v <= p.max; v++)
-          if (!((p.kind === 33 || p.kind === 34) && LFO_ONLY_NOT.has(v))) input.append(el("option", { value: v, textContent: fmt(p, v) }));
+          if (!destSkip(p.kind, v)) input.append(el("option", { value: v, textContent: fmt(p, v) }));
       } else input = el("input", { type: "range", min: p.min, max: p.max, step: 1 });
       input.oninput = () => { M._web_set(p.off, +input.value); };
       input.onfocus = () => goPage(pg.index, rowIndex(pg, r));

@@ -317,13 +317,14 @@ DEST and AMT are on KNOB1 and KNOB2, where the LFOs have them.
 
 With **LOOP ON** an envelope runs attack -> decay -> attack -> decay ... for as long as you hold the key, then
 releases: a sustain of 0 gives full up-and-down sweeps, a higher sustain a shallower cycle. Its destination can be
-any of the LFO's (below), plus two of its own:
+any of the LFO's (below), plus these:
 
 | | |
 | --- | --- |
 | LFORATE | the LFO's rate, up to +-4 octaves: an envelope that speeds the LFO up and slows it down |
 | LFOAMT | the LFO's depth, from nothing up to double |
 | LFOSHAPE | the LFO's wave, morphed: from the one you chose along SINE, TRI, SAW UP, SAW DN, SQUARE, S&H (a full amount: the whole row), each fading into the next |
+| DLYTIME | the delay's time (the newest note's envelope: the delay is shared; the repeats bend, as tape does) |
 
 The two can share a destination (they add up), or split the work: say M.ENV 1 sweeps the cutoff while M.ENV 2,
 short and looping, flicks mod 1's pitch. The picture shows two seconds of the envelope (the key held for 1.5 s, the
@@ -396,7 +397,9 @@ it is set, as far as the whole knob):
 ### MATRIX
 
 Press **LFO** a third time for the mod matrix: four more routes, each a **source** onto any of the LFO's destinations
-(the same list as the LFO's DEST), with an **amount** either way. They add to what the LFO, LFO 2 and the mod
+(the same list as the LFO's DEST) or **DLYTIME** (the delay's time, at the end of the list), with an **amount** either
+way. The delay is shared, so a source that is a note's own (VELO, KEY, RANDOM, the mod envelopes, the LFO on RETRIG)
+moves it from the newest note, and the time stays where that note left it after the notes stop. They add to what the LFO, LFO 2 and the mod
 envelopes already do. A route is off while its source is OFF or its amount is 0 (the middle of the knob).
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
@@ -416,7 +419,8 @@ envelopes already do. A route is off while its source is OFF or its amount is 0 
 
 The picture lists the four routes, source to destination, each amount a bar from the middle. Some ideas: VELO onto
 the CUTOFF (a harder note, brighter); KEY onto MOD1 (high notes less FM, so they stay clean); WHEEL onto the LFO's
-pitch depth for vibrato on demand; RANDOM onto the pitch, a little, for an old synth's drift.
+pitch depth for vibrato on demand; RANDOM onto the pitch, a little, for an old synth's drift; WHEEL onto DLYTIME
+for a tape echo you bend by hand.
 
 **The drums as sources.** A drum source follows that drum's hits, from the drum sequencer and from MIDI (channel 10,
 or the DRUM page's keys). It works even when the drum's LEVEL is 0, so a silent kick can still drive a route. A drum

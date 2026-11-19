@@ -39,7 +39,7 @@ enum : clap_id { P_SYNC = 10000, P_SEQ, P_SOUND, P_FM1 };
 struct Extra { clap_id id; const char* name; double def; };
 const Extra EXTRAS[] = {{P_SYNC, "Arp & sequencer on DAW tempo", 1}, {P_SEQ, "Sequencer run", 0},
                         {P_SOUND, "Plugin sound", 1}, {P_FM1, "Play the FM-1 too", 0}};
-const std::vector<uint32_t> LIST_KINDS = {4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58};   // (ui.c's K_ kinds)
+const std::vector<uint32_t> LIST_KINDS = {4, 6, 7, 9, 11, 12, 16, 17, 18, 22, 32, 33, 34, 35, 56, 58, 101};   // (ui.c's K_ kinds)
 
 std::atomic<void*> g_owner{nullptr};            // the core is one per process: the first Prysm has it
 

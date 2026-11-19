@@ -263,7 +263,9 @@ static void modfx_render(int32_t *out, uint32_t n)
 static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t *dr, const int32_t *snd)
 {
     const fxp_t p = fxp;                        /* (read once: fx_set, in the main loop, cannot run during the ISR) */
-    uint32_t i, dest = eg.l2_dest, dtime = p.dly_sync ? dly_synced(p.time_v) : p.dly_time;   /* (SYNC: the tempo now) */
+    int32_t mpz = dly_mpz;                      /* (the newest note's mod envelopes and matrix on DLYTIME) */
+    uint32_t i, dest = eg.l2_dest, dtime = mpz ? dly_time_at(knob_moved(p.time_v, mpz), p.dly_sync)
+                                         : p.dly_sync ? dly_synced(p.time_v) : p.dly_time;   /* (SYNC: the tempo now) */
     int32_t cmix = p.cho_mix, dmix = p.dly_mix, rmix = p.rev_mix, dfb = p.dly_fb, rdec = p.rev_decay;
     int32_t dsend = dr ? PR_CURVE_Q15[seqs.dr_dly & 127u] : 0, rsend = dr ? PR_CURVE_Q15[seqs.dr_rev & 127u] : 0;
     int32_t vd = lk_send[0] < 0 ? 32767 : PR_CURVE_Q15[lk_send[0] & 127], vr = lk_send[1] < 0 ? 32767 : PR_CURVE_Q15[lk_send[1] & 127];
@@ -276,7 +278,7 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
             switch (dest) {
             case DEST_CHORUS: cmix = cho_mix_of(knob_moved(p.cho_v, pz)); break;
             case DEST_DELAY: dmix = PR_CURVE_Q15[knob_moved(p.dly_v, pz)]; break;
-            case DEST_DLYTIME: dtime = dly_time_at(knob_moved(p.time_v, pz), p.dly_sync); break;
+            case DEST_DLYTIME: dtime = dly_time_at(knob_moved(p.time_v, pz + mpz), p.dly_sync); break;
             case DEST_DLYFB: dfb = dly_fb_of(knob_moved(p.fb_v, pz)); break;
             case DEST_REVERB: rmix = PR_CURVE_Q15[knob_moved(p.rev_v, pz)]; break;
             default: rdec = rev_decay_of(knob_moved(p.size_v, pz)); break;
