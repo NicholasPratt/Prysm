@@ -28,6 +28,14 @@ static uint64_t run(uint32_t n, uint32_t from)  /* n frames on; the energy of th
     return e;
 }
 
+static void run0(uint32_t n)                    /* n frames on, each block from silence (engine_render adds into out) */
+{
+    for (; n >= BLK; n -= BLK) {
+        memset(buf, 0, sizeof buf);
+        engine_render(buf, BLK);
+    }
+}
+
 static void fresh(void)                         /* the default sound at 120 BPM, the sequencer cleared, stopped (and */
 {                                               /* from its first step at the next PLAY) */
     engine_seq_play(0);
@@ -160,6 +168,38 @@ int main(void)
         engine_set(&edit);
         engine_note_on(48); run(4000, 0); l2 = dly_mpz; engine_note_off(48); run(30000, 0);
         CHECK(!eg.dly_mod && l2 == 0, "LFO 2 -> DLYTIME: fx_render's own, not counted twice (%d)", (int)l2);
+    }
+
+    /* ---- the delay's FDBK at the top: it self-oscillates, held (no hard clip); lower down, the repeats die away */
+    {
+        static const uint8_t FB[3] = {100, 112, 127};
+        uint64_t late[3];
+        int32_t peak = 0;
+        uint32_t f, j, q;
+        for (f = 0; f < 3u; f++) {
+            fresh();
+            edit.dly_mix = 100; edit.dly_time = 40; edit.dly_fb = FB[f]; edit.dly_ping = 0;
+            engine_set(&edit);
+            engine_note_on(60); run0(2000); engine_note_off(60);
+            run0(44100u * 6u);                /* six seconds after the note */
+            late[f] = 0;
+            for (q = 0; q < 44100u; q += BLK) {
+                memset(buf, 0, sizeof buf);
+                engine_render(buf, BLK);
+                for (j = 0; j < 2u * BLK; j++) {
+                    int32_t a = buf[j] < 0 ? -buf[j] : buf[j];
+                    late[f] += (uint64_t)((int64_t)buf[j] * buf[j] >> 16);
+                    if (f == 2u && a > peak) peak = a;
+                }
+            }
+        }
+        CHECK(dly_fb_of(112) == 112 * 31000 / 127 && dly_fb_of(127) > 32768,
+              "FDBK: as before up to 112, past unity at the top (%d)", (int)dly_fb_of(127));
+        CHECK(late[0] < 1000u && late[1] < late[2] / 100u,
+              "FDBK 100, 112: gone after six seconds (%llu, %llu)", (unsigned long long)late[0], (unsigned long long)late[1]);
+        CHECK(late[2] > 100000u && peak < 30000,
+              "FDBK 127: still sounding after six seconds, self-oscillating (%llu), held under full scale (peak %d)",
+              (unsigned long long)late[2], (int)peak);
     }
 
     /* ---- MOD FX, CRUSH: off, the sound as it was; on, changed */

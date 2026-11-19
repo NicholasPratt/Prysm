@@ -550,7 +550,10 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 
 - **Chorus**: left and right swept against each other, for width. Full mix is half wet: the classic chorus.
 - **Delay**: **ping** sends the repeats from side to side. **Tone** darkens each repeat. Turning the time while it
-  plays bends the repeats, like tape.
+  plays bends the repeats, like tape. **Feedback** at the top of its range (past about 120) goes past unity: the
+  delay **self-oscillates**, building from whatever went in to a steady, saturating drone that holds after the notes
+  stop (turn FDBK down to let it die away). TONE sets its colour and TIME its pitch; turn TIME while it runs for the
+  classic tape-echo sirens.
 - **Sync**: with SYNC on, TIME picks a note length of the tempo instead of ms: 1/32, 1/16T, 1/16, 1/8T, 1/16D, 1/8,
   1/4T, 1/8D, 1/4, 1/2T, 1/4D, 1/2. The tempo is the arp's BPM, or the MIDI clock when CLOCK is MIDI, and the delay
   follows it as it changes. A length longer than the delay's 735 ms (slow tempos) is halved until it fits, so it

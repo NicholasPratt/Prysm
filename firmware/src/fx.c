@@ -130,6 +130,8 @@ static volatile fxp_t fxp;
 
 static uint32_t cho_w, cho_ph, dly_w, wow_ph, pre_w, rev_ph, dly_time_q8;
 static int32_t dly_lp[2];
+static int32_t dly_dc[2];                       /* the repeats' DC (~3 Hz), taken out past the old top: a gain over 1
+                                                 * would hold an offset */
 static struct { uint32_t ph, w; int32_t x[2][PH_N], y[2][PH_N], fb[2]; } mfx;   /* MOD FX's state */
 static struct { int32_t l, r; uint32_t left; } crs;   /* CRUSH: the frame held, the frames it still is */
 
@@ -149,7 +151,23 @@ static void fx_init(void)                       /* the plate's lines over rv_mem
 }
 
 static int32_t cho_mix_of(uint32_t v) { return PR_CURVE_Q15[v & 127u] / 2; }   /* full = half wet: the classic chorus */
-static int32_t dly_fb_of(uint32_t v) { return (int32_t)(v & 127u) * 31000 / 127; }   /* up to 0.95 */
+#define DLY_FB_KNEE 112u                        /* FDBK up to here: up to 0.83, as before; past it, on to 1.10 */
+#define DLY_FB_TOP 36045                        /* (1.10: the line runs away, self-oscillates, from about 121) */
+#define DLY_FB_SOFT 31000                       /* (past the old top, 0.95: the repeats through fb_soft) */
+static int32_t dly_fb_of(uint32_t v)
+{
+    int32_t k = (int32_t)DLY_FB_KNEE * 31000 / 127;
+    v &= 127u;
+    return v <= DLY_FB_KNEE ? (int32_t)v * 31000 / 127
+                            : k + ((int32_t)(v - DLY_FB_KNEE) * (DLY_FB_TOP - k)) / (int32_t)(127u - DLY_FB_KNEE);
+}
+static inline int32_t fb_soft(int32_t x)        /* x - x^3 / 3: unity when small, at most +-2/3 of full scale: a */
+{                                               /* runaway line settles to a steady drone, never a hard clip */
+    int64_t c;
+    x = clip15(x);
+    c = ((((int64_t)x * x) >> 15) * x) >> 15;
+    return x - (int32_t)(c / 3);
+}
 static uint32_t dly_time_of(uint32_t v) { return (441u + (v & 127u) * (DLY_N - 1100u) / 127u) << 8; }   /* 10 .. 735 ms */
 static uint32_t fx_tick_q8;                     /* the tempo (engine_render): a clock tick, frames Q8 (0: not yet) */
 static uint32_t dly_synced(uint32_t v)          /* SYNC: TIME's division in time, halved until the line holds it */
@@ -308,8 +326,15 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
             tr = rd_frac(dly_buf[1], DLY_N - 1u, dly_w, d);
             dly_lp[0] += ((tl - dly_lp[0]) * p.dly_tone) >> 15;   /* the repeats darken */
             dly_lp[1] += ((tr - dly_lp[1]) * p.dly_tone) >> 15;
-            fl = (dly_lp[0] * dfb) >> 15;
-            fr = (dly_lp[1] * dfb) >> 15;
+            dly_dc[0] += (dly_lp[0] - dly_dc[0]) >> 11;   /* (followed always: in step when FDBK crosses over) */
+            dly_dc[1] += (dly_lp[1] - dly_dc[1]) >> 11;
+            if (dfb > DLY_FB_SOFT) {          /* the top of FDBK: past unity, saturating (self-oscillation) */
+                fl = fb_soft(((dly_lp[0] - dly_dc[0]) * dfb) >> 15);
+                fr = fb_soft(((dly_lp[1] - dly_dc[1]) * dfb) >> 15);
+            } else {
+                fl = (dly_lp[0] * dfb) >> 15;
+                fr = (dly_lp[1] * dfb) >> 15;
+            }
             if (p.dly_ratio != 65536u) {      /* SHIFT: each repeat a step up or down */
                 fl = shift(&sh_dly[0], fl, p.dly_ratio);
                 fr = shift(&sh_dly[1], fr, p.dly_ratio);
