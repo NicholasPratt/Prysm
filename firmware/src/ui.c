@@ -105,7 +105,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_ETIME,                                 /* (an envelope's time: 1 ms .. 10 s, as the engine has it: PR_ENV_US) */
        K_HOME,                                  /* (SETUP: what HOME opens first, LIVE or the SCOPE) */
        K_MMDEST,                                /* (a matrix route's destination: the LFO's, and DLYTIME) */
-       K_EPART };                               /* (the SEQ page's POLY row: the part edited, A or B; not the sound) */
+       K_EPART,                                 /* (the SEQ page's POLY row: the part edited, A or B; not the sound) */
+       K_MSYNC };                               /* (a modulator in SYNC: its rate, sync_rate, x 2^(n/48); off: 0, 1) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -556,6 +557,7 @@ static uint8_t *part_byte(uint32_t off)         /* the sound's byte off, as the 
 /* a modulator's ratio when it is in MIX or RING: heard, so a pitch (semitones), not a ratio (on its own row, and on
  * the RATIO row) */
 static const prm_t PITCH_PRM[2] = {{"PIT1", 0, 48, K_MPIT}, {"PIT2", 1, 48, K_MPIT}};
+static const prm_t SYNC_PRM[2] = {{"SYNC1", 0, 192, K_MSYNC}, {"SYNC2", 1, 192, K_MSYNC}};   /* (in SYNC: its rate) */
 static const prm_t *prm_alt(uint32_t pg, uint32_t r, uint32_t i)   /* knob i's other parameter (0: none) */
 {
     const prm_t *p = &PAGES[pg].rows[r].p[i];
@@ -563,12 +565,22 @@ static const prm_t *prm_alt(uint32_t pg, uint32_t r, uint32_t i)   /* knob i's o
     if (!PAGES[pg].osc || PAGES[pg].osc == G || p->kind != K_RATIO) return 0;
     return p->off == OO(ratio[1]) ? &PITCH_PRM[0] : p->off == OO(ratio[2]) ? &PITCH_PRM[1] : 0;   /* (the carrier: */
 }                                               /*  none) */
+static const prm_t *prm_alt2(uint32_t pg, uint32_t r, uint32_t i)  /* its third (a modulator's SYNC rate; 0: none) */
+{
+    const prm_t *a = prm_alt(pg, r, i);
+    return a >= PITCH_PRM && a < PITCH_PRM + 2 ? &SYNC_PRM[a - PITCH_PRM] : 0;
+}
 static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's parameter, as the sound is now */
 {
     const prm_t *a = prm_alt(pg, r, i);
     if (a && a >= SEND_PRM && a < SEND_PRM + 4)
         return edit.vmode == VM_DUAL ? a : &PAGES[pg].rows[r].p[i];
-    return a && edit.osc[PAGES[pg].osc - 1u].mode[a - PITCH_PRM] != MODE_FM ? a : &PAGES[pg].rows[r].p[i];
+    if (a) {                                    /* (MIX, RING: the pitch; SYNC: the rate; FM: the ratio) */
+        uint32_t m = edit.osc[PAGES[pg].osc - 1u].mode[a - PITCH_PRM];
+        if (m == MODE_SYNC) return &SYNC_PRM[a - PITCH_PRM];
+        if (m != MODE_FM) return a;
+    }
+    return &PAGES[pg].rows[r].p[i];
 }
 
 static const char *prm_label(const prm_t *p)     /* its label (the noise's COLOUR: what it is for the type) */
@@ -626,7 +638,9 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_EPART: return &ui_part;
     case K_LQUANT: return (uint8_t *)&lp_quant;
     case K_LPLAY: lp_play_ui = lp.run; return &lp_play_ui;
-    case K_MPIT: return &edit.mpitch[PAGES[pg].osc == 2u][p->off & 1u];   /* (the OSC pages: their oscillator's) */
+    case K_MSYNC: return &edit.sync_rate[PAGES[pg].osc == 2u][p->off & 1u];
+    case K_MPIT: return &edit.mpitch[PAGES[pg].osc == 2u][p->off & 1u];   /* (the OSC pages: their */
+                                                /* oscillator's) */
     case K_MFINE: return &edit.mfine[PAGES[pg].osc == 2u][p->off & 1u];
     default: break;
     }
@@ -733,6 +747,16 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_RATIO: put(put(s, "x"), PR_RATIO_NAME[*v < PR_RATIOS ? *v : 1u]); break;
     case K_MODE: put(s, MODE_NAME[*v < MODE_N ? *v : 0u]); break;
     case K_SEMI: case K_MPIT: put(snum(s, (int32_t)*v - 24), "st"); break;
+    case K_MSYNC: {                             /* x1.00 .. x9.99, x10.0 .. x16.0 */
+        uint32_t r = *v <= 192u ? *v : 96u;    /* (2^(r/48): PR_PITCH16_Q16 a 1/192 octave a step) */
+        uint32_t h = (uint32_t)((((uint64_t)PR_PITCH16_Q16[192u + (r % 48u) * 4u] << (r / 48u)) * 100u + 32768u) >> 16),
+                 w = h / 100u;
+        char *e = num(put(s, "x"), w);
+        e = put(e, ".");
+        if (w < 10u) { e = num(e, h / 10u % 10u); num(e, h % 10u); }
+        else num(e, (h % 100u + 5u) / 10u > 9u ? 9u : (h % 100u + 5u) / 10u);
+        break;
+    }
     case K_LFOW: put(s, LFO_NAME[*v < LFO_N ? *v : 0u]); break;
     case K_LDEST: put(s, DEST_NAME[*v < DEST_N ? *v : 0u]); break;
     case K_DEST: case K_MMDEST: put(s, DEST_NAME[*v < DEST_N || *v == DEST_DLYTIME ? *v : 0u]); break;
@@ -996,9 +1020,11 @@ static void gfx_osc(uint32_t o, uint32_t lit)   /* the sketch: carrier <- mod 1 
                 cv_pset(mx - 5 + (int32_t)j, y - SW[j] + 1, c);
             }
         else {
-            cv_circle(mx, y, 6, c, 0);          /* ring: a times sign; mix: a plus */
+            cv_circle(mx, y, 6, c, 0);          /* ring: a times sign; mix: a plus; sync: a reset ramp */
             if (mode == MODE_RING) { cv_line(mx - 3, y - 3, mx + 3, y + 3, c); cv_line(mx - 3, y + 3, mx + 3, y - 3, c); }
-            else { cv_line(mx - 3, y, mx + 3, y, c); cv_line(mx, y - 3, mx, y + 3, c); }
+            else if (mode == MODE_SYNC) {       /* sync: a ramp cut short and started again */
+                cv_line(mx - 4, y + 3, mx, y - 3, c); cv_line(mx, y - 3, mx, y + 3, c); cv_line(mx, y + 3, mx + 4, y - 3, c);
+            } else { cv_line(mx - 3, y, mx + 3, y, c); cv_line(mx, y - 3, mx, y + 3, c); }
         }
     }
 }

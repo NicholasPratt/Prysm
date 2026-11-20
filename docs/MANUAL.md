@@ -136,14 +136,14 @@ middle of their knob.
 Each oscillator is a chain: **mod 2 -> mod 1 -> carrier**. The carrier is what you hear; mod 1 changes the carrier,
 and mod 2 changes mod 1. The picture draws the three as boxes with the waves they are playing, and the arrows
 between them: an arrow gets thicker with more modulation, and the symbol on it is its mode
-(**~** FM, **x** ring, **+** mix).
+(**~** FM, **x** ring, **+** mix, a cut-off ramp for sync).
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | CAR | carrier bank | carrier wave | carrier ratio | the oscillator's level |
-| MOD1 | mod 1 bank | mod 1 wave | mod 1 ratio (PIT1 in MIX / RING) | mod 1 amount |
-| ENV1 | mod 1 attack | mod 1 release | mod 1's mode: FM, RING, MIX | mod 1 fine |
-| MOD2 | mod 2 bank | mod 2 wave | mod 2 ratio (PIT2 in MIX / RING) | mod 2 amount |
+| MOD1 | mod 1 bank | mod 1 wave | mod 1 ratio (PIT1 in MIX / RING, SYNC1 in SYNC) | mod 1 amount |
+| ENV1 | mod 1 attack | mod 1 release | mod 1's mode: FM, RING, MIX, SYNC | mod 1 fine |
+| MOD2 | mod 2 bank | mod 2 wave | mod 2 ratio (PIT2 in MIX / RING, SYNC2 in SYNC) | mod 2 amount |
 | ENV2 | mod 2 attack | mod 2 release | mod 2's mode | mod 2 fine |
 | RATIO | carrier ratio | mod 1 ratio (PIT1) | mod 2 ratio (PIT2) | fine tune (the whole oscillator) |
 
@@ -172,10 +172,24 @@ oscillator by up to +-50 cents.
 - **FM** (phase modulation): bright, metallic, bell-like, the DX7 sound. More amount, more harmonics.
 - **RING**: multiplies; at full amount you hear the sum and difference of the two pitches, not the carrier itself.
 - **MIX**: adds the modulator's wave to the other one, a layer.
+- **SYNC**: classic oscillator sync. The modulator becomes a silent *master* running at the note's pitch, and the
+  wave it points at becomes the *slave*: it runs faster and restarts its cycle every time the master starts a new one.
+  With mod 1 in SYNC the carrier is the slave, so all you hear is the synced carrier (mod 1's own wave is never
+  heard): the note's pitch, with the carrier's faster wave cut short inside each cycle, the tearing, vocal sync lead.
+  Mod 2 then modulates the synced carrier directly (in its own mode, FM, RING or MIX): sync and FM together. With
+  mod 2 in SYNC, mod 1 is its slave, and the synced mod 1 acts on the carrier in mod 1's mode.
+
+**Sync rate.** In SYNC the RATIO knob becomes **SYNC1** (or **SYNC2**): how fast the slave runs against its master,
+**x1.00 .. x16.0** in quarter-semitone steps (x4.00 to start); the modulator's FINE moves it in between. The pitch
+you hear stays the note's; the rate changes the timbre. **AMT** sweeps the rate up with the modulator's envelope (its
+A and R on the ENV row): up to 3 octaves at full, the classic sync sweep on every note; 0 leaves the rate where SYNC1
+puts it. An LFO or a mod envelope on **M1PITCH** (**M2PITCH** for mod 2) moves the rate too, or turn SYNC1 while you
+play. A saw or a square (BASIC) on the carrier gives the familiar sound; any wave can be synced.
 
 **Pitch in MIX and RING.** A modulator in MIX or RING is heard, not just felt, so a ratio is the wrong tool: its
 RATIO knob (on its row and on the RATIO row) becomes **PIT1** (or **PIT2**), the modulator's pitch against the carrier, -24 .. +24 semitones. Switch
-back to FM and the ratio is there again, as you left it (each mode keeps its own setting). Each modulator's **FINE**
+back to FM and the ratio is there again, as you left it (FM, MIX / RING and SYNC each keep their own setting). Each
+modulator's **FINE**
 (ENV1, ENV2 rows) detunes it by up to +-50 cents, in any mode: in MIX a chorused layer, in FM a slowly beating,
 inharmonic shimmer. The pitch is a modulation destination too (**M1PITCH**, **M2PITCH**, below).
 

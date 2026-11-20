@@ -35,8 +35,8 @@
 #define VOICE_GAIN 8000                         /* Q15: four voices at full level cannot clip (4 x 8000 < 32767) */
 static inline int32_t clip15(int32_t x) { return x > 32767 ? 32767 : x < -32767 ? -32767 : x; }   /* to full scale */
 
-enum { MODE_FM, MODE_RING, MODE_MIX, MODE_N };
-static const char *const MODE_NAME[MODE_N] = {"FM", "RING", "MIX"};
+enum { MODE_FM, MODE_RING, MODE_MIX, MODE_SYNC, MODE_N };   /* SYNC: the modulator a silent master, the wave it */
+static const char *const MODE_NAME[MODE_N] = {"FM", "RING", "MIX", "SYNC"};   /* points at hard-synced to it */
 enum { LFO_SINE, LFO_TRI, LFO_SAWUP, LFO_SAWDN, LFO_SQR, LFO_SH, LFO_N };
 static const char *const LFO_NAME[LFO_N] = {"SINE", "TRI", "SAW UP", "SAW DN", "SQUARE", "S&H"};
 enum { DEST_OFF, DEST_PITCH, DEST_PITCH2, DEST_WAVE1, DEST_WAVE2, DEST_MWAVE1, DEST_MWAVE2, DEST_MOD1, DEST_MOD2,
@@ -228,7 +228,9 @@ typedef struct {
     uint8_t ppan[2];                            /* each part's place: 0 left .. 64 centre .. 127 right (SINGLE: */
                                                 /*  neither) */
     uint8_t psend[2][2];                        /* (format 21) DUAL: each part's sends, [part][0 delay, 1 reverb]: */
-} patch_t;                                      /*  127 = all of it, as the other modes (the effects' MIX: the return) */
+                                                /*  127 = all of it, as the other modes (the effects' MIX: the return) */
+    uint8_t sync_rate[NOSC][2];                 /* (format 22) mod 1, mod 2 in SYNC (RATIO then): the slave's speed, */
+} patch_t;                                      /*  2^(n/48) times its master's: 0..192, x1 .. x16 (96: x4) */
 /* the fields a part has its own of: part B's in pb, in this order */
 #define PF(f) ((uint8_t)__builtin_offsetof(patch_t, f))
 static const uint8_t PART_OFF[PART_N] = {
@@ -433,7 +435,7 @@ static const patch_t PATCH_INIT = {
     .lfo2_wave = LFO_TRI, .lfo2_rate = 60, .lfo2_sync = L2SYNC_OFF, .lfo2_dest = DEST_OFF, .lfo2_amt = 64,
     .menv2_a = 0, .menv2_d = 60, .menv2_s = 0, .menv2_r = 50, .menv2_loop = 0,   /* no amount yet */
     .menv2_dest = DEST_PITCH, .menv2_amt = 64,
-    .mpitch = {{24, 24}, {24, 24}}, .mfine = {{64, 64}, {64, 64}},
+    .mpitch = {{24, 24}, {24, 24}}, .mfine = {{64, 64}, {64, 64}}, .sync_rate = {{96, 96}, {96, 96}},
     .vca = 0,
     .noise_type = NOISE_WHITE, .noise_col = 100, .noise_lvl = 0, .route = {ROUTE_FILTER, ROUTE_FILTER, ROUTE_FILTER},
     .split = 0, .split_oct = {2, 2},
@@ -708,6 +710,14 @@ static inline int32_t modulated(uint32_t mode, const src_t *t, uint32_t ph, int3
     return clip15(s);
 }
 
+/* SYNC: the slave's phase when its master's cycle has just begun again at nm (nm < im: so far into the new cycle):
+ * as far into its own, at its speed (between frames: no jitter as the rate sweeps). (A 64-bit division: once a
+ * master's cycle) */
+static inline uint32_t sync_ph(uint32_t nm, uint32_t im, uint32_t is)
+{
+    return im ? (uint32_t)(((uint64_t)nm * is) / im) : 0u;
+}
+
 /* an oscillator's block: operator 3 into 2 into 1 (m2, m1: FM, RING or MIX), times lvl, added into dst; ph its phases,
  * moved on by inc a frame. e1, e2: the modulators' levels, d1, d2 their steps a frame; two: operator 3 silent. (Its
  * own function, not inlined: engine_render's filter keeps its registers) */
@@ -718,7 +728,25 @@ static __attribute__((noinline)) void osc_block(int32_t *dst, const src_t *t, ui
     uint32_t i, p0 = ph[0], p1 = ph[1], p2 = ph[2], i0 = inc[0], i1 = inc[1], i2 = inc[2];
     /* fm: the usual, plain FM with the waves still (no LFO on their position): a loop with nothing to choose a frame */
     int fm = m1 == MODE_FM && !t[0].f && !t[1].f;
-    if (two) {
+    if (m1 == MODE_SYNC || m2 == MODE_SYNC) {   /* SYNC: the master silent, its slave restarted as its cycle */
+        for (i = 0; i < BLK; i++, e1 += d1, e2 += d2) {   /* restarts. Mod 1's: the carrier the slave (mod 2 then */
+            uint32_t n0 = p0 + i0, n1 = p1 + i1, n2 = p2 + i2, w1;   /* modulates it); mod 2's: mod 1 (heard as ever) */
+            int32_t c;
+            if (m1 != MODE_SYNC) {              /* mod 2's alone */
+                int32_t y1 = (src_at(&t[1], p1) * e1) >> 15;
+                c = modulated(m1, &t[0], p0, y1, e1);
+            } else if (m2 != MODE_SYNC) {        /* mod 1's alone */
+                int32_t y2 = two ? 0 : (src_at(&t[2], p2) * e2) >> 15;
+                c = modulated(m2, &t[0], p0, y2, two ? 0 : e2);
+            } else                              /* both: mod 2 mod 1's master, mod 1 the carrier's */
+                c = src_at(&t[0], p0);
+            dst[i] += (c * lvl) >> 15;
+            w1 = n1 < p1;                       /* (mod 1's cycle begun again: it wrapped, or it is reset) */
+            if (m2 == MODE_SYNC && n2 < p2) { n1 = sync_ph(n2, i2, i1); w1 = 1u; }
+            if (m1 == MODE_SYNC && w1) n0 = sync_ph(n1 < i1 ? n1 : 0u, i1, i0);
+            p0 = n0; p1 = n1; p2 = n2;
+        }
+    } else if (two) {
         if (fm)
             for (i = 0; i < BLK; i++, e1 += d1) {
                 int32_t y1 = (wave_at(t[1].a, p1) * e1) >> 15;
@@ -2422,9 +2450,8 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                 src_t t[NOP];
                 uint32_t p0 = voice[v].ph[o][0], p1 = voice[v].ph[o][1], p2 = voice[v].ph[o][2];
                 int32_t g16 = voice[v].glide_q8 >> 8;   /* (+-48 semitones: the LFO, the envelope, glide) */
-                uint32_t i0 = rate_moved(voice[v].inc[o][0], m.pitch16[o] + g16);
-                uint32_t i1 = rate_moved(voice[v].inc[o][1], m.pitch16[o] + m.mpitch16 + m.mp16[0] + g16);
-                uint32_t i2 = rate_moved(voice[v].inc[o][2], m.pitch16[o] + m.mpitch16 + m.mp16[1] + g16);
+                int32_t q0 = m.pitch16[o] + g16, q1 = q0 + m.mpitch16 + m.mp16[0], q2 = q0 + m.mpitch16 + m.mp16[1];
+                uint32_t i0, i1, i2;
                 uint32_t m1 = eg.mode[o][0], m2 = eg.mode[o][1];
                 int32_t lvl = eg.lvl[o], am1, am2;
                 if (l2d == DEST_LVL1 + o)   /* LFO 2 on the MIX page's level */
@@ -2448,6 +2475,17 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                                                      eg.m_rel[o][1]) * am2) >> 24);
                 e1 = voice[v].mod_q15[o][0];
                 e2 = voice[v].mod_q15[o][1];
+                if (m2 == MODE_SYNC) {          /* SYNC: the master at its slave's pitch, the slave moved from it by */
+                    q2 = m1 == MODE_SYNC ? q0 : q1;   /* the modulator's own pitch (M1PITCH, M2PITCH) and its level, */
+                    q1 = q2 + m.mp16[1] + ((e2_to * 576) >> 15);   /* AMT on its envelope: up 3 octaves at full */
+                }
+                if (m1 == MODE_SYNC) {
+                    if (m2 != MODE_SYNC) q1 = q0;
+                    q0 = q1 + m.mp16[0] + ((e1_to * 576) >> 15);
+                }
+                i0 = rate_moved(voice[v].inc[o][0], q0);
+                i1 = rate_moved(voice[v].inc[o][1], q1);
+                i2 = rate_moved(voice[v].inc[o][2], q2);
                 d1 = (e1_to - e1) >> BLK_SHIFT;
                 d2 = (e2_to - e2) >> BLK_SHIFT;
                 voice[v].mod_q15[o][0] = e1_to;
@@ -2737,6 +2775,12 @@ static uint32_t pitch_q16(uint32_t o)           /* the oscillator's tuning: fine
     return f;
 }
 
+static uint32_t sync_inc(uint32_t master, uint32_t rate, uint32_t fine)   /* SYNC: the slave's step */
+{
+    uint64_t inc = rate_moved(master, (int32_t)(rate <= 192u ? rate : 96u) * 4);   /* (x 2^(rate/48)) */
+    inc = (inc * PR_FINE_Q16[fine & 127u]) >> 16;
+    return inc > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)inc;
+}
 static void voice_tune(uint32_t v)              /* the operators' phase steps for the voice's note; its part: SINGLE */
 {                                               /* A (on the split's side: that oscillator alone, that side's octave), */
                                                 /* SPLIT the side's, LAYER the voice's place, DUAL as given */
@@ -2752,16 +2796,26 @@ static void voice_tune(uint32_t v)              /* the operators' phase steps fo
     base = INC_C9[(uint32_t)nt % 12u] >> (10u - (uint32_t)nt / 12u);
     for (o = 0; o < NOSC; o++) {
         uint64_t f = ((uint64_t)base * pitch_q16(o)) >> 16;
+        uint32_t m1 = patch.osc[o].mode[0], m2 = patch.osc[o].mode[1];
+        volatile uint32_t *n = voice[v].inc[o];
         for (k = 0; k < NOP; k++) {
             uint64_t inc;
-            if (k && patch.osc[o].mode[k - 1u] != MODE_FM) {   /* a modulator heard (MIX, RING): its pitch */
-                uint32_t sm = patch.mpitch[o][k - 1u];
+            if (k && patch.osc[o].mode[k - 1u] != MODE_FM && patch.osc[o].mode[k - 1u] != MODE_SYNC) {
+                uint32_t sm = patch.mpitch[o][k - 1u];   /* a modulator heard (MIX, RING): its pitch */
                 inc = (f * PR_SEMI_Q16[sm <= 48u ? sm : 24u]) >> 16;
             } else
                 inc = (f * PR_RATIO_Q8[patch.osc[o].ratio[k] < PR_RATIOS ? patch.osc[o].ratio[k] : 1u]) >> 8;
             if (k)
                 inc = (inc * PR_FINE_Q16[patch.mfine[o][k - 1u] & 127u]) >> 16;
-            voice[v].inc[o][k] = inc > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)inc;   /* at most Nyquist */
+            n[k] = inc > 0x7FFFFFFFu ? 0x7FFFFFFFu : (uint32_t)inc;   /* at most Nyquist */
+        }
+        if (m2 == MODE_SYNC) {                  /* SYNC: the master at its slave's pitch (the slave's as it would be), */
+            n[2] = m1 == MODE_SYNC ? n[0] : n[1];   /* the slave its rate times that, and the modulator's FINE */
+            n[1] = sync_inc(n[2], patch.sync_rate[o][1], patch.mfine[o][1]);
+        }
+        if (m1 == MODE_SYNC) {
+            if (m2 != MODE_SYNC) n[1] = n[0];
+            n[0] = sync_inc(n[1], patch.sync_rate[o][0], patch.mfine[o][0]);
         }
     }
     voice[v].n_inc = rate_moved(base, ((int32_t)((voice[v].part ? patch.pb[PB_NOISE_COL] : patch.noise_col) & 127u) - 64) *

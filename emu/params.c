@@ -2,7 +2,7 @@
 /* The sound's parameters, from the pages' own tables (ui.c): what an editor shows and sets, with the FM-1's names,
  * ranges and values (fmt). Included after prysm.c by the browser's FM-1 (emu/exports.c) and the plugin
  * (plugin/core/core.c). Every knob of the sound's pages: not SETUP's, the sequencer's steps or its cursor; a knob
- * with another parameter (RATIO's MOD1 / MOD2: PIT1 / PIT2 in MIX or RING) has both, the other just after it. A byte
+ * with others (RATIO's MOD1 / MOD2: PIT1 / PIT2 in MIX or RING, SYNC1 / SYNC2 in SYNC) has them all, the other just after it. A byte
  * on two pages (the noise's level and route: NOISE and MIX) is the first one's: a parameter is its byte (the plugin's
  * id). */
 static const prm_t *prm_get(uint32_t i, uint32_t *pg_, uint32_t *row_, uint32_t *k_, uint32_t *off_)
@@ -16,8 +16,8 @@ static const prm_t *prm_get(uint32_t i, uint32_t *pg_, uint32_t *row_, uint32_t 
         for (pg = 0; pg < PG_N && !got; pg++)
             for (r = 0; PAGES[pg].osc != G && r < PAGES[pg].n && !got; r++)
                 for (k = 0; k < 4u && !got; k++)
-                    for (a = 0; a < 2u; a++) {
-                        const prm_t *p = a ? prm_alt(pg, r, k) : &PAGES[pg].rows[r].p[k];
+                    for (a = 0; a < 3u; a++) {
+                        const prm_t *p = a == 2u ? prm_alt2(pg, r, k) : a ? prm_alt(pg, r, k) : &PAGES[pg].rows[r].p[k];
                         const uint8_t *at = !p || p->kind == K_NONE ? 0 : pval(pg, p);
                         if (!at || at < (const uint8_t *)&edit || at >= (const uint8_t *)&edit + sizeof edit)
                             continue;           /* (not a byte of the sound: a cursor, the patterns) */

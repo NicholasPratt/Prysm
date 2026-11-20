@@ -18,7 +18,8 @@ typedef __typeof__(((patch_t *)0)->osc[0]) osc_t;
 typedef struct {
     char name[TONE_NAME];                       /* (a user tone: name[0] 0 = empty) */
     osc_t osc;
-    uint8_t mpitch[2], mfine[2];                /* (the modulators' pitch in MIX / RING, their fine) */
+    uint8_t mpitch[2], mfine[2];                /* (the modulators' pitch in MIX / RING, their fine; in SYNC: its */
+                                                /*  rate, sync_rate) */
     uint8_t lvl;                                /* the oscillator's level (MIX page) */
     uint8_t semi, fine;                         /* (osc 2's SEMI, FINE: part B's; part A's 24, 64) */
     uint8_t route;                              /* FILTER / DIRECT */
@@ -45,7 +46,10 @@ static void tone_get(const patch_t *p, uint32_t part, tone_t *t)   /* part (0 A,
 {
     uint32_t o = part & 1u, i, k;
     t->osc = p->osc[o];
-    for (k = 0; k < 2u; k++) { t->mpitch[k] = p->mpitch[o][k]; t->mfine[k] = p->mfine[o][k]; }
+    for (k = 0; k < 2u; k++) {
+        t->mpitch[k] = p->osc[o].mode[k] == MODE_SYNC ? p->sync_rate[o][k] : p->mpitch[o][k];
+        t->mfine[k] = p->mfine[o][k];
+    }
     t->lvl = o ? p->lvl2 : p->lvl1;
     t->semi = o ? p->semi2 : 24u;
     t->fine = o ? p->fine2 : 64u;
@@ -60,7 +64,11 @@ static void tone_put(patch_t *p, uint32_t part, const tone_t *t)   /* a tone int
 {
     uint32_t o = part & 1u, i, k;
     p->osc[o] = t->osc;
-    for (k = 0; k < 2u; k++) { p->mpitch[o][k] = t->mpitch[k]; p->mfine[o][k] = t->mfine[k]; }
+    for (k = 0; k < 2u; k++) {
+        if (t->osc.mode[k] == MODE_SYNC) p->sync_rate[o][k] = t->mpitch[k];
+        else p->mpitch[o][k] = t->mpitch[k];
+        p->mfine[o][k] = t->mfine[k];
+    }
     if (o) { p->lvl2 = t->lvl; p->semi2 = t->semi; p->fine2 = t->fine; } else p->lvl1 = t->lvl;
     p->route[o] = t->route;
     p->trn_type[o] = t->trn[0]; p->trn_lvl[o] = t->trn[1]; p->trn_tune[o] = t->trn[2]; p->trn_dec[o] = t->trn[3];

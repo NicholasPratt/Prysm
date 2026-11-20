@@ -170,6 +170,71 @@ int main(void)
         CHECK(!eg.dly_mod && l2 == 0, "LFO 2 -> DLYTIME: fx_render's own, not counted twice (%d)", (int)l2);
     }
 
+    /* ---- SYNC: the carrier hard-synced to mod 1 (a silent master at the note's pitch): the note's period kept
+     * whatever the rate (the timbre moves); the same pitches in MIX are not periodic at the note. Mod 1's own wave
+     * not heard; its AMT sweeps the rate up (3 octaves at full) */
+    {
+        static int32_t w[6][8192];
+        static const struct { uint8_t md, rate, amt, mwave; } C[6] = {
+            {MODE_SYNC, 72, 0, 72}, {MODE_SYNC, 124, 0, 72},   /* x2.83, x5.99: neither a whole number */
+            {MODE_MIX, 18, 127, 72}, {MODE_MIX, 31, 127, 72},  /* (MIX: those as pitches, +-st from the note) */
+            {MODE_SYNC, 124, 0, 0},                             /* mod 1 a sine, not a saw */
+            {MODE_SYNC, 0, 127, 72}};                           /* x1, AMT full: x8 */
+        double c[6];
+        uint32_t q, j, n;
+        for (q = 0; q < 6u; q++) {
+            fresh();
+            edit.osc[1].level = 0; edit.cho_mix = 0; edit.dly_mix = 0; edit.rev_mix = 0;
+            edit.cut = 127; edit.res = 0; edit.fenv = 64; edit.amp_a = 0; edit.amp_s = 127;
+            edit.osc[0].bank[0] = 0; edit.osc[0].pos[0] = 72;   /* (the carrier a saw: the classic sync sound) */
+            edit.osc[0].mode[0] = C[q].md; edit.osc[0].amt[0] = C[q].amt; edit.osc[0].att[0] = 0;
+            edit.osc[0].amt[1] = 0;
+            edit.osc[0].bank[1] = 0; edit.osc[0].pos[1] = C[q].mwave;
+            if (C[q].md == MODE_SYNC) edit.sync_rate[0][0] = C[q].rate; else edit.mpitch[0][0] = C[q].rate;
+            engine_set(&edit);
+            engine_note_on(57);                  /* A3: 220 Hz, 200.45 frames a cycle */
+            run0(8192);
+            for (n = 0; n < 8192u; n += BLK) {
+                memset(buf, 0, sizeof buf);
+                engine_render(buf, BLK);
+                for (j = 0; j < BLK; j++) w[q][n + j] = buf[2u * j];
+            }
+            engine_note_off(57);
+            run0(30000);
+            {                                   /* the correlation one cycle apart (44100 / 220 frames: between two, */
+                double sxy = 0, sxx = 0, syy = 0, L = 44100.0 / 220.0;   /* interpolated) */
+                for (j = 0; j + 202u < 8192u; j++) {
+                    double at = j + L, f = at - (double)(uint32_t)at;
+                    double y = w[q][(uint32_t)at] + (w[q][(uint32_t)at + 1u] - w[q][(uint32_t)at]) * f;
+                    sxy += (double)w[q][j] * y; sxx += (double)w[q][j] * w[q][j]; syy += y * y;
+                }
+                c[q] = sxx > 0 && syy > 0 ? sxy / __builtin_sqrt(sxx * syy) : 0;
+            }
+        }
+        {
+            uint32_t same = 1, d58 = 0;
+            for (j = 0; j < 8192u; j++) same &= w[1][j] == w[4][j];
+            for (j = 0; j < 8192u; j++) d58 += w[0][j] != w[1][j];
+            CHECK(MODE_N == 4u && !strcmp(MODE_NAME[MODE_SYNC], "SYNC"), "MODE: FM, RING, MIX, SYNC");
+            CHECK(c[0] > 0.95 && c[1] > 0.95 && d58 > 4000u, "SYNC x2.83, x5.99: the carrier at the note's period "
+                  "(%.3f, %.3f), unlike each other", c[0], c[1]);
+            CHECK(c[2] < 0.9 && c[3] < 0.9, "... MIX at those pitches: not (%.3f, %.3f)", c[2], c[3]);
+            CHECK(same, "... the master not heard: mod 1 a sine or a saw, the same sound");
+            CHECK(c[5] > 0.95, "... AMT full: the rate up 3 octaves, at the note's period still (%.3f)", c[5]);
+        }
+        fresh();
+        CHECK(edit.sync_rate[0][0] == 96u && edit.sync_rate[1][1] == 96u, "SYNC's rate: x4 in a new sound");
+        {                                       /* a format 21 sound from SYNC's first builds: its rate was its PIT */
+            static patch_t o, q;
+            o = PATCH_INIT;
+            o.osc[0].mode[0] = MODE_SYNC; o.mpitch[0][0] = 12;   /* (x2: 12 semitones) */
+            o.osc[1].mode[1] = MODE_MIX; o.mpitch[1][1] = 30;
+            CHECK(patch_from(&q, (const uint8_t *)&o, PATCH_V21_SIZE, 21u) == 0 && q.sync_rate[0][0] == 48u &&
+                  q.sync_rate[1][1] == 96u && q.mpitch[1][1] == 30u, "format 21: SYNC's rate from its PIT (x2), the "
+                  "others x4");
+        }
+    }
+
     /* ---- the delay's FDBK at the top: it self-oscillates, held (no hard clip); lower down, the repeats die away */
     {
         static const uint8_t FB[3] = {100, 112, 127};
