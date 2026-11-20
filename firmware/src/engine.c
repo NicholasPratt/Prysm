@@ -1117,6 +1117,17 @@ static int32_t menv_step(const volatile eng_t *x, env_t *e, uint32_t gate, uint3
     return l;
 }
 
+static int32_t mod_env(env_t *e, uint32_t gate, uint32_t att, uint32_t rel, uint32_t loop)   /* a modulator's */
+{                                               /* envelope: AR (held at the top); loop (SYNC): attack, decay (rel) to */
+    int32_t l;                                  /* nothing, over and over as long as the voice sounds (its release too) */
+    if (!loop) return env_step(e, gate, att, 0, ENV_FULL, rel);
+    if (e->st != 1u && e->st != 2u) e->st = 1;  /* (SYNC turned on in a release: going again) */
+    l = env_step(e, 1, att, rel, 0, rel);
+    if (e->st == 2u && l < ENV_FULL / 128)
+        e->st = 1;
+    return l;
+}
+
 #include "fx.c"                                 /* the effects: chorus, delay, reverb */
 
 static uint32_t part_of(uint32_t note)          /* the split's side a note is on: 0 below (osc 1), 1 from it (osc 2) */
@@ -2469,17 +2480,17 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                     am1 = (am1 * m.vmod) >> 15;
                     am2 = (am2 * m.vmod) >> 15;
                 }
-                e1_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][0], hold, eg.m_att[o][0], 0, ENV_FULL,
-                                                     eg.m_rel[o][0]) * am1) >> 24);
-                e2_to = (int32_t)(((int64_t)env_step(&voice[v].mod[o][1], hold, eg.m_att[o][1], 0, ENV_FULL,
-                                                     eg.m_rel[o][1]) * am2) >> 24);
+                e1_to = (int32_t)(((int64_t)mod_env(&voice[v].mod[o][0], hold, eg.m_att[o][0], eg.m_rel[o][0],
+                                                    m1 == MODE_SYNC) * am1) >> 24);
+                e2_to = (int32_t)(((int64_t)mod_env(&voice[v].mod[o][1], hold, eg.m_att[o][1], eg.m_rel[o][1],
+                                                    m2 == MODE_SYNC) * am2) >> 24);
                 e1 = voice[v].mod_q15[o][0];
                 e2 = voice[v].mod_q15[o][1];
                 if (m2 == MODE_SYNC) {          /* SYNC: the master at its slave's pitch, the slave moved from it by */
                     q2 = m1 == MODE_SYNC ? q0 : q1;   /* the modulator's own pitch (M1PITCH, M2PITCH) and its level, */
-                    q1 = q2 + m.mp16[1] + ((e2_to * 576) >> 15);   /* AMT on its envelope: up 3 octaves at full */
+                    q1 = q2 + m.mp16[1] + ((e2_to * 576) >> 15);   /* AMT on its envelope (an AD, looping): up 3 */
                 }
-                if (m1 == MODE_SYNC) {
+                if (m1 == MODE_SYNC) {          /* octaves at full */
                     if (m2 != MODE_SYNC) q1 = q0;
                     q0 = q1 + m.mp16[0] + ((e1_to * 576) >> 15);
                 }

@@ -583,8 +583,11 @@ static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's p
     return &PAGES[pg].rows[r].p[i];
 }
 
-static const char *prm_label(const prm_t *p)     /* its label (the noise's COLOUR: what it is for the type) */
-{
+static const char *prm_label(uint32_t pg, const prm_t *p)   /* its label (the noise's COLOUR: what it is for the */
+{                                               /* type; a modulator's R in SYNC: D, its looping envelope's decay) */
+    if (PAGES[pg].osc && PAGES[pg].osc != G && (p == &OSC_ROWS[OR_M1ENV].p[1] || p == &OSC_ROWS[OR_M2ENV].p[1]) &&
+        edit.osc[PAGES[pg].osc - 1u].mode[p == &OSC_ROWS[OR_M2ENV].p[1]] == MODE_SYNC)
+        return "D";
     if (p->kind == K_NCOL)
         return NOISE_RATED(pv->noise_type) ? "RATE" : pv->noise_type == NOISE_CRACKLE ? "DENSE" : p->label;
     return p->label;
@@ -991,15 +994,25 @@ static void gfx_osc(uint32_t o, uint32_t lit)   /* the sketch: carrier <- mod 1 
         }
         put(s, PW_WAVE_NAME[edit.osc[o].bank[k] < PW_BANKS ? edit.osc[o].bank[k] : 0u][wave_index(edit.osc[o].pos[k])]);
         cv_text(x0 + (BOX_W - text_w(&FONT_S, s)) / 2, BOX_Y + BOX_H + 3, &FONT_S, s, lit & LITS[k] ? C_BRIGHT : C_MID);
-        if (k) {                                /* the modulator's AR under it: attack up, hold, release down */
+        if (k) {                                /* the modulator's AR under it: attack up, hold, release down; in */
             int32_t aw = 1 + (int32_t)edit.osc[o].att[k - 1u] * 18 / 127, rw = 1 + (int32_t)edit.osc[o].rel[k - 1u] * 18 / 127;
             int32_t xa = x0 + 4, xh = xa + aw, xr = x0 + BOX_W - 4 - rw, yb = G_H - 2, yt = BOX_Y + BOX_H + 23;
-            uint32_t on = lit & LIT_AR && lit & LITS[k];   /* (a modulator's ENV row: its AR alone) */
-            uint16_t ac = on ? C_BRIGHT : C_FAINT;
-            if (on) { cv_under(xa, yb, xh, yt, yb); cv_under(xh, yt, xr, yt, yb); cv_under(xr, yt, xr + rw, yb, yb); }
-            cv_line(xa, yb, xh, yt, ac);
-            cv_line(xh, yt, xr, yt, ac);
-            cv_line(xr, yt, xr + rw, yb, ac);
+            uint32_t on = lit & LIT_AR && lit & LITS[k];   /* (a modulator's ENV row: its AR alone) SYNC: an AD, */
+            uint16_t ac = on ? C_BRIGHT : C_FAINT;  /* twice (it loops) */
+            if (edit.osc[o].mode[k - 1u] == MODE_SYNC) {
+                int32_t hw = (BOX_W - 8) / 2, j;  /* (each AD: its share of half the box, as A to D) */
+                int32_t ap = 1 + (hw - 2) * aw / (aw + rw);
+                for (j = 0; j < 2; j++, xa += hw) {
+                    if (on) { cv_under(xa, yb, xa + ap, yt, yb); cv_under(xa + ap, yt, xa + hw, yb, yb); }
+                    cv_line(xa, yb, xa + ap, yt, ac);
+                    cv_line(xa + ap, yt, xa + hw, yb, ac);
+                }
+            } else {
+                if (on) { cv_under(xa, yb, xh, yt, yb); cv_under(xh, yt, xr, yt, yb); cv_under(xr, yt, xr + rw, yb, yb); }
+                cv_line(xa, yb, xh, yt, ac);
+                cv_line(xh, yt, xr, yt, ac);
+                cv_line(xr, yt, xr + rw, yb, ac);
+            }
         }
     }
     for (k = 0; k < 2u; k++) {                  /* the arrows: mod k+1 into the one on its left; thicker = more */
@@ -2109,7 +2122,7 @@ static void draw_focus(void)                    /* the selected row: four labels
         if (p->kind == K_NONE)
             continue;
         if (assign) {                           /* LIVE's ASSIGN: what each knob turns, its page over it */
-            const char *n = PAGES[pg].name, *l = prm_label(p);
+            const char *n = PAGES[pg].name, *l = prm_label(pg, p);
             cv_text(x + (FOC_W - text_w(&FONT_S, n)) / 2, 0, &FONT_S, n, C_MID);
             if ((w = text_w(&FONT_M, l)) <= FOC_W - 4) cv_text(x + (FOC_W - w) / 2, 19, &FONT_M, l, C_BRIGHT);
             else cv_text(x + (FOC_W - text_w(&FONT_S, l)) / 2, 22, &FONT_S, l, C_BRIGHT);
@@ -2128,7 +2141,7 @@ static void draw_focus(void)                    /* the selected row: four labels
             if (!idle) vc = shift_col(cell_at, cell_dir, &cell_tinted), lc = C_BRIGHT;
             cell_drawn = 1;
         }
-        cv_text(x + (FOC_W - text_w(&FONT_S, prm_label(p))) / 2, lit ? 2 : 0, &FONT_S, prm_label(p), lc);
+        cv_text(x + (FOC_W - text_w(&FONT_S, prm_label(pg, p))) / 2, lit ? 2 : 0, &FONT_S, prm_label(pg, p), lc);
         if ((w = text_w(&FONT_M, s)) <= FOC_W - 4)
             cv_text(x + (FOC_W - w) / 2, 19, &FONT_M, s, vc);
         else                                    /* (too long for the large font: the small one) */

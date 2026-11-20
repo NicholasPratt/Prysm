@@ -179,7 +179,7 @@ int main(void)
             {MODE_SYNC, 72, 0, 72}, {MODE_SYNC, 124, 0, 72},   /* x2.83, x5.99: neither a whole number */
             {MODE_MIX, 18, 127, 72}, {MODE_MIX, 31, 127, 72},  /* (MIX: those as pitches, +-st from the note) */
             {MODE_SYNC, 124, 0, 0},                             /* mod 1 a sine, not a saw */
-            {MODE_SYNC, 0, 127, 72}};                           /* x1, AMT full: x8 */
+            {MODE_SYNC, 0, 127, 72}};                           /* x1, AMT full: swept, x1 .. x8, round again */
         double c[6];
         uint32_t q, j, n;
         for (q = 0; q < 6u; q++) {
@@ -220,7 +220,36 @@ int main(void)
                   "(%.3f, %.3f), unlike each other", c[0], c[1]);
             CHECK(c[2] < 0.9 && c[3] < 0.9, "... MIX at those pitches: not (%.3f, %.3f)", c[2], c[3]);
             CHECK(same, "... the master not heard: mod 1 a sine or a saw, the same sound");
-            CHECK(c[5] > 0.95, "... AMT full: the rate up 3 octaves, at the note's period still (%.3f)", c[5]);
+            CHECK(c[5] < c[0] - 0.05, "... AMT full: the rate swept by its envelope, the timbre moving cycle to cycle "
+                  "(%.3f)", c[5]);
+        }
+        {                                       /* the modulator's envelope: SYNC an AD looping (in the release too); */
+            uint32_t md, cyc[2], low[2], n;        /* FM its AR, held at the top */
+            for (md = 0; md < 2u; md++) {
+                int32_t was = 0, up = 0;
+                fresh();
+                edit.osc[0].mode[0] = md ? MODE_FM : MODE_SYNC; edit.osc[0].amt[0] = 127;
+                edit.osc[0].att[0] = 40; edit.osc[0].rel[0] = 40; edit.amp_r = 127;
+                engine_set(&edit);
+                engine_note_on(57);
+                cyc[md] = low[md] = 0;
+                for (j = 0; j < 44100u / BLK; j++) {   /* a second held, then a second let go */
+                    int32_t e;
+                    if (j == 22050u / BLK) engine_note_off(57);
+                    run0(BLK);
+                    e = 0;
+                    for (n = 0; n < NV; n++) e = voice[n].mod_q15[0][0] > e ? voice[n].mod_q15[0][0] : e;
+                    if (j > 2000u / BLK && j < 22050u / BLK && e < 3000) low[md]++;
+                    if (!up && e > 30000) { up = 1; cyc[md]++; }
+                    else if (up && e < 3000) up = 0;
+                    was = e;
+                }
+                (void)was;
+                run0(60000);
+            }
+            CHECK(cyc[0] >= 4u, "SYNC: the modulator's envelope an AD, looping (%u peaks in 1 s)", (unsigned)cyc[0]);
+            CHECK(cyc[1] == 1u && low[1] == 0u, "... FM: its AR, held at the top while the key is down (%u, %u)",
+                  (unsigned)cyc[1], (unsigned)low[1]);
         }
         fresh();
         CHECK(edit.sync_rate[0][0] == 96u && edit.sync_rate[1][1] == 96u, "SYNC's rate: x4 in a new sound");

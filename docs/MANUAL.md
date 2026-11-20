@@ -142,7 +142,7 @@ between them: an arrow gets thicker with more modulation, and the symbol on it i
 | --- | --- | --- | --- | --- |
 | CAR | carrier bank | carrier wave | carrier ratio | the oscillator's level |
 | MOD1 | mod 1 bank | mod 1 wave | mod 1 ratio (PIT1 in MIX / RING, SYNC1 in SYNC) | mod 1 amount |
-| ENV1 | mod 1 attack | mod 1 release | mod 1's mode: FM, RING, MIX, SYNC | mod 1 fine |
+| ENV1 | mod 1 attack | mod 1 release (D, decay, in SYNC) | mod 1's mode: FM, RING, MIX, SYNC | mod 1 fine |
 | MOD2 | mod 2 bank | mod 2 wave | mod 2 ratio (PIT2 in MIX / RING, SYNC2 in SYNC) | mod 2 amount |
 | ENV2 | mod 2 attack | mod 2 release | mod 2's mode | mod 2 fine |
 | RATIO | carrier ratio | mod 1 ratio (PIT1) | mod 2 ratio (PIT2) | fine tune (the whole oscillator) |
@@ -181,9 +181,10 @@ oscillator by up to +-50 cents.
 
 **Sync rate.** In SYNC the RATIO knob becomes **SYNC1** (or **SYNC2**): how fast the slave runs against its master,
 **x1.00 .. x16.0** in quarter-semitone steps (x4.00 to start); the modulator's FINE moves it in between. The pitch
-you hear stays the note's; the rate changes the timbre. **AMT** sweeps the rate up with the modulator's envelope (its
-A and R on the ENV row): up to 3 octaves at full, the classic sync sweep on every note; 0 leaves the rate where SYNC1
-puts it. An LFO or a mod envelope on **M1PITCH** (**M2PITCH** for mod 2) moves the rate too, or turn SYNC1 while you
+you hear stays the note's; the rate changes the timbre. **AMT** sweeps the rate up with the modulator's envelope, up
+to 3 octaves at full; 0 leaves the rate where SYNC1 puts it. In SYNC that envelope loops: an attack (**A**) then a
+decay (**D**, the R knob relabelled) back down, over and over for as long as the note sounds, its release included.
+The picture draws it as two humps. Short times give a fast, buzzing sync wobble; long ones a slow rise and fall. An LFO or a mod envelope on **M1PITCH** (**M2PITCH** for mod 2) moves the rate too, or turn SYNC1 while you
 play. A saw or a square (BASIC) on the carrier gives the familiar sound; any wave can be synced.
 
 **Pitch in MIX and RING.** A modulator in MIX or RING is heard, not just felt, so a ratio is the wrong tool: its
