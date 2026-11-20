@@ -6,7 +6,14 @@
  *            around MANUAL, the last fed back (FDBK: under 64 inverted)
  *   flanger  a short line (MANUAL: 0.2 .. 8 ms) swept by the sine, fed back
  *
- *   chorus   a short delay swept by a sine, left and right a quarter cycle apart
+ *   chorus   FREE: a short delay swept by a sine, left and right a quarter cycle apart (RATE, DEPTH). The fixed
+ *            modes, after the bucket-brigade choruses: the line between two low-passes (a BBD's filters), read by
+ *            two taps swept by a triangle in antiphase. I, II, I+II: the Juno-60's sweeps (1.66 .. 5.35 ms at 0.51 Hz,
+ *            0.86 Hz; 3.3 .. 3.7 ms at 9.75 Hz). DIM 1 .. 4: after the Dimension D: shallower, slow sweeps, each
+ *            side's wet with some of the other's taken out (wide and still: the pitch sweep mostly cancels in
+ *            the middle); 1 the subtlest, 4 the most (by ear: not a measured copy); 1+4, 2+4: two buttons down,
+ *            1's or 2's sweep with 4's wet balance (3+4 is 4: UA's finding). WIDTH (DEPTH's knob in
+ *            these): the wet's sides, 0 mono .. 64 as the mode has them .. 127 twice
  *   delay    up to DLY_N samples (743 ms) a side; feedback through a tone low-pass and (SHIFT) a pitch shifter, so
  *            each repeat climbs or falls; ping-pong; wow: a sine sweeps its time (the repeats' pitch wobbles)
  *   reverb   Dattorro's plate (J. Dattorro, "Effect Design, Part 1", JAES 1997), its lengths scaled from 29761 Hz to
@@ -31,6 +38,23 @@
 #define PH_N 6u                                 /* the phaser's allpasses a side */
 
 static int16_t cho_buf[CHO_N] ENGINE_POOL;
+enum { CHO_FREE, CHO_I, CHO_II, CHO_I_II, CHO_DIM1, CHO_DIM2, CHO_DIM3, CHO_DIM4, CHO_DIM14, CHO_DIM24, CHO_N_MODES };
+static const char *const CHO_NAME[CHO_N_MODES] = {"FREE", "I", "II", "I+II", "DIM 1", "DIM 2", "DIM 3", "DIM 4",
+                                                  "DIM 1+4", "DIM 2+4"};
+#define CHO_US(us) ((uint32_t)(us) * 28901u / 10u)   /* microseconds -> samples Q16 (44.1 kHz) */
+#define CHO_HZ(mhz) ((uint32_t)(mhz) * 97391u / 1000u)   /* millihertz -> a phase step a sample */
+static const struct { uint32_t c, d, inc; int32_t x; } CHO_FIX[CHO_N_MODES] = {   /* the fixed modes: the taps' */
+    {0, 0, 0, 0},                               /* middle and their sweep (+-), the triangle's step, the other side */
+    {CHO_US(3505), CHO_US(1845), CHO_HZ(513), 0},  /*  taken out (Q15) */
+    {CHO_US(3505), CHO_US(1845), CHO_HZ(863), 0},
+    {CHO_US(3500), CHO_US(200), CHO_HZ(9750), 0},
+    {CHO_US(4000), CHO_US(250), CHO_HZ(250), 8192},
+    {CHO_US(4000), CHO_US(450), CHO_HZ(250), 11469},
+    {CHO_US(4000), CHO_US(700), CHO_HZ(250), 14746},
+    {CHO_US(4000), CHO_US(1000), CHO_HZ(500), 16384},
+    {CHO_US(4000), CHO_US(250), CHO_HZ(250), 16384},   /* (two buttons down, as UA and Roland's own JX-08 */
+    {CHO_US(4000), CHO_US(450), CHO_HZ(250), 16384}};  /*  model them: 1's or 2's sweep, 4's wet balance) */
+#define CHO_BBD 22290                           /* the BBD's low-passes: one pole at 8 kHz (Q15) */
 static int16_t dly_buf[2][DLY_N] ENGINE_POOL;
 static int16_t pre_buf[PRE_N] ENGINE_POOL;
 static int16_t fl_buf[2][FL_N];
@@ -107,6 +131,9 @@ static int32_t rv_lp[2];                        /* the tank's damping low-passes
 typedef struct {
     int32_t cho_mix, cho_depth;                 /* Q15; the sweep's depth in samples, Q16 */
     uint32_t cho_inc;                           /* the sweep's phase step a sample */
+    uint32_t cho_mode, cho_c;                   /* CHO_FREE ..; a fixed mode's taps' middle (samples Q16), */
+    int32_t cho_x;                              /*  the other side taken out (Q15) */
+    int32_t cho_wid;                            /* the fixed modes' WIDTH: the wet's sides, Q15 (0 .. 2.0) */
     int32_t dly_mix, dly_fb, dly_tone;          /* Q15 */
     uint32_t dly_time;                          /* samples, Q8 (glided to by the ISR) */
     uint32_t dly_ping, dly_ratio;               /* ratio Q16 (65536: no shift) */
@@ -130,6 +157,7 @@ static volatile fxp_t fxp;
 
 static uint32_t cho_w, cho_ph, dly_w, wow_ph, pre_w, rev_ph, dly_time_q8;
 static int32_t dly_lp[2];
+static int32_t cho_lp[2], cho_po[2];            /* the chorus's BBD low-passes: before the line (two), after (a side) */
 static int32_t dly_dc[2];                       /* the repeats' DC (~3 Hz), taken out past the old top: a gain over 1
                                                  * would hold an offset */
 static struct { uint32_t ph, w; int32_t x[2][PH_N], y[2][PH_N], fb[2]; } mfx;   /* MOD FX's state */
@@ -187,7 +215,15 @@ static void fx_set(const patch_t *p)
     fxp.fb_v = p->dly_fb & 127u; fxp.rev_v = p->rev_mix & 127u; fxp.size_v = p->rev_size & 127u;
     fxp.cho_mix = cho_mix_of(p->cho_mix);
     fxp.cho_depth = (int32_t)(p->cho_depth & 127u) * (260 << 16) / 127;   /* up to +-6 ms */
-    fxp.cho_inc = PR_LFO_INC[p->cho_rate & 127u] >> BLK_SHIFT;
+    fxp.cho_mode = p->cho_mode < CHO_N_MODES ? p->cho_mode : CHO_FREE;
+    if (fxp.cho_mode != CHO_FREE) {             /* (a fixed mode: its own sweep, RATE and DEPTH aside) */
+        fxp.cho_c = CHO_FIX[fxp.cho_mode].c;
+        fxp.cho_depth = (int32_t)CHO_FIX[fxp.cho_mode].d;
+        fxp.cho_inc = CHO_FIX[fxp.cho_mode].inc;
+        fxp.cho_x = CHO_FIX[fxp.cho_mode].x;
+        fxp.cho_wid = (int32_t)(p->cho_depth & 127u) * 65535 / 127;
+    } else
+        fxp.cho_inc = PR_LFO_INC[p->cho_rate & 127u] >> BLK_SHIFT;
     fxp.dly_mix = PR_CURVE_Q15[p->dly_mix & 127u];
     fxp.dly_fb = dly_fb_of(p->dly_fb);
     fxp.dly_tone = 3000 + (int32_t)(p->dly_tone & 127u) * 29000 / 127;
@@ -302,7 +338,29 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
             default: rdec = rev_decay_of(knob_moved(p.size_v, pz)); break;
             }
         }
-        if (cmix) {                             /* chorus: the mono sum into the line; two swept taps */
+        if (cmix && p.cho_mode != CHO_FREE) {   /* chorus, a fixed mode: the mono sum through the BBD's low-passes */
+            uint32_t ph = cho_ph;               /* into the line; two taps swept by a triangle in antiphase */
+            int32_t tri = (int32_t)(((ph >> 31) ? ~ph : ph) >> 15) - 32768, dv, wl, wr;
+            cho_lp[0] += ((((l + r) >> 1) - cho_lp[0]) * CHO_BBD) >> 15;
+            cho_lp[1] += ((cho_lp[0] - cho_lp[1]) * CHO_BBD) >> 15;
+            cho_buf[cho_w & (CHO_N - 1u)] = sat16(cho_lp[1]);
+            cho_w++;
+            cho_ph += p.cho_inc;
+            dv = (int32_t)(((int64_t)p.cho_depth * tri) >> 15);
+            wl = rd_frac(cho_buf, CHO_N - 1u, cho_w, p.cho_c + (uint32_t)dv);
+            wr = rd_frac(cho_buf, CHO_N - 1u, cho_w, p.cho_c - (uint32_t)dv);
+            cho_po[0] += ((wl - cho_po[0]) * CHO_BBD) >> 15;
+            cho_po[1] += ((wr - cho_po[1]) * CHO_BBD) >> 15;
+            wl = cho_po[0] - ((cho_po[1] * p.cho_x) >> 15);   /* (DIM: some of the other side out) */
+            wr = cho_po[1] - ((cho_po[0] * p.cho_x) >> 15);
+            {                                   /* WIDTH: the sides, around their middle */
+                int32_t mid = (wl + wr) >> 1, side = (int32_t)(((int64_t)((wl - wr) >> 1) * p.cho_wid) >> 15);
+                wl = mid + side;
+                wr = mid - side;
+            }
+            l += ((wl - l) * cmix) >> 15;
+            r += ((wr - r) * cmix) >> 15;
+        } else if (cmix) {                      /* chorus, FREE: the mono sum into the line; two swept taps */
             int32_t sl = sine_q15(cho_ph), sr = sine_q15(cho_ph + 0x40000000u), wl, wr;
             uint32_t base = 309u << 16;         /* 7 ms */
             cho_buf[cho_w & (CHO_N - 1u)] = sat16((l + r) >> 1);

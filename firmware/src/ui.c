@@ -106,7 +106,9 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_HOME,                                  /* (SETUP: what HOME opens first, LIVE or the SCOPE) */
        K_MMDEST,                                /* (a matrix route's destination: the LFO's, and DLYTIME) */
        K_EPART,                                 /* (the SEQ page's POLY row: the part edited, A or B; not the sound) */
-       K_MSYNC };                               /* (a modulator in SYNC: its rate, sync_rate, x 2^(n/48); off: 0, 1) */
+       K_MSYNC,                                 /* (a modulator in SYNC: its rate, sync_rate, x 2^(n/48); off: 0, 1) */
+       K_CHOMODE,                               /* (the chorus's mode: CHO_NAME) */
+       K_WIDTH };                               /* (a fixed chorus mode's width, on DEPTH's byte: 0 .. 200 %) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -267,7 +269,7 @@ static const row_t SETUP_ROWS[] = {
  * reverb */
 static const row_t CHO_ROWS[] = {
     {"CHORUS", {{"RATE", PO(cho_rate), 127, K_RATE}, {"DEPTH", PO(cho_depth), 127, K_NUM},
-                {"MIX", PO(cho_mix), 127, K_NUM}, NOPRM}, LIT_C},
+                {"MIX", PO(cho_mix), 127, K_NUM}, {"MODE", PO(cho_mode), CHO_N_MODES - 1u, K_CHOMODE}}, LIT_C},
 };
 static const row_t DLY_ROWS[] = {
     {"DELAY", {{"TIME", PO(dly_time), 127, K_DMS}, {"FDBK", PO(dly_fb), 127, K_NUM},
@@ -570,9 +572,12 @@ static const prm_t *prm_alt2(uint32_t pg, uint32_t r, uint32_t i)  /* its third 
     const prm_t *a = prm_alt(pg, r, i);
     return a >= PITCH_PRM && a < PITCH_PRM + 2 ? &SYNC_PRM[a - PITCH_PRM] : 0;
 }
+static const prm_t WIDTH_PRM = {"WIDTH", PO(cho_depth), 127, K_WIDTH};   /* (a fixed chorus mode: DEPTH's knob) */
 static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's parameter, as the sound is now */
 {
     const prm_t *a = prm_alt(pg, r, i);
+    if (pg == PG_CHO && i == 1u && edit.cho_mode != CHO_FREE)
+        return &WIDTH_PRM;
     if (a && a >= SEND_PRM && a < SEND_PRM + 4)
         return edit.vmode == VM_DUAL ? a : &PAGES[pg].rows[r].p[i];
     if (a) {                                    /* (MIX, RING: the pitch; SYNC: the rate; FM: the ratio) */
@@ -749,6 +754,8 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_POS: put(s, PW_WAVE_NAME[v[-(int)NOP] < PW_BANKS ? v[-(int)NOP] : 0u][wave_index(*v)]); break;
     case K_RATIO: put(put(s, "x"), PR_RATIO_NAME[*v < PR_RATIOS ? *v : 1u]); break;
     case K_MODE: put(s, MODE_NAME[*v < MODE_N ? *v : 0u]); break;
+    case K_CHOMODE: put(s, CHO_NAME[*v < CHO_N_MODES ? *v : 0u]); break;
+    case K_WIDTH: put(num(s, ((uint32_t)*v * 200u + 63u) / 127u), "%"); break;
     case K_SEMI: case K_MPIT: put(snum(s, (int32_t)*v - 24), "st"); break;
     case K_MSYNC: {                             /* x1.00 .. x9.99, x10.0 .. x16.0 */
         uint32_t r = *v <= 192u ? *v : 96u;    /* (2^(r/48): PR_PITCH16_Q16 a 1/192 octave a step) */
@@ -1210,13 +1217,17 @@ static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a b
             cv_line(X[k + 1u] - 2, H / 2, X[k + 1u] - 5, H / 2 + 3, C_FAINT);
         }
     }
-    {                                           /* the chorus: two lines swept against each other (left, right) */
-        int32_t a = 3 + (int32_t)edit.cho_depth * 36 / 127, py0 = 0, py1 = 0;
-        uint32_t cyc = 1u + (uint32_t)edit.cho_rate * 3u / 127u;
+    {                                           /* the chorus: two lines swept against each other (left, right); a */
+        static const uint8_t FA[CHO_N_MODES] = {0, 36, 36, 8, 6, 10, 16, 24, 6, 10};
+        static const uint8_t FC[CHO_N_MODES] = {0, 1, 2, 4, 1, 1, 1, 2, 1, 1};
+        uint32_t fm = edit.cho_mode < CHO_N_MODES ? edit.cho_mode : 0u;   /* fixed mode: its triangles, opposed */
+        int32_t a = fm ? FA[fm] : 3 + (int32_t)edit.cho_depth * 36 / 127, py0 = 0, py1 = 0;
+        uint32_t cyc = fm ? FC[fm] : 1u + (uint32_t)edit.cho_rate * 3u / 127u;
+        uint32_t sh = fm ? LFO_TRI : LFO_SINE, off = fm ? 0x80000000u : 0x40000000u;
         for (i = 0; i < W - 8; i++) {
             uint32_t ph = (uint32_t)((uint64_t)i * cyc * 0x100000000ull / (uint64_t)(W - 8));
-            int32_t y0 = H / 2 - lfo_wave(LFO_SINE, ph, 0) * a / 32767;
-            int32_t y1 = H / 2 - lfo_wave(LFO_SINE, ph + 0x40000000u, 0) * a / 32767;
+            int32_t y0 = H / 2 - lfo_wave(sh, ph, 0) * a / 32767;
+            int32_t y1 = H / 2 - lfo_wave(sh, ph + off, 0) * a / 32767;
             if (i) {
                 cv_line(X[0] + 3 + i, py0, X[0] + 4 + i, y0, lit & LIT_C ? C_BRIGHT : C_MID);
                 cv_line(X[0] + 3 + i, py1, X[0] + 4 + i, y1, lit & LIT_C ? C_ACC : C_FAINT);
@@ -2091,6 +2102,9 @@ static const char *prm_idle(uint32_t pg, const prm_t *p)   /* a parameter that d
 {                                               /* why (it stays where it is, dimmed); 0: it works */
     if (p->kind == K_EPART && !ui_two())
         return "SINGLE";                        /* (one part: none to choose) */
+    if (pg == PG_CHO && ((p->off == PO(cho_rate) && p->kind == K_RATE) || (p->off == PO(cho_depth) && p->kind == K_NUM)) &&
+        edit.cho_mode != CHO_FREE)
+        return "FIXED";                         /* (a fixed chorus mode: its own sweep) */
     if (pg == PG_FILTER && (p->off == PO(comb_damp) || p->off == PO(comb_spread)) && pv->flt_type < FLT_COMBP)
         return "COMB ONLY";                     /* (the low-passes have no comb) */
     if (pg == PG_FILTER && p->off == PO(hp_res) && !pv->hp_cut)

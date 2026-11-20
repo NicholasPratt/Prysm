@@ -554,7 +554,7 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 
 | Page | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- | --- |
-| CHORUS | CHORUS | rate | depth | mix | |
+| CHORUS | CHORUS | rate (FIXED in the other modes) | depth (WIDTH in the other modes) | mix | mode: FREE, I, II, I+II, DIM 1 .. DIM 4, DIM 1+4, DIM 2+4 |
 | DELAY | DELAY | time (10 .. 735 ms) | feedback | mix | PING ON / OFF |
 | DELAY | D.MOD | wow rate | wow depth | shift (-12 .. +12 st) | tone |
 | DELAY | D.SYNC | SYNC ON / OFF: TIME in the tempo | | | |
@@ -565,6 +565,19 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 | CRUSH | CRUSH | BITS: OFF, 15 .. 2 bits | RATE: OFF, 44100 .. 1378 Hz | | |
 
 - **Chorus**: left and right swept against each other, for width. Full mix is half wet: the classic chorus.
+  **MODE** picks its character:
+  - **FREE**: a sine sweep, set by RATE and DEPTH (the chorus as it always was).
+  - **I**, **II**, **I+II**: after the Juno-60's chorus. A bucket-brigade line, with its filters taking the top off
+    the wet sound, read by two taps that a triangle sweeps in opposite directions, one for each side. I is slow and
+    lush (0.5 Hz), II faster and deeper-sounding (0.86 Hz), I+II a fast, shallow shimmer (9.75 Hz).
+  - **DIM 1 .. DIM 4**: after the Dimension D. Shallower, slower sweeps, and each side has some of the other side's
+    wet taken out: wide and spacious with hardly any audible wobble. 1 is the subtlest, 4 the widest.
+    **DIM 1+4** and **DIM 2+4** are two buttons held down on the original: 1's or 2's gentle sweep with 4's wet
+    balance (the wider, more hollow centre). Other combinations add nothing new (3+4 sounds as 4).
+
+  In the fixed modes RATE does nothing (dimmed, "FIXED") and the DEPTH knob becomes **WIDTH**: how far the wet sound
+  spreads, 0% mono, 100% as the mode has it, 200% twice as wide. MIX still sets how much you hear. They are
+  modelled on those units' published delay times and rates and tuned by ear, not measured copies.
 - **Delay**: **ping** sends the repeats from side to side. **Tone** darkens each repeat. Turning the time while it
   plays bends the repeats, like tape. **Feedback** at the top of its range (past about 120) goes past unity: the
   delay **self-oscillates**, building from whatever went in to a steady, saturating drone that holds after the notes

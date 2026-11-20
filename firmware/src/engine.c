@@ -230,7 +230,9 @@ typedef struct {
     uint8_t psend[2][2];                        /* (format 21) DUAL: each part's sends, [part][0 delay, 1 reverb]: */
                                                 /*  127 = all of it, as the other modes (the effects' MIX: the return) */
     uint8_t sync_rate[NOSC][2];                 /* (format 22) mod 1, mod 2 in SYNC (RATIO then): the slave's speed, */
-} patch_t;                                      /*  2^(n/48) times its master's: 0..192, x1 .. x16 (96: x4) */
+                                                /*  2^(n/48) times its master's: 0..192, x1 .. x16 (96: x4) */
+    uint8_t cho_mode;                           /* (format 23) the chorus: CHO_FREE (RATE, DEPTH) .. CHO_DIM4 (fx.c) */
+} patch_t;
 /* the fields a part has its own of: part B's in pb, in this order */
 #define PF(f) ((uint8_t)__builtin_offsetof(patch_t, f))
 static const uint8_t PART_OFF[PART_N] = {

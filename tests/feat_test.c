@@ -99,6 +99,36 @@ static uint64_t fx_case(uint32_t i)              /* a note's energy: i 0 the def
     return run(20000, 4000);
 }
 
+
+/* the chorus alone (fx_render) on a sine of f Hz (0: white noise), mode m at full MIX, its last second: the RMS of left, of left - right,
+ * of the dry sine (the delay and the reverb off) */
+static void cho_run(uint32_t m, uint32_t f, uint32_t wid, double *rl, double *rd, double *rdry)
+{
+    static int32_t o[2u * 256u];
+    uint32_t n, j, rng = 0x2545F491u, ph = 0, inc = (uint32_t)((uint64_t)f * 0x100000000ull / 44100u);
+    double sl = 0, sd = 0, sx = 0;
+    edit = PATCH_INIT;
+    edit.cho_mode = (uint8_t)m; edit.cho_depth = (uint8_t)wid; edit.cho_mix = 127; edit.dly_mix = 0; edit.rev_mix = 0; edit.lfo2_dest = DEST_OFF;
+    engine_set(&edit);
+    for (n = 0; n < 2u * 44100u; n += 256u) {
+        for (j = 0; j < 256u; j++) {
+            int32_t x;
+            rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+            x = f ? sine_q15(ph) / 2 : (int32_t)(rng >> 18) - 8192;
+            ph += inc;
+            o[2u * j] = o[2u * j + 1u] = x;
+            if (n >= 44100u) sx += (double)x * x;
+        }
+        fx_render(o, 256u, 0, 0, 0);
+        if (n >= 44100u)
+            for (j = 0; j < 256u; j++) {
+                double l = o[2u * j], r = o[2u * j + 1u];
+                sl += l * l; sd += (l - r) * (l - r);
+            }
+    }
+    *rl = __builtin_sqrt(sl); *rd = __builtin_sqrt(sd); *rdry = __builtin_sqrt(sx);
+}
+
 int main(void)
 {
     uint64_t a0, a1, b0, b1, x, y;
@@ -262,6 +292,45 @@ int main(void)
                   q.sync_rate[1][1] == 96u && q.mpitch[1][1] == 30u, "format 21: SYNC's rate from its PIT (x2), the "
                   "others x4");
         }
+    }
+
+    /* ---- the chorus's modes: FREE as it was; I, II, I+II (the Juno-60's sweeps), DIM 1 .. 4: stereo, darker
+     * (the BBD's low-passes), at about the dry level */
+    {
+        double l[CHO_N_MODES], d[CHO_N_MODES], x, hl[2], hd, hx;
+        uint32_t m, ok = 1;
+        for (m = 0; m < CHO_N_MODES; m++) cho_run(m, 0u, 64u, &l[m], &d[m], &x);
+        for (m = CHO_I; m < CHO_N_MODES; m++) {
+            ok &= d[m] / l[m] > 0.05 && l[m] / x > 0.5 && l[m] / x < 1.12;
+            printf("       %-6s L %.2f of the dry, L-R %.2f of L\n", CHO_NAME[m], l[m] / x, d[m] / l[m]);
+        }
+        CHECK(ok, "the chorus's fixed modes: wide (L, R apart), at the dry level (-6 .. +1 dB)");
+        cho_run(CHO_FREE, 12000u, 60u, &hl[0], &hd, &hx);
+        cho_run(CHO_I, 12000u, 64u, &hl[1], &hd, &hx);
+        CHECK(hl[1] < hl[0] * 0.85, "... darker than FREE at 12 kHz (the BBD's low-passes: %.2f, %.2f of the dry)",
+              hl[1] / hx, hl[0] / hx);
+        edit = PATCH_INIT;
+        edit.cho_mode = CHO_I; fx_set(&edit);
+        x = fxp.cho_inc * 44100.0 / 4294967296.0;
+        edit.cho_mode = CHO_I_II; fx_set(&edit);
+        hd = fxp.cho_inc * 44100.0 / 4294967296.0;
+        CHECK(x > 0.508 && x < 0.518 && hd > 9.65 && hd < 9.85, "... I sweeps at 0.513 Hz, I+II at 9.75 (%.3f, %.2f)", x, hd);
+        {                                   /* WIDTH: 0 mono, up: wider */
+            double w0, w1, w2, d0, d1, d2, z;
+            cho_run(CHO_DIM2, 0u, 0u, &w0, &d0, &z);
+            cho_run(CHO_DIM2, 0u, 64u, &w1, &d1, &z);
+            cho_run(CHO_DIM2, 0u, 127u, &w2, &d2, &z);
+            CHECK(d0 == 0 && d1 > 0 && d2 > d1 * 1.6, "... WIDTH: 0 mono (L - R %.0f), 64 as the mode (%.0f), 127 twice "
+                  "(%.0f)", d0, d1, d2);
+        }
+        CHECK(PATCH_INIT.cho_mode == CHO_FREE, "... a new sound's chorus: FREE, as before");
+        {
+            static patch_t o, q;
+            o = PATCH_INIT; o.cho_rate = 99;
+            CHECK(patch_from(&q, (const uint8_t *)&o, PATCH_V22_SIZE, 22u) == 0 && q.cho_mode == CHO_FREE &&
+                  q.cho_rate == 99u, "format 22: the chorus FREE, its RATE kept");
+        }
+        fresh();
     }
 
     /* ---- the delay's FDBK at the top: it self-oscillates, held (no hard clip); lower down, the repeats die away */
