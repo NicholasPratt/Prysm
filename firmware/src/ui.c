@@ -104,7 +104,8 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_PAN,                                   /* (a part's place: L 64 .. C .. R 63) */
        K_ETIME,                                 /* (an envelope's time: 1 ms .. 10 s, as the engine has it: PR_ENV_US) */
        K_HOME,                                  /* (SETUP: what HOME opens first, LIVE or the SCOPE) */
-       K_MMDEST };                              /* (a matrix route's destination: the LFO's, and DLYTIME) */
+       K_MMDEST,                                /* (a matrix route's destination: the LFO's, and DLYTIME) */
+       K_EPART };                               /* (the SEQ page's POLY row: the part edited, A or B; not the sound) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -238,8 +239,9 @@ static const row_t SEQ_ROWS[] = {                /* (STEP: the step under the cu
               {"LANE2", 1, LK_N - 1u, K_LKDEST}, {"VAL2", 1, 128, K_LKVAL}}, LIT_CURVE},   /* knob; the step's value) */
     {"PATTERN", {{"PATT", 0, SEQ_PATS - 1u, K_SPAT}, {"LENGTH", 0, 64, K_SLEN},
                  {"DIV", 0, DIV_N - 1u, K_SDIV}, {"GATE", 0, 127, K_SGATE}}, LIT_ENV},
-    {"POLY", {{"A LEN", 0, 64, K_SLEN}, {"B LEN", 0, 64, K_SBLEN}, NOPRM, NOPRM}, LIT_ENV},   /* (DUAL: the parts' */
-                                                /* lengths, A's the pattern's; B's own: they loop apart) */
+    {"POLY", {{"A LEN", 0, 64, K_SLEN}, {"B LEN", 0, 64, K_SBLEN}, {"EDIT", 0, 1, K_EPART}, NOPRM}, LIT_ENV},   /* (DUAL: */
+                                                /* the parts' lengths, A's the pattern's; B's own: they loop apart; */
+                                                /* EDIT: the part the keys record, as SELECT here) */
     {"EDIT", {{"ROW", 0, 4, K_SROW}, {"COPY", 0, 1, K_SCOPY},   /* (ROW 5: ALL, the whole pattern) */
               {"PASTE", 0, 1, K_SPASTE}, {"CLEAR", 0, 1, K_SCLEAR}}, LIT_CURVE},
     {"PARTS", {{"MUTE1", SO(part_mute[0]), 1, K_SMUTE}, {"MUTE2", SO(part_mute[1]), 1, K_SMUTE},   /* (the split's: */
@@ -621,6 +623,7 @@ static uint8_t *pval(uint32_t pg, const prm_t *p)
     case K_LKDEST: return &seq_ed()->lk_dest[p->off % PLOCKS];
     case K_LKVAL: lk_ui = seq_ed()->lk[p->off % PLOCKS][seq_cursor % 64u]; return &lk_ui;
     case K_LBARS: return &lp_bars_ui;
+    case K_EPART: return &ui_part;
     case K_LQUANT: return (uint8_t *)&lp_quant;
     case K_LPLAY: lp_play_ui = lp.run; return &lp_play_ui;
     case K_MPIT: return &edit.mpitch[PAGES[pg].osc == 2u][p->off & 1u];   /* (the OSC pages: their oscillator's) */
@@ -796,6 +799,7 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_MCHB: if (*v) num(s, *v); else put(s, "OFF"); break;
     case K_PTGT: put(s, PT_NAME[*v < PT_N ? *v : 0u]); break;
     case K_SLPART: put(s, *v ? "B" : "A"); break;
+    case K_EPART: put(s, !ui_two() ? "--" : *v ? "B" : "A"); break;
     case K_NCOL:                                /* (the tone; a rate from the note; a density) */
         if (NOISE_RATED(pv->noise_type)) put(snum(s, ((int32_t)*v - 64) * 3 / 4), "st");
         else if (pv->noise_type == NOISE_CRACKLE) num(s, 2u + (uint32_t)PR_CURVE_Q15[*v & 127u] * 2000u / 32767u);
@@ -1374,8 +1378,8 @@ static void gfx_seq(uint32_t lit)
         }
         if (lk_on(pt, k))                       /* a lock: a mark in its corner */
             cv_rect(x + 8, y + 17, 3, 4, tr == SEQ_REST || tr == SEQ_TIE ? C_BRIGHT : C_BLACK);
-        if (k == seq_cursor && row[PG_SEQ] <= SR_LOCK) {   /* the cursor */
-            uint16_t c = C_BRIGHT;
+        if (k == seq_cursor && row[PG_SEQ] <= SR_LOCK) {   /* the cursor (two parts: the part edited's colour) */
+            uint16_t c = ui_two() ? (ui_b() ? C_PART_B : C_PART_A) : C_BRIGHT;
             cv_frame(x - 2, y - 2, 16, 26, c);
             if (seq_rec) cv_frame(x - 1, y - 1, 14, 24, c);
         }
@@ -1859,6 +1863,13 @@ static void pop(const char *name, const char *val)
     pop_dir = 0;
     dirty |= D_GFX;
 }
+static void part_flip(uint32_t to)              /* two parts: the part edited (and the keys record), A or B */
+{
+    if (!ui_two() || ui_part == to) return;
+    ui_part = (uint8_t)(to & 1u);
+    pop("PART", ui_part ? "B" : "A");
+    dirty |= D_ALL;
+}
 
 static void pop_turn(const char *name, const char *val, int32_t d)   /* a value turned: up blue, down red */
 {
@@ -1996,6 +2007,11 @@ static void draw_hdr(void)
         if (seqs.mode && page == PG_SEQ) x = cv_text(x + 6, 1, &FONT_S, "SONG", C_BRIGHT);
         else { char t[4]; num(put(t, "P"), seqs.cur % SEQ_PATS + 1u); x = cv_text(x + 6, 1, &FONT_S, t, C_BRIGHT); }
     }
+    if ((page == PG_SEQ || page == PG_LOOP) && ui_two()) {   /* two parts: the one the keys record, a badge in */
+        const char *n = ui_b() ? "B" : "A";     /* its colour (SELECT here switches it) */
+        cv_rect(x + 6, 1, text_w(&FONT_S, n) + 8, 16, ui_b() ? C_PART_B : C_PART_A);
+        x = cv_text(x + 10, 1, &FONT_S, n, C_BLACK) + 4;
+    }
     if (((page == PG_SEQ || page == PG_DRUM) && seq_rec) || (page == PG_LOOP && lp.rec)) {   /* REC: inverted */
         cv_rect(x + 6, 1, 36, 16, C_BRIGHT);
         x = cv_text(x + 10, 1, &FONT_S, "REC", C_BLACK) + 4;
@@ -2018,7 +2034,8 @@ static void draw_hdr(void)
         if (modified()) e = put(e, "*");
         r -= text_w(&FONT_S, s);
         cv_text(r, 1, &FONT_S, s, modified() ? C_BRIGHT : C_MID);
-        if (ui_two() && hdr_part() < 3) {       /* two parts: the part this page edits, its colour; ALL: shared */
+        if (ui_two() && hdr_part() < 3 && page != PG_SEQ && page != PG_LOOP) {   /* two parts: the part this page */
+                                                /* edits, its colour; ALL: shared (SEQ, LOOP: the badge, left) */
             int32_t t = hdr_part(), tx;         /* (where it fits after the row's name; else the rule */
             const char *n = t == 2 ? "ALL" : t ? "B" : "A";   /*  under the header shows the part alone) */
             tx = r - 6 - text_w(&FONT_S, n);
@@ -2033,6 +2050,8 @@ static void draw_hdr(void)
 
 static const char *prm_idle(uint32_t pg, const prm_t *p)   /* a parameter that does nothing as the sound is now: */
 {                                               /* why (it stays where it is, dimmed); 0: it works */
+    if (p->kind == K_EPART && !ui_two())
+        return "SINGLE";                        /* (one part: none to choose) */
     if (pg == PG_FILTER && (p->off == PO(comb_damp) || p->off == PO(comb_spread)) && pv->flt_type < FLT_COMBP)
         return "COMB ONLY";                     /* (the low-passes have no comb) */
     if (pg == PG_FILTER && p->off == PO(hp_res) && !pv->hp_cut)
@@ -2076,7 +2095,8 @@ static void draw_focus(void)                    /* the selected row: four labels
         if ((idle = prm_idle(pg, p)) != 0) {    /* (does nothing now: dimmed, why below) */
             vc = lc = C_FAINT;
             why = idle;
-        }
+        } else if (p->kind == K_EPART)          /* (the part edited: in its colour) */
+            vc = ui_b() ? C_PART_B : C_PART_A;
         if (lit) {                              /* (just turned: framed, its value shifted, fading) */
             cv_frame(x + 1, 0, FOC_W - 2, FOC_H - 1, C_MID);
             if (!idle) vc = shift_col(cell_at, cell_dir, &cell_tinted), lc = C_BRIGHT;
@@ -3430,13 +3450,12 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_ENV))              /* ENV: AMP, F.ENV, M.ENV 1, M.ENV 2 in turn */
         ui_page(page >= PG_AMP && page < PG_MENV2 ? page + 1u : PG_AMP);
     if (buttons & (1u << BTN_SEL)) {            /* SELECT (the button): FILTER, from every page; on FILTER, two */
-        if (page != PG_FILTER)                  /* parts: A and B in turn (the part edited, on every page after) */
+        if ((page == PG_SEQ || page == PG_LOOP) && ui_two())   /* parts: A and B in turn (the part edited, on */
+            part_flip(ui_part ^ 1u);            /* every page after); SEQ, LOOP: in turn there, the page kept */
+        else if (page != PG_FILTER)
             ui_page(PG_FILTER);
-        else if (ui_two()) {
-            ui_part ^= 1u;
-            pop("PART", ui_part ? "B" : "A");
-            dirty |= D_ALL;
-        }
+        else
+            part_flip(ui_part ^ 1u);
     }
     if (buttons & (1u << BTN_LFO)) ui_page(page == PG_LFO ? PG_LFO2 : page == PG_LFO2 ? PG_MATRIX : PG_LFO);
     if (buttons & (1u << BTN_ARP)) {            /* ARP: its page; on its page, the arp on / off */
@@ -3499,6 +3518,10 @@ static int ui_input(uint32_t buttons)
         }
         if (p->kind == K_DCOPY) {               /* the drums' lanes, copied (a turn either way) */
             drum_copy(0);
+            continue;
+        }
+        if (p->kind == K_EPART) {               /* the part edited: right B, left A */
+            part_flip(d > 0);
             continue;
         }
         if (p->kind == K_SLEARN) {              /* the next key sets the split (a turn back: not) */

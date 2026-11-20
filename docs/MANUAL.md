@@ -105,7 +105,7 @@ its TYPE is OFF.
 | **KNOB1 .. KNOB4** | the row's four values, left to right. Turn fast to move quickly. Modes, LFO waves and on/off switches step every two clicks. |
 | **EDIT** | OSC 1 (press again: OSC 2, then TRANS, then NOISE) |
 | **ENV** | AMP (press again: F.ENV, then M.ENV 1, then M.ENV 2) |
-| **SELECT** (the button) | FILTER, from any page. On FILTER, a sound with two parts (MIX's PARTS row): part A, part B in turn |
+| **SELECT** (the button) | FILTER, from any page. On FILTER, a sound with two parts (MIX's PARTS row): part A, part B in turn. On SEQ and LOOP (two parts): part A, part B in turn, staying on the page |
 | **LFO** | LFO (press again: LFO 2, then MATRIX) |
 | **GLO** | MIX (press again: SETUP) |
 | **ARP** | ARP (on the ARP page: the arpeggiator on / off; its LED shows it) |
@@ -489,7 +489,8 @@ level and its place, and its voices (the four squares, lit while one sounds on t
 is framed in its colour. In SINGLE part B is greyed: part A plays both oscillators.
 
 With two parts, the **SELECT** button switches the part you are editing: it opens FILTER from any page, and on FILTER
-each press switches between part A and part B. The part stays chosen as you move to other pages. The header says
+each press switches between part A and part B; on the SEQ and LOOP pages it switches straight away, without leaving
+the page. The part stays chosen as you move to other pages. The header says
 what a page edits: **A** in amber or **B** in teal, with a thin rule of that colour under it, on the pages a part has
 its own settings on (OSC 1 is part A's oscillator, OSC 2 part B's); **ALL** in white on the shared pages (the
 effects, LFO 2, M.ENV 2, the MATRIX, ...). Every part page then turns that part's own settings (the cutoff on
@@ -598,7 +599,7 @@ ENTRY rows the picture is the song instead: its entries, each a pattern and how 
 | PART | the step's note's part: A / B (DUAL) | the 2nd note's | the 3rd's | the 4th's |
 | LOCK | LANE1: the parameter of the pattern's first lock lane (OFF: none) | VAL1: the step's value (-- none) | LANE2 | VAL2 |
 | PATTERN | the pattern edited: P1 .. P4 | its length: 1 .. 64 | step: 1/4 .. 1/32 (all patterns) | gate (all patterns) |
-| POLY | A LEN: the pattern's length (as LENGTH) | B LEN (DUAL): part B's own, 1 .. 64, or = A | | |
+| POLY | A LEN: the pattern's length (as LENGTH) | B LEN (DUAL): part B's own, 1 .. 64, or = A | EDIT: the part you edit and record, A / B (two parts) | |
 | EDIT | the row: 1 .. 4, or ALL | COPY | PASTE | CLEAR |
 | PARTS | MUTE1: part 1 PLAY / MUTE | MUTE2: part 2 | CLR1: clear part 1 | CLR2: clear part 2 |
 | CLICK | the metronome: OFF, ON, REC (only while recording) | its level | | |
@@ -660,8 +661,10 @@ the STEP and CHORD rows, or CLEAR a row.
   across both parts. Which part a note is in follows the split: move the split key and notes change sides. With the
   split off, every note is part 1's.
 - **DUAL** (MIX's PARTS row): each note carries its own part, A or B, so one pattern plays both synths. A note
-  recorded or entered goes on the part you are editing (SELECT on FILTER), or, from a MIDI keyboard, on its channel's part (the
-  SETUP page's B IN). Record a bass on part A, switch to part B (SELECT, SELECT), overdub a lead on it. The **PART** row shows and
+  recorded or entered goes on the part you are editing, or, from a MIDI keyboard, on its channel's part (the
+  SETUP page's B IN). On the SEQ page the part is the **badge** in the header (amber **A**, teal **B**), and the step
+  cursor is in its colour; **SELECT** switches it without leaving the page (so does the POLY row's **EDIT** knob).
+  Record a bass on part A, press SELECT, overdub a lead on part B. The **PART** row shows and
   changes the parts of the step under the cursor; steps with a note on part B have a small teal mark in their corner.
   Here **MUTE1** / **MUTE2** and **CLR1** / **CLR2** are parts A and B. In SINGLE, SPLIT and LAYER a note's part is
   kept but not used. The arpeggiator plays the part you are editing; the looper keeps each note on the part it was
