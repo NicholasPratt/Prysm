@@ -17,7 +17,7 @@ from a library of 96 (and 64 of your own: [Tones](#tones)); each oscillator can 
 - [Finding your way around](#finding-your-way-around)
 - [The pages](#the-pages): [OSC 1 / OSC 2](#osc-1--osc-2), [TRANS](#trans), [NOISE](#noise), [FILTER](#filter), [AMP](#amp), [LFO](#lfo),
   [LFO 2](#lfo-2), [MATRIX](#matrix), [MIX](#mix), [ARP](#arp), [SEQ](#seq), [DRUM](#drum), [LOOP](#loop),
-  [FX](#fx) (CHORUS, DELAY, REVERB, MOD FX, CRUSH), [SETUP](#setup)
+  [FX](#fx) (CRUSH, MOD FX, CHORUS, DELAY, REVERB, COMP), [SETUP](#setup)
 - [Patches](#patches): [Tones](#tones)
 - [The oscilloscope](#the-oscilloscope)
 - [USB: audio and MIDI](#usb-audio-and-midi)
@@ -112,8 +112,8 @@ its TYPE is OFF.
 | **SEQ** | SEQ (press again: DRUM, then LOOP) |
 | **PLAY** | the sequencer: run / stop (from any page; its LED shows it) |
 | **REC** | step entry on the SEQ page; while the sequencer plays, real-time recording (on the DRUM page: the drums; on the LOOP page: the looper) (its LED shows it) |
-| **FX** | CHORUS (press again: DELAY, REVERB, MOD FX, then CRUSH) |
-| **HOME** | the [LIVE screen](#the-live-screen) (press again: the oscilloscope; again: back). SETUP's HOME row can put the oscilloscope first |
+| **FX** | CRUSH (press again: MOD FX, CHORUS, DELAY, REVERB, then COMP: the order they come in on the ROUTE screen) |
+| **HOME** | the [LIVE screen](#the-live-screen) (press again: the oscilloscope; again: the [ROUTE screen](#the-route-screen); again: back). SETUP's HOME row can put the oscilloscope first |
 | **SAVE** | the PATCH screen |
 
 The header's battery shows **0 to 3 bars** (red, green, blue: a prism); empty, it blinks: charge the FM-1 soon. Connected to a computer it shows a
@@ -229,12 +229,12 @@ fade over it, its length in milliseconds.
 ### NOISE
 
 A noise source in every voice, beside the two oscillators: it follows the amp envelope like them, and goes through the
-filter or past it (ROUTE). **EDIT** four times. The picture is the noise itself: its wave (a few milliseconds) above,
+filter or past it (on the [ROUTE screen](#the-route-screen)). **EDIT** four times. The picture is the noise itself: its wave (a few milliseconds) above,
 its spectrum below (24 bands, 60 Hz .. 15 kHz, the loudest at the top), so you see its colour change as you turn.
 
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
-| NOISE | TYPE | COLOUR (or RATE, DENSE) | LEVEL (0: off) | ROUTE: FILTER / DIRECT |
+| NOISE | TYPE | COLOUR (or RATE, DENSE) | LEVEL (0: off) | |
 
 - **WHITE**: flat hiss. **PINK**: softer (-3 dB an octave), wind and surf. **BROWN**: darker still (-6 dB an
   octave), a rumble. For these three, **COLOUR** is a tone (127 open, down: darker).
@@ -450,24 +450,13 @@ every kick, and HAT onto MOD1 adds FM bite in time with the hats.
 | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- |
 | OSC | osc 1 level | osc 2 level | osc 2 semitones (+-24) | osc 2 fine (+-50 cents) |
-| ROUTE | osc 1: FILTER / DIRECT | osc 2: FILTER / DIRECT | the noise: FILTER / DIRECT | the noise's level |
-| ROUTE (DUAL) | A DLY: part A's delay send | A REV: part A's reverb send | B DLY: part B's | B REV: part B's |
 | GLIDE | glide time (0 = off) | mode: ALWAYS / LEGATO | | |
 | SPLIT | the split key (OFF, or a note) | the low side's octave (-2 .. +2) | the high side's octave | LEARN |
 | PARTS | MODE: SINGLE / DUAL / SPLIT / LAYER | | | |
 | LEVELS | A LVL: part A's level | B LVL: part B's | A PAN: part A's place, L64 .. C .. R63 | B PAN: part B's |
 
-**Routing.** Each source goes **through the filter** (its drive, the low-pass or the comb, the high-pass), or
-**DIRECT**: past it, straight to the amp (its envelope, VCA OPEN, the effects all still apply). Filter one
-oscillator and leave the other bright: a resonant sweep over a steady body, or a comb ringing on the noise while
-the oscillators stay clean. The picture shows each source's level and its route (DIR inverted).
-
-**Sends (DUAL).** In DUAL each part already has its own filter, so the ROUTE row sends the parts to the effects
-instead: how much of each part goes into the **delay** and the **reverb** (127, the most, is how the other modes
-play: everything in). The effects' own MIX is how much comes back. A dry bass on part A and a pad drowned in
-reverb on part B: A REV 0, B REV 127. A send stays dimmed while its effect's MIX is 0 (DELAY OFF, REVERB OFF).
-The chorus, MOD FX and CRUSH stay on the whole sound. The oscillators' routes are kept, not shown: set them in
-another mode (the noise's is on the NOISE page). The picture shows each part's sends beside its level.
+The picture shows each source's level, and beside it where it goes (FLT: into the filter; the rest as the
+[ROUTE screen](#the-route-screen) has them). Where the oscillators, the noise and the parts go is set there.
 
 **Glide** (portamento) slides each new note from the pitch of the last one. **ALWAYS** slides every note;
 **LEGATO** only when another note is still held (play overlapping to slide, apart to jump). Arpeggiated notes glide
@@ -547,10 +536,13 @@ swing and gate still apply. With CLOCK = MIDI and no clock running, the arpeggia
 
 ### FX
 
-Effects after the voices: **crush -> mod FX -> chorus -> delay -> reverb**, a page each: **FX** steps through
-CHORUS, DELAY, REVERB, MOD FX and CRUSH. Each one is off while its **MIX** (CRUSH: its BITS and RATE) is at 0. The
-chorus, delay and reverb pages draw the chain, with a mix bar under each effect and the page's own lit. CRUSH and
-MOD FX work on the synth's voices only, before the chorus: the drums have a crush of their own (DRUM page, BUS row).
+Effects after the voices, a page each, in the order they come in: **crush -> mod FX -> chorus -> delay -> reverb ->
+comp**. **FX** steps through them in that order. What goes into each, and where it goes after, is the
+[ROUTE screen](#the-route-screen)'s (as new: the voices through all but COMP, the drums straight out). Each one is off
+while its **MIX** (CRUSH: its BITS and RATE) is at 0. Every effect page draws the chain three boxes at a time:
+CRUSH -> MOD FX -> CHORUS, then DELAY -> REVERB -> COMP. Each box is a small picture of that effect as it is set, with
+its name and a mix bar under it; the page's own box is lit. A dotted arrow off the right edge (or in from the left)
+means the chain carries on, on the other three's pages. The drums also have a crush of their own (DRUM page, BUS row).
 
 | Page | Row | KNOB1 | KNOB2 | KNOB3 | KNOB4 |
 | --- | --- | --- | --- | --- | --- |
@@ -563,6 +555,8 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
 | MOD FX | MOD FX | TYPE: OFF, PHASER, FLANGER | rate | mix | depth |
 | MOD FX | TONE | MANUAL: where it sweeps around | FDBK: feedback, either way | | |
 | CRUSH | CRUSH | BITS: OFF, 15 .. 2 bits | RATE: OFF, 44100 .. 1378 Hz | | |
+| COMP | COMP | THRESH: -48 .. 0 dB | RATIO: 1:1, 1.5:1, 2:1, 3:1, 4:1, 6:1, 8:1, 12:1, 20:1, LIMIT | mix (0 dry .. 127 all compressed) | GAIN: make-up, +0 .. +24 dB |
+| COMP | C.TIME | ATTACK: 0.1 .. 100 ms | RELEASE: 10 ms .. 2 s | | |
 
 - **Chorus**: left and right swept against each other, for width. Full mix is half wet: the classic chorus.
   **MODE** picks its character:
@@ -601,6 +595,19 @@ MOD FX work on the synth's voices only, before the chorus: the drums have a crus
   is all delay, a vibrato).
 - **Crush**: BITS takes the sound down to fewer bits (grit at 12, broken at 4), RATE holds each sample longer (a
   lower sample rate, with the aliasing of an old sampler). The picture is a sine as it comes out.
+- **Comp**: a compressor. Nothing goes into it until you pin something into its **CMP** column on the ROUTE screen
+  (and as new its own row goes OUT). Whatever goes over **THRESH** is turned down by **RATIO** (at 4:1, 8 dB over
+  comes out 2 dB over; LIMIT holds it at the threshold), with a soft knee 6 dB wide. **ATTACK** is how fast it clamps
+  down, **RELEASE** how fast it lets go; **GAIN** brings the level back up. **MIX** below 127 blends the dry sound
+  back in: parallel compression, punch with the transients kept. Ideas: the drums into COMP, not OUT, for a pumping
+  bus (fast attack, ~100 ms release); the filter's output into it for a squashed, sustained synth; the reverb into it
+  for a tail that swells as the notes stop. Its box shows its curve (in across, out up) with the threshold marked,
+  and beside it a bar of how much it is turning down right now, live; **NO INPUT** while nothing is pinned into it.
+
+**The safety limiter.** After everything, always on: if the sound would go past what the output can play at the
+MASTER knob's setting, it is turned down for just that moment instead of clipping (it sees each render's peaks before
+they go out, so it adds no delay). Below that it does nothing at all, so a sound that never clipped sounds exactly as
+it did.
 
 With every effect on, Prysm uses roughly twice the CPU: watch it on the SETUP page.
 
@@ -752,10 +759,15 @@ step's hits, each as loud as it plays, or on the BUS row its settings.
 | --- | --- | --- | --- | --- |
 | STEP | the drum: KICK / SNARE / HAT / CLAP | the step (the cursor) | its HIT: --, HIT, ACCENT, (the snare) FLAM, GHOST | CLEAR the drum's lane (asks: SAVE) |
 | ROLL | the step (the cursor) | the step's ROLL: OFF, 2, 3, 4, 6, 8 hits | RAMP: EVEN; down: FADE; up: SWELL | DRUM: HAT or SNARE |
-| KICK, SNARE, HAT, CLAP | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | FILTER: how much goes through the sound's filter |
-| BUS | DRIVE | CRUSH: fewer bits and a lower rate still | DELAY send | REVERB send |
+| KICK, SNARE, HAT, CLAP | LEVEL (0: silent) | TUNE: +-24 semitones | DECAY: FULL (as made), down: shorter | PAN: L64 .. C .. R63 |
+| BUS | DRIVE | CRUSH: fewer bits and a lower rate still | | |
 | KIT | LO-FI, TR, BOOM (and any of your own) | PRESET: a beat (below) | LOAD it (turn; asks: SAVE) | GHOST: a ghost's velocity (48) |
 | EDIT | the pattern: P1 .. P4 | LANE: ALL, KICK, SNARE, HAT, CLAP | COPY (turn) | PASTE (turn; asks: SAVE) |
+
+**PAN** places each drum in the stereo picture (centre: both sides as before; turned left, the right side fades, and
+the other way round). Like the drums' pins on the ROUTE screen, it is saved with the sound, not the kit: a different
+sound can spread the kit differently. A drum sent through the filter (its FLT pin) is placed in the middle there; its
+other pins are panned.
 
 **Copying drum patterns** (EDIT row): pick the pattern with KNOB1 and the LANE with KNOB2, turn **COPY**, pick
 another pattern and turn **PASTE**. Only the drums change; the pattern's notes and length stay as they are. The copy
@@ -817,12 +829,10 @@ lo-fi, 140 for TRAP RLL, 95-110 for funk, 70-90 for neo soul and the shuffle, 90
   a swung step spreads them over its swung length. **RAMP** shapes the hits: EVEN, all at the step's level; FADE, each
   softer than the last (at most to a quarter); SWELL, rising into it. RAMP is one for every roll in the sequencer,
   saved with the kit. Taking a step's hit away takes its roll.
-- **The sends** feed the drums into the sound's **delay** and **reverb**: what comes back is that effect's MIX on its
-  page (a mixer's send and return), so with the effect's MIX at 0 nothing comes back. The rest of the drums stay dry.
-- **FILTER** sends a drum through a filter of the drums' own that follows the sound's **CUTOFF** and **RES** (and
-  its type: LP 24, or LP 12 for the others; no envelope, and it does not self-oscillate). 0: the drum dry, 127: all
-  of it filtered, between: a blend. Turn the cutoff and the hat and snare sweep with the synth while the kick stays
-  full, or the other way round.
+- **Where each drum goes** (into the filter, an effect, OUT) is on the [ROUTE screen](#the-route-screen), and is
+  saved with the sound. Through the filter, a drum goes through a filter of the drums' own that follows the sound's
+  **CUTOFF** and **RES** (and its type: LP 24, or LP 12 for the others; no envelope, and it does not self-oscillate),
+  so turn the cutoff and the hat and snare sweep with the synth while the kick stays full.
 - **CRUSH** holds each sample for up to 16 frames and cuts it to as few as 4 bits: from a little grit to a broken
   toy. **DRIVE** saturates the drums' bus before it.
 - **Copy, paste, clear** on the SEQ page's EDIT row take the drums (and the rolls) with the notes. **INIT** clears them too and puts
@@ -871,7 +881,7 @@ picture shows the MIDI setup, the battery and the **CPU** (its peak, a bar).
 - **B IN**: part B's channel, for a sound in DUAL (MIX's PARTS row). Set, notes on it play part B and notes on IN play
   part A, so a DAW can play both parts on two tracks. OFF: MIDI plays the part you are editing.
 - **HOME**: what the HOME button opens first: the **LIVE** screen (at first), or the **SCOPE**. HOME again opens the
-  other, and once more goes back.
+  other, then the ROUTE screen, and once more goes back.
 
 ---
 
@@ -966,12 +976,64 @@ down). **KNOB2** picks how it draws it:
 - It locks onto the **newest note**: the trace shows that many of its cycles, starting on a rising zero, so the
   wave stands still whatever you play. **KNOB1** sets how many cycles (1 .. 8; it starts at 2).
 - It **zooms by itself** (x1 .. x8, shown under the trace), so a single quiet note fills the screen too.
-- **HOME** again goes back to where you first pressed HOME (with SETUP's HOME on SCOPE: it opens the
-  [LIVE screen](#the-live-screen)). ALGORITHM, SAVE or a page button go back too.
+- **HOME** again opens the [ROUTE screen](#the-route-screen) (with SETUP's HOME on SCOPE: the
+  [LIVE screen](#the-live-screen)). ALGORITHM, SAVE or a page button go back to where you first pressed HOME.
 
 The scope costs no sound processing while it is not shown.
 
 ---
+
+## The ROUTE screen
+
+A pin matrix, as on a patch-panel synth: which sound goes where, and how much. Press **HOME** three times (LIVE, the
+scope, ROUTE). Down the side, the sources; across the top, where they can go. A dot is a pin: the bigger and brighter,
+the more goes through it; a small point, a place a pin could go. The header names the pin under the cursor and its
+level (**OSC 1 > FLT 127**).
+
+| Rows (from) | Columns (to) |
+| --- | --- |
+| **OSC 1**, **OSC 2**, **NOISE** (every voice's) | **FLT** the filter |
+| **KICK**, **SNARE**, **HAT**, **CLAP** | **CRS** CRUSH |
+| **FILTER** (in DUAL, SPLIT and LAYER: **FILT A** and **FILT B**, each part's) | **MFX** MOD FX |
+| **CRUSH**, **MOD FX**, **CHORUS**, **DELAY**, **REVERB**, **COMP** | **CHO** the chorus, **DLY** the delay, **REV** the reverb |
+| | **CMP** the compressor, **OUT** the outputs (the speaker, the oscilloscope, USB channels 1-2) |
+| | **U2**, **U3**: USB's other two stereo pairs, channels 3-4 and 5-6 (see [USB](#usb-audio-and-midi)) |
+
+| Control | |
+| --- | --- |
+| **KNOB1** or **SELECT** | the row |
+| **KNOB2** | the column |
+| **KNOB3** | the pin's level: OFF, 1 .. 127 (turned fast: three at a time) |
+| **KNOB4** | the pin off, or full (127) |
+| **HOME**, **ALGORITHM** | back to where you first pressed HOME |
+| **SAVE** | the PATCH screen |
+| a page button | that page |
+
+- **As a new sound has it**, it is the chain Prysm always had: the oscillators and the noise into the filter, the filter
+  into CRUSH, then MOD FX, the chorus; the chorus into the delay, the reverb and OUT; the delay into the reverb and OUT;
+  the reverb OUT. The drums straight OUT. Nothing into COMP (its own row OUT, waiting for something).
+- **An effect only feeds those after it** (left to right: CRUSH, MOD FX, CHORUS, DELAY, REVERB, COMP), so nothing can feed
+  back into itself. Pin the filter straight into the reverb and past the rest, or the delay into the chorus never.
+- **What each effect sends on.** CRUSH, MOD FX, the chorus and COMP pass on what comes in, blended by their **MIX** (MIX 0:
+  just as it came in). The delay and the reverb send on only their echoes and their tail (as a mixer's send and
+  return), as loud as their **MIX**: so pin a source both to the delay and to OUT to hear it dry and echoed. A column
+  is faint while its effect is off (its MIX at 0, or CRUSH at nothing).
+- **A source straight past the filter** (OSC 2 into CRS, not FLT) still follows the amp envelope: a bright oscillator
+  over a resonant sweep. Pinned into the filter and past it at once, it is both.
+- **Two parts** (MIX's PARTS row): each part has its own filter, so the FILTER row becomes FILT A (orange) and FILT B
+  (blue). A dry bass on A, a pad in the reverb on B: FILT A only into OUT, FILT B into REV.
+- **The drums** each have their own row: the kick dry, the hats into the delay, the snare through the filter. Through
+  the filter, they go through a filter of their own that follows the sound's (see [DRUM](#drum)).
+- **Saved with the sound**, the drums' pins too. A sound saved by an earlier version opens as it played: its
+  sources' FILTER / DIRECT become pins, DUAL's sends become each part's pins into the delay and the reverb, and its
+  drums take their pins from the sequencer's old DELAY, REVERB and FILTER sends until you change one of them.
+- Lock-lane sends (the sequencer's DLY and REV locks) still scale what goes into the delay and the reverb.
+- **U2 and U3** are recordings, not outputs you hear: what is pinned there goes to the computer over USB, on its own
+  stereo pair (U2: channels 3-4, U3: 5-6), and nowhere else. Pin the drums into U2 as well as OUT, and the filter into
+  U3, and the DAW records the drums and the synth apart, beside the full mix on 1-2. Any row can go there: an effect's
+  row sends its output (the reverb's return alone into U3: a wet track to mix later). They are not touched by MASTER,
+  the limiter or the speaker; full scale is the same level as OUT with MASTER at full. A new sound pins nothing
+  there. (The column names are on two lines, every other one lower: ten don't fit side by side.)
 
 ## The LIVE screen
 
@@ -1002,7 +1064,7 @@ FILTER FILTER DELAY REVERB         each knob's page
 | **KNOB1 .. KNOB4** | on PLAY: the parameters chosen for them. On ASSIGN: turn a knob to choose its parameter (any of the sound's, page by page); the cells show each knob's page and parameter, and nothing in the sound changes |
 | **SELECT** | the row: PLAY, or ASSIGN |
 | **PRESETS** | the cutoff, as everywhere (on ASSIGN too) |
-| **HOME** | the oscilloscope (with SETUP's HOME on SCOPE: back) |
+| **HOME** | the oscilloscope (with SETUP's HOME on SCOPE: the ROUTE screen) |
 | **ALGORITHM** | back to where you first pressed HOME |
 | **SAVE**, a page button | the PATCH screen, that page |
 
@@ -1026,12 +1088,21 @@ FILTER FILTER DELAY REVERB         each knob's page
 
 Connected to a computer, the FM-1 shows up as **Prysm FM-1**:
 
-- a **2-in audio input** (16-bit stereo, 44.1 or 48 kHz): record Prysm straight into any DAW, no cable needed. It
-  carries exactly what the speaker plays, effects included.
+- a **6-in audio input** (16-bit, 44.1 or 48 kHz; three stereo pairs, no driver): record Prysm straight into any DAW,
+  no cable needed.
+  - **Channels 1-2, "Master L / R"**: exactly what the speaker plays, effects included (MASTER sets its level).
+  - **Channels 3-4, "U2 L / R"** and **5-6, "U3 L / R"**: whatever you pin into the ROUTE screen's **U2** and **U3**
+    columns, at a fixed level (MASTER does not change them). Silent until you pin something there. Use them to record
+    stems: the drums on one pair, the synth on another, or a dry and a wet version of the same part.
+  - A DAW that only wants stereo takes channels 1-2. In macOS's Audio MIDI Setup and in most DAWs the six channels
+    show by name.
 - a **MIDI port**: notes in play Prysm (with their velocity, on the SETUP page's IN channel); channel 10 plays the
   drums; the keys' notes come out on its OUT channel; the MIDI clock can drive the arpeggiator.
 
-Prysm's USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear.
+Prysm's stereo USB audio is checked on macOS 14, where the audio of many FM-1 firmwares does not appear. The six-channel
+input is new: its descriptors and its packets are checked on a computer (tests/uac6_test.c), the same form ChoralRoot's
+six channels use, but it has not been tried on every host yet. The first time a computer sees it, it may take a few
+seconds to set the new device up.
 
 ### Filming a performance
 

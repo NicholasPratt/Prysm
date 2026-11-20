@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Prysm's effects, after the voices, in stereo: crush -> mod fx (the voices alone), then chorus -> delay -> reverb.
+/* Prysm's effects, in stereo, as the ROUTE screen pins them (engine.c: RT_; rt_render): crush, mod fx, chorus, delay,
+ * reverb, comp, each fed by the sources and the effects before it (by default the chain: crush -> mod fx -> chorus ->
+ * delay -> reverb, the delay into the reverb, as before the pins; nothing into the compressor).
  *
  *   crush    fewer bits (16 down to 2), a lower rate (each sample held 1 .. 32 frames)
  *   phaser   six first-order allpasses a side, their corner swept by a sine (left and right a quarter cycle apart)
@@ -20,13 +22,16 @@
  *            44100 Hz: pre-delay, four input diffusers, a two-sided tank whose two allpasses are swept (RATE, DEPTH:
  *            the tail's wobble); shimmer: inside the tank, one side's feed is crossfaded with itself an octave up,
  *            so the tail climbs; the loop's gain stays the decay's (< 1): it can never run away
+ *   comp     a compressor: the louder side's peak followed (ATTACK, RELEASE), its level in dB over THRESH turned
+ *            down by RATIO (a 6 dB soft knee; LIMIT: all of it), make-up GAIN, MIX in parallel with the dry. The
+ *            gain is worked out every CMP_B frames and glided to (log2 and 2^x by integer approximations)
  *
  * The drums (engine.c) have sends: their bus into the delay's and the reverb's input, beside the voices; what comes
  * back is the effect's MIX, as a mixer's return. A sequencer's lock lane on DLY SND / REV SND sets the voices' send
  * step by step (engine.c: lk_send; none locked: full).
  *
- * Integers only: samples Q15 in int32, the lines int16 (written saturated), coefficients Q15. Each effect is
- * skipped while its mix is 0 (then the dry sound passes untouched). The lines are big: in the pool (ENGINE_POOL).
+ * Integers only: samples Q15 in int32, the lines int16 (written saturated), coefficients Q15. An effect with nothing
+ * pinned into it is skipped; the delay and the reverb while their MIX is 0. The lines are big: in the pool (ENGINE_POOL).
  * fx_set() (main loop) derives what fx_render() (the audio ISR) reads. */
 
 #define CHO_N 2048u                             /* the chorus line: 46 ms */
@@ -152,6 +157,8 @@ typedef struct {
     int32_t mfx_fb, mfx_mix;                    /* Q15 (fb signed) */
     int32_t cr_mask;                            /* CRUSH: the bits kept (~0: all); the frames a sample is held (1: all) */
     uint32_t cr_hold;
+    int32_t cmp_thr, cmp_slope, cmp_make;       /* COMP: the threshold (log2 of Q15, 1/256 steps), 1 - 1 / RATIO */
+    int32_t cmp_att, cmp_rel, cmp_mix;          /*  (Q15), the make-up (1/256 octave); the follower's steps, Q15 */
 } fxp_t;
 static volatile fxp_t fxp;
 
@@ -162,6 +169,38 @@ static int32_t dly_dc[2];                       /* the repeats' DC (~3 Hz), take
                                                  * would hold an offset */
 static struct { uint32_t ph, w; int32_t x[2][PH_N], y[2][PH_N], fb[2]; } mfx;   /* MOD FX's state */
 static struct { int32_t l, r; uint32_t left; } crs;   /* CRUSH: the frame held, the frames it still is */
+static struct { int32_t env, g, dg; uint32_t k; } cmp = {0, 32768, 0, 0};   /* COMP: the level followed, the gain */
+static volatile int32_t cmp_gr;                 /* (COMP's gain reduction now, 1/256 octave (a 6 dB step a 256): */
+                                                /*  its page's meter) */
+#define CMP_B 16u                               /* (the gain worked out every CMP_B frames; a power of two) */
+#define CMP_RATIOS 10u
+static const char *const CMP_RATIO_NAME[CMP_RATIOS] = {"1:1", "1.5:1", "2:1", "3:1", "4:1", "6:1", "8:1", "12:1",
+                                                       "20:1", "LIMIT"};
+static const uint16_t CMP_SLOPE[CMP_RATIOS] = {0, 10923, 16384, 21845, 24576, 27307, 28672, 30037, 31130, 32768};
+static int32_t cmp_msb8(uint32_t x)               /* log2(x), 1/256 steps (0: 0); within 0.03 dB */
+{
+    int32_t n = 0;
+    if (!x) return 0;
+    if (x >> 16) { x >>= 16; n += 16; }         /* (the leading bit: no libgcc, no clz) */
+    if (x >> 8) { x >>= 8; n += 8; }
+    if (x >> 4) { x >>= 4; n += 4; }
+    if (x >> 2) { x >>= 2; n += 2; }
+    if (x >> 1) n += 1;
+    return n << 8;
+}
+static int32_t cmp_lg2(uint32_t x)              /* the same, with its fraction: f + f (1 - f) 0.34 */
+{
+    int32_t n = cmp_msb8(x) >> 8, f;
+    if (!x) return 0;
+    f = (int32_t)((n >= 8 ? x >> (n - 8) : x << (8 - n)) & 255u);
+    return (n << 8) + f + ((f * (256 - f) * 87) >> 16);
+}
+static uint32_t ex2_q16(int32_t e)              /* 2^(e / 256), Q16 (e: -4096 .. 3840): 1 + x (0.6602 + 0.3398 x) */
+{
+    int32_t i = e >> 8, f = e & 255;
+    uint32_t m = 65536u + (uint32_t)((f * (43266 + ((22270 * f) >> 8))) >> 8);
+    return i >= 0 ? (i > 15 ? 0xFFFFFFFFu : m << i) : i < -31 ? 0u : m >> -i;
+}
 
 static void fx_init(void)                       /* the plate's lines over rv_mem */
 {
@@ -208,6 +247,9 @@ static uint32_t dly_synced(uint32_t v)          /* SYNC: TIME's division in time
 static uint32_t dly_time_at(uint32_t v, uint32_t sync) { return sync ? dly_synced(v) : dly_time_of(v); }
 static int32_t rev_decay_of(uint32_t v) { return 6000 + (int32_t)(v & 127u) * 25500 / 127; }   /* 0.18 .. 0.96 */
 
+static uint32_t cmp_att_us(uint32_t v) { return 100u * (ex2_q16((int32_t)((v & 127u) * 2551u / 127u)) >> 8) >> 8; }   /* 0.1 */
+static uint32_t cmp_rel_us(uint32_t v) { return 10000u * (ex2_q16((int32_t)((v & 127u) * 1956u / 127u)) >> 8) >> 8; }   /* */
+                                                /*  .. 100 ms; 10 ms .. 2 s */
 static void fx_set(const patch_t *p)
 {
     uint32_t r;
@@ -256,123 +298,200 @@ static void fx_set(const patch_t *p)
     fxp.mfx_mix = (int32_t)(p->mfx_mix & 127u) * 32767 / 127;
     fxp.cr_mask = p->crush_bits & 127u ? ~((1 << (1 + (p->crush_bits & 127u) * 13 / 127)) - 1) : ~0;   /* 15 .. 2 bits */
     fxp.cr_hold = 1u + (p->crush_rate & 127u) * 31u / 127u;
+    {                                           /* COMP: -48 .. 0 dB (a 6.02 dB octave: 42.52 steps a dB) */
+        uint32_t ta = cmp_att_us(p->cmp_att) * 441u / 10000u, tr = cmp_rel_us(p->cmp_rel) / 100u * 441u / 100u;
+        fxp.cmp_thr = (15 << 8) - (int32_t)((127u - (p->cmp_thr & 127u)) * 204096u / 12700u);
+        fxp.cmp_slope = CMP_SLOPE[p->cmp_ratio < CMP_RATIOS ? p->cmp_ratio : 4u];
+        fxp.cmp_make = (int32_t)((p->cmp_gain <= 24u ? p->cmp_gain : 24u) * 4252u / 100u);
+        fxp.cmp_att = ta ? (int32_t)(65536u / (2u * ta + 1u)) : 32768;   /* (1 - e^(-1/T), near enough) */
+        fxp.cmp_rel = (int32_t)(65536u / (2u * (tr ? tr : 1u) + 1u));
+        fxp.cmp_mix = (int32_t)(p->cmp_mix & 127u) * 32768 / 127;
+    }
 }
 
-/* ---- the audio ISR: the voices (out, L R) through CRUSH and MOD FX, in place (the drums, the effects after) */
-static void modfx_render(int32_t *out, uint32_t n)
+/* ---- the audio ISR: the sources' buses (engine.c: rbus, those in used) mixed by the ROUTE screen's pins into the
+ * effects (each its input, L R), each effect's output on into the ones after it, and all that is pinned to OUT into
+ * out (L R; zeroed by the caller). A lock lane's sends (lk_send) scale what comes into the delay and the reverb from
+ * all but the drums */
+#define MAC(acc, s, g) ((acc) += (g) == 32768 ? (s) : (int32_t)(((int64_t)(s) * (g)) >> 15))
+#define RT_IN (RT_COLS - 1u)                    /* (the inputs: CRS .. OUT) */
+typedef struct { const int32_t *b; int32_t gl, gr; } rt_in_t;
+static int32_t pg_mul(int32_t a, int32_t b) { return a == 32768 ? b : b == 32768 ? a : (int32_t)(((int64_t)a * b) >> 15); }
+static void rt_render(int32_t *out, uint32_t n, const int32_t *g2, uint32_t used)
 {
-    const fxp_t p = fxp;
-    uint32_t i, j, c;
-    if (p.cr_mask != ~0 || p.cr_hold > 1u)     /* CRUSH: each frame held a while, its low bits gone */
-        for (i = 0; i < n; i++) {
-            if (!crs.left) {
-                crs.l = clip15(out[2u * i]) & p.cr_mask;
-                crs.r = clip15(out[2u * i + 1u]) & p.cr_mask;
-                crs.left = p.cr_hold;
-            }
-            crs.left--;
-            out[2u * i] = crs.l;
-            out[2u * i + 1u] = crs.r;
+    const fxp_t p = fxp;                        /* (read once: fx_set, in the main loop, cannot run during the ISR) */
+    static const uint8_t ROW[RB_BUSES] = {RT_FILTA, RT_FILTB, RT_OSC1, RT_OSC2, RT_NOISE, RT_NOISE,
+                                          RT_KICK, RT_SNARE, RT_HAT, RT_CLAP, RT_FILTA};   /* (each bus's row) */
+    static const uint8_t PART[RB_BUSES] = {0, 1, 0, 1, 0, 1, 2, 2, 2, 2, 2};   /* (its part's gains; 2: none) */
+    rt_in_t in[RT_IN][RB_BUSES];
+    uint32_t nin[RT_IN], hin = 0, b, c, f, i;
+    int32_t eg_[RT_ROWS - RT_FX0][RT_COLS];     /* (the effects' rows' pins) */
+    int32_t mpz = dly_mpz;                      /* (the newest note's mod envelopes and matrix on DLYTIME) */
+    uint32_t dest = eg.l2_dest, dtime = mpz ? dly_time_at(knob_moved(p.time_v, mpz), p.dly_sync)
+                                         : p.dly_sync ? dly_synced(p.time_v) : p.dly_time;   /* (SYNC: the tempo now) */
+    int32_t cmix = p.cho_mix, dmix = p.dly_mix, rmix = p.rev_mix, dfb = p.dly_fb, rdec = p.rev_decay;
+    int32_t vd = lk_send[0] < 0 ? 32768 : pin_g((uint32_t)lk_send[0]), vr = lk_send[1] < 0 ? 32768 : pin_g((uint32_t)lk_send[1]);
+    int crush = p.cr_mask != ~0 || p.cr_hold > 1u;
+    for (c = 0; c < RT_IN; c++) nin[c] = 0;
+    for (b = 0; b < RB_BUSES; b++) {            /* the sources: each bus's pins, by its part's level and place */
+        uint32_t r = ROW[b], drum = RT_DRUM(r);
+        int32_t gl = PART[b] < 2u ? eg.pg[PART[b]][0] : drum ? eg.dpg[r - RT_KICK][0] : 32768;   /* (a drum: */
+        int32_t gr = PART[b] < 2u ? eg.pg[PART[b]][1] : drum ? eg.dpg[r - RT_KICK][1] : 32768;   /*  its PAN) */
+        if (!(used >> b & 1u)) continue;
+        for (c = 0; c < RT_IN; c++) {
+            int32_t g = drum ? pin_g(rt_pin(&patch, r, c + 1u)) : eg.rt_g[r][c + 1u];   /* (the drums': now, as */
+                                                /*  the sequencer may change) */
+            if (!g) continue;
+            if (!drum && b != RB_DF && c + 1u == RC_DLY) g = pg_mul(g, vd);   /* (the voices' sends: a lock's) */
+            if (!drum && b != RB_DF && c + 1u == RC_REV) g = pg_mul(g, vr);
+            in[c][nin[c]].b = rbus[b];
+            in[c][nin[c]].gl = pg_mul(g, gl);
+            in[c][nin[c]].gr = pg_mul(g, gr);
+            nin[c]++;
+            hin |= 1u << c;
         }
-    if (p.mfx == MFX_PHASER) {
-        for (i = 0; i < n; i += BLK) {          /* the corner a block (each side its own), then the samples */
-            int32_t a[2];
-            mfx.ph += p.mfx_inc;
-            for (c = 0; c < 2u; c++) {
-                int32_t q = p.mfx_mid + ((p.mfx_depth * sine_q15(mfx.ph + c * 0x40000000u)) >> 15);
-                uint32_t g = PR_FILT_G[q < 0 ? 0 : q >= (int32_t)PR_FILT_N ? (int32_t)PR_FILT_N - 1 : q];
-                a[c] = 16384 - (int32_t)((0xFFFFFFFFu / ((g + (1u << 24)) >> 8)) >> 1);   /* (g-1)/(g+1), Q14 */
+    }
+    for (f = 0; f < RT_ROWS - RT_FX0; f++)      /* the effects' pins (into the delay, the reverb: a lock's too) */
+        for (c = 0; c < RT_COLS; c++) {
+            int32_t g = eg.rt_g[RT_FX0 + f][c];
+            eg_[f][c] = g && c == RC_DLY ? pg_mul(g, vd) : g && c == RC_REV ? pg_mul(g, vr) : g;
+        }
+    for (f = 0; f < 3u; f++)                    /* (CRUSH, MOD FX, CHORUS: something comes in, something goes on) */
+        if (hin >> f & 1u)
+            for (c = f + 2u; c < RT_COLS; c++)
+                if (eg_[f][c]) hin |= 1u << (c - 1u);
+    if (eg_[3][RC_CMP] || eg_[4][RC_CMP]) hin |= 1u << (RC_CMP - 1u);   /* (the delay's, the reverb's tails too) */
+    {                                           /* (USB's pairs: anything pinned there) */
+        uint32_t live = 0, k;
+        for (k = 0; k < 2u; k++) {
+            uint32_t c2 = RC_U2 + k, on = nin[c2 - 1u] != 0;
+            for (f = 0; f < RT_ROWS - RT_FX0; f++) on |= eg_[f][c2] != 0;
+            live |= on << k;
+        }
+        if (st_at + n > RB_N) live = 0;         /* (past the buffer: a render longer than the FM-1's, the host's) */
+        st_live = live;
+        hin |= live << (RC_U2 - 1u);
+    }
+    for (i = 0; i < n; i++) {
+        int32_t x[RT_IN][2], l, r;
+        uint32_t e;
+        for (c = 0; c < RT_IN; c++) {
+            int32_t al = 0, ar = 0;
+            for (e = 0; e < nin[c]; e++) {
+                int32_t s = in[c][e].b[i];
+                MAC(al, s, in[c][e].gl);
+                MAC(ar, s, in[c][e].gr);
             }
-            for (j = i; j < i + BLK && j < n; j++)
+            x[c][0] = al;
+            x[c][1] = ar;
+        }
+        if ((i & (BLK - 1u)) == 0u) {
+            if (DEST_FX(dest)) {                /* LFO 2 on an effect's knob, block by block */
+                int32_t pz = (((g2[i / BLK < MAXBLK ? i / BLK : MAXBLK - 1u] * eg.l2_amt) >> 15) * 127) >> 15;
+                switch (dest) {
+                case DEST_CHORUS: cmix = cho_mix_of(knob_moved(p.cho_v, pz)); break;
+                case DEST_DELAY: dmix = PR_CURVE_Q15[knob_moved(p.dly_v, pz)]; break;
+                case DEST_DLYTIME: dtime = dly_time_at(knob_moved(p.time_v, pz + mpz), p.dly_sync); break;
+                case DEST_DLYFB: dfb = dly_fb_of(knob_moved(p.fb_v, pz)); break;
+                case DEST_REVERB: rmix = PR_CURVE_Q15[knob_moved(p.rev_v, pz)]; break;
+                default: rdec = rev_decay_of(knob_moved(p.size_v, pz)); break;
+                }
+            }
+        }
+        if (hin & 1u) {                         /* CRUSH: each frame held a while, its low bits gone */
+            l = x[0][0]; r = x[0][1];
+            if (crush) {
+                if (!crs.left) {
+                    crs.l = clip15(l) & p.cr_mask;
+                    crs.r = clip15(r) & p.cr_mask;
+                    crs.left = p.cr_hold;
+                }
+                crs.left--;
+                l = crs.l; r = crs.r;
+            }
+            for (c = RC_MFX; c < RT_COLS; c++)
+                if (eg_[0][c]) { MAC(x[c - 1u][0], l, eg_[0][c]); MAC(x[c - 1u][1], r, eg_[0][c]); }
+        }
+        if (hin & 2u) {                         /* MOD FX */
+            l = x[1][0]; r = x[1][1];
+            if (p.mfx == MFX_PHASER) {          /* the corner a block (each side its own), then the samples */
+                static int32_t pa[2];
+                int32_t *ch[2] = {&l, &r};
+                if ((i & (BLK - 1u)) == 0u) {
+                    mfx.ph += p.mfx_inc;
+                    for (c = 0; c < 2u; c++) {
+                        int32_t q = p.mfx_mid + ((p.mfx_depth * sine_q15(mfx.ph + c * 0x40000000u)) >> 15);
+                        uint32_t g = PR_FILT_G[q < 0 ? 0 : q >= (int32_t)PR_FILT_N ? (int32_t)PR_FILT_N - 1 : q];
+                        pa[c] = 16384 - (int32_t)((0xFFFFFFFFu / ((g + (1u << 24)) >> 8)) >> 1);   /* (g-1)/(g+1), Q14 */
+                    }
+                }
                 for (c = 0; c < 2u; c++) {
-                    int32_t x = clip15(out[2u * j + c]), u = x + ((mfx.fb[c] * p.mfx_fb) >> 15), k, t;
+                    int32_t xx = clip15(*ch[c]), u = xx + ((mfx.fb[c] * p.mfx_fb) >> 15), k, t;
                     for (k = 0; k < (int32_t)PH_N; k++) {   /* y = a (u - y1) + u1 */
-                        t = (((u - mfx.y[c][k]) * a[c]) >> 14) + mfx.x[c][k];
+                        t = (((u - mfx.y[c][k]) * pa[c]) >> 14) + mfx.x[c][k];
                         mfx.x[c][k] = u;
                         mfx.y[c][k] = u = clip15(t);
                     }
                     mfx.fb[c] = u;
-                    out[2u * j + c] = x + (((u - x) * p.mfx_mix) >> 15);
+                    *ch[c] = xx + (((u - xx) * p.mfx_mix) >> 15);
                 }
-        }
-    } else if (p.mfx == MFX_FLANGER) {
-        for (i = 0; i < n; i++) {
-            if ((i & (BLK - 1u)) == 0u) mfx.ph += p.mfx_inc;
-            for (c = 0; c < 2u; c++) {
-                int32_t x = clip15(out[2u * i + c]), w;
-                int32_t d = p.mfx_mid + (int32_t)(((int64_t)p.mfx_depth * sine_q15(mfx.ph + c * 0x40000000u)) >> 15);
-                if (d < (1 << 16)) d = 1 << 16;
-                w = rd_frac(fl_buf[c], FL_N - 1u, mfx.w, (uint32_t)d);
-                fl_buf[c][mfx.w & (FL_N - 1u)] = sat16(x + ((w * p.mfx_fb) >> 15));
-                out[2u * i + c] = x + (((w - x) * p.mfx_mix) >> 15);
+            } else if (p.mfx == MFX_FLANGER) {
+                int32_t *ch[2] = {&l, &r};
+                if ((i & (BLK - 1u)) == 0u) mfx.ph += p.mfx_inc;
+                for (c = 0; c < 2u; c++) {
+                    int32_t xx = clip15(*ch[c]), w;
+                    int32_t d = p.mfx_mid + (int32_t)(((int64_t)p.mfx_depth * sine_q15(mfx.ph + c * 0x40000000u)) >> 15);
+                    if (d < (1 << 16)) d = 1 << 16;
+                    w = rd_frac(fl_buf[c], FL_N - 1u, mfx.w, (uint32_t)d);
+                    fl_buf[c][mfx.w & (FL_N - 1u)] = sat16(xx + ((w * p.mfx_fb) >> 15));
+                    *ch[c] = xx + (((w - xx) * p.mfx_mix) >> 15);
+                }
+                mfx.w++;
             }
-            mfx.w++;
+            for (c = RC_CHO; c < RT_COLS; c++)
+                if (eg_[1][c]) { MAC(x[c - 1u][0], l, eg_[1][c]); MAC(x[c - 1u][1], r, eg_[1][c]); }
         }
-    }
-}
-
-/* ---- the audio ISR: out (L R, the voices) -> chorus, delay, reverb, in place; dr: the drums' bus (mono, or 0), sent
- * into the delay and the reverb; snd: DUAL's sends (engine.c: psnd_buf, a frame's delay L R, the reverb's L+R), or 0:
- * the voices as they are (after the chorus) into both */
-static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t *dr, const int32_t *snd)
-{
-    const fxp_t p = fxp;                        /* (read once: fx_set, in the main loop, cannot run during the ISR) */
-    int32_t mpz = dly_mpz;                      /* (the newest note's mod envelopes and matrix on DLYTIME) */
-    uint32_t i, dest = eg.l2_dest, dtime = mpz ? dly_time_at(knob_moved(p.time_v, mpz), p.dly_sync)
-                                         : p.dly_sync ? dly_synced(p.time_v) : p.dly_time;   /* (SYNC: the tempo now) */
-    int32_t cmix = p.cho_mix, dmix = p.dly_mix, rmix = p.rev_mix, dfb = p.dly_fb, rdec = p.rev_decay;
-    int32_t dsend = dr ? PR_CURVE_Q15[seqs.dr_dly & 127u] : 0, rsend = dr ? PR_CURVE_Q15[seqs.dr_rev & 127u] : 0;
-    int32_t vd = lk_send[0] < 0 ? 32767 : PR_CURVE_Q15[lk_send[0] & 127], vr = lk_send[1] < 0 ? 32767 : PR_CURVE_Q15[lk_send[1] & 127];
-    if (!cmix && !dmix && !rmix && !(eg.l2_amt && (dest == DEST_CHORUS || dest == DEST_DELAY || dest == DEST_REVERB)))
-        return;
-    for (i = 0; i < n; i++) {
-        int32_t l = out[2u * i], r = out[2u * i + 1u];
-        if (DEST_FX(dest) && (i & (BLK - 1u)) == 0u) {   /* LFO 2 on an effect's knob, block by block */
-            int32_t pz = (((g2[i / BLK < MAXBLK ? i / BLK : MAXBLK - 1u] * eg.l2_amt) >> 15) * 127) >> 15;
-            switch (dest) {
-            case DEST_CHORUS: cmix = cho_mix_of(knob_moved(p.cho_v, pz)); break;
-            case DEST_DELAY: dmix = PR_CURVE_Q15[knob_moved(p.dly_v, pz)]; break;
-            case DEST_DLYTIME: dtime = dly_time_at(knob_moved(p.time_v, pz + mpz), p.dly_sync); break;
-            case DEST_DLYFB: dfb = dly_fb_of(knob_moved(p.fb_v, pz)); break;
-            case DEST_REVERB: rmix = PR_CURVE_Q15[knob_moved(p.rev_v, pz)]; break;
-            default: rdec = rev_decay_of(knob_moved(p.size_v, pz)); break;
+        if (hin & 4u) {                         /* CHORUS */
+            l = x[2][0]; r = x[2][1];
+            if (cmix && p.cho_mode != CHO_FREE) {   /* a fixed mode: the mono sum through the BBD's low-passes */
+                uint32_t ph = cho_ph;           /* into the line; two taps swept by a triangle in antiphase */
+                int32_t tri = (int32_t)(((ph >> 31) ? ~ph : ph) >> 15) - 32768, dv, wl, wr;
+                cho_lp[0] += ((((l + r) >> 1) - cho_lp[0]) * CHO_BBD) >> 15;
+                cho_lp[1] += ((cho_lp[0] - cho_lp[1]) * CHO_BBD) >> 15;
+                cho_buf[cho_w & (CHO_N - 1u)] = sat16(cho_lp[1]);
+                cho_w++;
+                cho_ph += p.cho_inc;
+                dv = (int32_t)(((int64_t)p.cho_depth * tri) >> 15);
+                wl = rd_frac(cho_buf, CHO_N - 1u, cho_w, p.cho_c + (uint32_t)dv);
+                wr = rd_frac(cho_buf, CHO_N - 1u, cho_w, p.cho_c - (uint32_t)dv);
+                cho_po[0] += ((wl - cho_po[0]) * CHO_BBD) >> 15;
+                cho_po[1] += ((wr - cho_po[1]) * CHO_BBD) >> 15;
+                wl = cho_po[0] - ((cho_po[1] * p.cho_x) >> 15);   /* (DIM: some of the other side out) */
+                wr = cho_po[1] - ((cho_po[0] * p.cho_x) >> 15);
+                {                               /* WIDTH: the sides, around their middle */
+                    int32_t mid = (wl + wr) >> 1, side = (int32_t)(((int64_t)((wl - wr) >> 1) * p.cho_wid) >> 15);
+                    wl = mid + side;
+                    wr = mid - side;
+                }
+                l += ((wl - l) * cmix) >> 15;
+                r += ((wr - r) * cmix) >> 15;
+            } else if (cmix) {                  /* FREE: the mono sum into the line; two swept taps */
+                int32_t sl = sine_q15(cho_ph), sr = sine_q15(cho_ph + 0x40000000u), wl, wr;
+                uint32_t base = 309u << 16;     /* 7 ms */
+                cho_buf[cho_w & (CHO_N - 1u)] = sat16((l + r) >> 1);
+                cho_w++;
+                cho_ph += p.cho_inc;
+                wl = rd_frac(cho_buf, CHO_N - 1u, cho_w, base + (uint32_t)(((int64_t)p.cho_depth * sl) >> 15));
+                wr = rd_frac(cho_buf, CHO_N - 1u, cho_w, base + (uint32_t)(((int64_t)p.cho_depth * sr) >> 15));
+                l += ((wl - l) * cmix) >> 15;
+                r += ((wr - r) * cmix) >> 15;
             }
+            for (c = RC_DLY; c < RT_COLS; c++)
+                if (eg_[2][c]) { MAC(x[c - 1u][0], l, eg_[2][c]); MAC(x[c - 1u][1], r, eg_[2][c]); }
         }
-        if (cmix && p.cho_mode != CHO_FREE) {   /* chorus, a fixed mode: the mono sum through the BBD's low-passes */
-            uint32_t ph = cho_ph;               /* into the line; two taps swept by a triangle in antiphase */
-            int32_t tri = (int32_t)(((ph >> 31) ? ~ph : ph) >> 15) - 32768, dv, wl, wr;
-            cho_lp[0] += ((((l + r) >> 1) - cho_lp[0]) * CHO_BBD) >> 15;
-            cho_lp[1] += ((cho_lp[0] - cho_lp[1]) * CHO_BBD) >> 15;
-            cho_buf[cho_w & (CHO_N - 1u)] = sat16(cho_lp[1]);
-            cho_w++;
-            cho_ph += p.cho_inc;
-            dv = (int32_t)(((int64_t)p.cho_depth * tri) >> 15);
-            wl = rd_frac(cho_buf, CHO_N - 1u, cho_w, p.cho_c + (uint32_t)dv);
-            wr = rd_frac(cho_buf, CHO_N - 1u, cho_w, p.cho_c - (uint32_t)dv);
-            cho_po[0] += ((wl - cho_po[0]) * CHO_BBD) >> 15;
-            cho_po[1] += ((wr - cho_po[1]) * CHO_BBD) >> 15;
-            wl = cho_po[0] - ((cho_po[1] * p.cho_x) >> 15);   /* (DIM: some of the other side out) */
-            wr = cho_po[1] - ((cho_po[0] * p.cho_x) >> 15);
-            {                                   /* WIDTH: the sides, around their middle */
-                int32_t mid = (wl + wr) >> 1, side = (int32_t)(((int64_t)((wl - wr) >> 1) * p.cho_wid) >> 15);
-                wl = mid + side;
-                wr = mid - side;
-            }
-            l += ((wl - l) * cmix) >> 15;
-            r += ((wr - r) * cmix) >> 15;
-        } else if (cmix) {                      /* chorus, FREE: the mono sum into the line; two swept taps */
-            int32_t sl = sine_q15(cho_ph), sr = sine_q15(cho_ph + 0x40000000u), wl, wr;
-            uint32_t base = 309u << 16;         /* 7 ms */
-            cho_buf[cho_w & (CHO_N - 1u)] = sat16((l + r) >> 1);
-            cho_w++;
-            cho_ph += p.cho_inc;
-            wl = rd_frac(cho_buf, CHO_N - 1u, cho_w, base + (uint32_t)(((int64_t)p.cho_depth * sl) >> 15));
-            wr = rd_frac(cho_buf, CHO_N - 1u, cho_w, base + (uint32_t)(((int64_t)p.cho_depth * sr) >> 15));
-            l += ((wl - l) * cmix) >> 15;
-            r += ((wr - r) * cmix) >> 15;
-        }
-        if (dmix) {                             /* delay: wow on its time, feedback through tone (and shift) */
+        if (dmix) {                             /* DELAY: wow on its time, feedback through tone (and shift) */
             int32_t wob = (int32_t)(((int64_t)p.wow_depth * sine_q15(wow_ph)) >> 15), tl, tr, fl, fr;
+            int32_t il = x[RC_DLY - 1u][0], ir = x[RC_DLY - 1u][1];
             uint32_t d;
             if ((i & (BLK - 1u)) == 0u) {       /* the time glides (a change bends the repeats, as tape does) */
                 int32_t dd = (int32_t)(dtime - dly_time_q8) >> 6;
@@ -386,59 +505,52 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
             dly_lp[1] += ((tr - dly_lp[1]) * p.dly_tone) >> 15;
             dly_dc[0] += (dly_lp[0] - dly_dc[0]) >> 11;   /* (followed always: in step when FDBK crosses over) */
             dly_dc[1] += (dly_lp[1] - dly_dc[1]) >> 11;
-            if (dfb > DLY_FB_SOFT) {          /* the top of FDBK: past unity, saturating (self-oscillation) */
+            if (dfb > DLY_FB_SOFT) {            /* the top of FDBK: past unity, saturating (self-oscillation) */
                 fl = fb_soft(((dly_lp[0] - dly_dc[0]) * dfb) >> 15);
                 fr = fb_soft(((dly_lp[1] - dly_dc[1]) * dfb) >> 15);
             } else {
                 fl = (dly_lp[0] * dfb) >> 15;
                 fr = (dly_lp[1] * dfb) >> 15;
             }
-            if (p.dly_ratio != 65536u) {      /* SHIFT: each repeat a step up or down */
+            if (p.dly_ratio != 65536u) {        /* SHIFT: each repeat a step up or down */
                 fl = shift(&sh_dly[0], fl, p.dly_ratio);
                 fr = shift(&sh_dly[1], fr, p.dly_ratio);
             }
-            {
-                int32_t ds = dsend ? (dr[i] * dsend) >> 15 : 0;   /* (the drums' send) */
-                int32_t s_l = snd ? snd[3u * i] : l, s_r = snd ? snd[3u * i + 1u] : r;   /* (the voices': DUAL, each */
-                int32_t il = vd == 32767 ? s_l : (s_l * vd) >> 15, ir = vd == 32767 ? s_r : (s_r * vd) >> 15;   /* part's) */
-                if (p.dly_ping) {             /* ping-pong: in on the left, then across and back */
-                    dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(((il + ir) >> 1) + ds + fr);
-                    dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(fl);
-                } else {
-                    dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(il + ds + fl);
-                    dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(ir + ds + fr);
-                }
+            if (p.dly_ping) {                   /* ping-pong: in on the left, then across and back */
+                dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(((il + ir) >> 1) + fr);
+                dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(fl);
+            } else {
+                dly_buf[0][dly_w & (DLY_N - 1u)] = sat16(il + fl);
+                dly_buf[1][dly_w & (DLY_N - 1u)] = sat16(ir + fr);
             }
             dly_w++;
-            l += (tl * dmix) >> 15;
-            r += (tr * dmix) >> 15;
+            l = (tl * dmix) >> 15;
+            r = (tr * dmix) >> 15;
+            for (c = RC_REV; c < RT_COLS; c++)
+                if (eg_[3][c]) { MAC(x[c - 1u][0], l, eg_[3][c]); MAC(x[c - 1u][1], r, eg_[3][c]); }
         }
-        if (rmix) {                             /* the plate */
-            int32_t x, sl, sr, yl, yr, a, b2;
+        if (rmix) {                             /* REVERB: the plate */
+            int32_t xx, sl, sr, yl, yr, a, b2;
             uint32_t e0, e1;
-            x = (snd ? snd[3u * i + 2u] : l + r) >> 2;   /* (half the mono sum: headroom in the tank) */
-            if (vr != 32767)                    /* (the voices' send: a lock lane's) */
-                x = (x * vr) >> 15;
-            if (rsend)                          /* (the drums' send, as much of it) */
-                x += (dr[i] * rsend) >> 16;
-            pre_buf[pre_w & (PRE_N - 1u)] = sat16(x);
+            xx = (x[RC_REV - 1u][0] + x[RC_REV - 1u][1]) >> 2;   /* (half the mono sum: headroom in the tank) */
+            pre_buf[pre_w & (PRE_N - 1u)] = sat16(xx);
             pre_w++;
-            x = pre_buf[(pre_w - 1u - p.rev_pre) & (PRE_N - 1u)];
-            x = allpass(&rv_in[0], x, 24576, 0);   /* 0.75, 0.75, 0.625, 0.625 */
-            x = allpass(&rv_in[1], x, 24576, 0);
-            x = allpass(&rv_in[2], x, 20480, 0);
-            x = allpass(&rv_in[3], x, 20480, 0);
-            rev_ph += p.rev_inc;              /* the tank's sweep: left and right a quarter cycle apart */
+            xx = pre_buf[(pre_w - 1u - p.rev_pre) & (PRE_N - 1u)];
+            xx = allpass(&rv_in[0], xx, 24576, 0);   /* 0.75, 0.75, 0.625, 0.625 */
+            xx = allpass(&rv_in[1], xx, 24576, 0);
+            xx = allpass(&rv_in[2], xx, 20480, 0);
+            xx = allpass(&rv_in[3], xx, 20480, 0);
+            rev_ph += p.rev_inc;                /* the tank's sweep: left and right a quarter cycle apart */
             e0 = (uint32_t)(((int32_t)(L_AP1L + EXC / 2u) << 16) +
                             (int32_t)(((int64_t)p.rev_depth * sine_q15(rev_ph)) >> 16));
             e1 = (uint32_t)(((int32_t)(L_AP1R + EXC / 2u) << 16) +
                             (int32_t)(((int64_t)p.rev_depth * sine_q15(rev_ph + 0x40000000u)) >> 16));
             a = ln_rd(&rv_d2[0], L_D2L);        /* the two sides' ends */
             b2 = ln_rd(&rv_d2[1], L_D2R);
-            if (p.rev_shim)                   /* shimmer: the left end, partly an octave up, feeds the right */
+            if (p.rev_shim)                     /* shimmer: the left end, partly an octave up, feeds the right */
                 a += ((shift(&sh_rev, a, 131072u) - a) * p.rev_shim) >> 15;
-            sl = x + ((b2 * rdec) >> 15);   /* each side fed by the other's end */
-            sr = x + ((a * rdec) >> 15);
+            sl = xx + ((b2 * rdec) >> 15);      /* each side fed by the other's end */
+            sr = xx + ((a * rdec) >> 15);
             sl = allpass(&rv_ap1[0], sl, -22938, e0);   /* -0.70: decay diffusion 1, swept */
             sr = allpass(&rv_ap1[1], sr, -22938, e1);
             a = ln_rd(&rv_d1[0], L_D1L);
@@ -456,10 +568,42 @@ static void fx_render(int32_t *out, uint32_t n, const int32_t *g2, const int32_t
                  ln_rd(&rv_d1[0], 2949) - ln_rd(&rv_ap2[0], 277) - ln_rd(&rv_d2[0], 1580);
             yr = ln_rd(&rv_d1[0], 523) + ln_rd(&rv_d1[0], 5374) - ln_rd(&rv_ap2[0], 1820) + ln_rd(&rv_d2[0], 3961) -
                  ln_rd(&rv_d1[1], 3128) - ln_rd(&rv_ap2[1], 496) - ln_rd(&rv_d2[1], 179);
-            l += (((yl * 19661) >> 15) * rmix) >> 15;   /* (0.6: the seven taps add up) */
-            r += (((yr * 19661) >> 15) * rmix) >> 15;
+            l = (((yl * 19661) >> 15) * rmix) >> 15;   /* (0.6: the seven taps add up) */
+            r = (((yr * 19661) >> 15) * rmix) >> 15;
+            for (c = RC_CMP; c < RT_COLS; c++)
+                if (eg_[4][c]) { MAC(x[c - 1u][0], l, eg_[4][c]); MAC(x[c - 1u][1], r, eg_[4][c]); }
         }
-        out[2u * i] = l;
-        out[2u * i + 1u] = r;
+        if (hin >> (RC_CMP - 1u) & 1u) {        /* COMP: the louder side's peak followed; every CMP_B frames the */
+            int32_t a, al, ar;                  /*  gain from it, glided to */
+            l = x[RC_CMP - 1u][0]; r = x[RC_CMP - 1u][1];
+            al = l < 0 ? -l : l; ar = r < 0 ? -r : r;
+            a = al > ar ? al : ar;
+            cmp.env += (int32_t)(((int64_t)(a - cmp.env) * (a > cmp.env ? p.cmp_att : p.cmp_rel)) >> 15);
+            if ((cmp.k++ & (CMP_B - 1u)) == 0u) {
+                int32_t over = cmp_lg2((uint32_t)(cmp.env > 0 ? cmp.env : 0)) - p.cmp_thr, gr = 0, gt;
+                if (over >= 128) gr = (over * p.cmp_slope) >> 15;   /* (over the knee: by RATIO) */
+                else if (over > -128) gr = ((((over + 128) * (over + 128)) >> 9) * p.cmp_slope) >> 15;   /* (in it: */
+                cmp_gr = gr;                    /*  a curve into the line, 6 dB wide) */
+                gt = (int32_t)(ex2_q16(p.cmp_make - gr) >> 1);   /* (Q15) */
+                cmp.dg = (gt - cmp.g) / (int32_t)CMP_B;
+            }
+            cmp.g += cmp.dg;
+            if (p.cmp_mix) {
+                int32_t yl = (int32_t)(((int64_t)l * cmp.g) >> 15), yr = (int32_t)(((int64_t)r * cmp.g) >> 15);
+                l += (int32_t)(((int64_t)(yl - l) * p.cmp_mix) >> 15);
+                r += (int32_t)(((int64_t)(yr - r) * p.cmp_mix) >> 15);
+            }
+            for (c = RC_OUT; c < RT_COLS; c++)
+                if (eg_[5][c]) { MAC(x[c - 1u][0], l, eg_[5][c]); MAC(x[c - 1u][1], r, eg_[5][c]); }
+        }
+        out[2u * i] += x[RC_OUT - 1u][0];
+        out[2u * i + 1u] += x[RC_OUT - 1u][1];
+        if (hin >> (RC_U2 - 1u)) {              /* USB's pairs, 16 bit */
+            uint32_t k;
+            for (k = 0; k < 2u; k++)
+                st_buf[k][st_at + i] = (uint32_t)(uint16_t)clip15(x[RC_U2 - 1u + k][0]) |
+                                       (uint32_t)(uint16_t)clip15(x[RC_U2 - 1u + k][1]) << 16;
+        }
     }
+    if (hin >> (RC_U2 - 1u)) st_at += n;
 }

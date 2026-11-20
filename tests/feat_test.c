@@ -100,7 +100,7 @@ static uint64_t fx_case(uint32_t i)              /* a note's energy: i 0 the def
 }
 
 
-/* the chorus alone (fx_render) on a sine of f Hz (0: white noise), mode m at full MIX, its last second: the RMS of left, of left - right,
+/* the chorus alone (rt_render, from the filter's bus) on a sine of f Hz (0: white noise), mode m at full MIX, its last second: the RMS of left, of left - right,
  * of the dry sine (the delay and the reverb off) */
 static void cho_run(uint32_t m, uint32_t f, uint32_t wid, double *rl, double *rd, double *rdry)
 {
@@ -116,10 +116,11 @@ static void cho_run(uint32_t m, uint32_t f, uint32_t wid, double *rl, double *rd
             rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
             x = f ? sine_q15(ph) / 2 : (int32_t)(rng >> 18) - 8192;
             ph += inc;
-            o[2u * j] = o[2u * j + 1u] = x;
+            rbus[RB_FA][j] = x;                 /* (the filter's bus: as the voices', the chain's start) */
+            o[2u * j] = o[2u * j + 1u] = 0;
             if (n >= 44100u) sx += (double)x * x;
         }
-        fx_render(o, 256u, 0, 0, 0);
+        rt_render(o, 256u, 0, 1u << RB_FA);
         if (n >= 44100u)
             for (j = 0; j < 256u; j++) {
                 double l = o[2u * j], r = o[2u * j + 1u];
@@ -127,6 +128,32 @@ static void cho_run(uint32_t m, uint32_t f, uint32_t wid, double *rl, double *rd
             }
     }
     *rl = __builtin_sqrt(sl); *rd = __builtin_sqrt(sd); *rdry = __builtin_sqrt(sx);
+}
+
+/* COMP alone: the filter's bus (a 1 kHz sine at amp, Q15) into it, it out; the last half second's peak (Q15) */
+static int32_t cmp_run(int32_t amp, uint32_t thr, uint32_t ratio, uint32_t gain, uint32_t mix)
+{
+    static int32_t o[2u * 256u];
+    uint32_t n, j, ph = 0, inc = (uint32_t)(1000ull * 0x100000000ull / 44100u);
+    int32_t pk = 0;
+    edit = PATCH_INIT;
+    edit.cho_mix = edit.dly_mix = edit.rev_mix = 0; edit.lfo2_dest = DEST_OFF;
+    memset(edit.rt[RT_FILTA], 0, sizeof edit.rt[RT_FILTA]);
+    edit.rt[RT_FILTA][RC_CMP] = 127;
+    edit.cmp_thr = (uint8_t)thr; edit.cmp_ratio = (uint8_t)ratio; edit.cmp_gain = (uint8_t)gain; edit.cmp_mix = (uint8_t)mix;
+    edit.cmp_att = 20; edit.cmp_rel = 40;
+    engine_set(&edit);
+    for (n = 0; n < 44100u; n += 256u) {
+        for (j = 0; j < 256u; j++) {
+            rbus[RB_FA][j] = (int32_t)(((int64_t)sine_q15(ph) * amp) >> 15);
+            ph += inc;
+            o[2u * j] = o[2u * j + 1u] = 0;
+        }
+        rt_render(o, 256u, 0, 1u << RB_FA);
+        if (n >= 22050u)
+            for (j = 0; j < 512u; j++) pk = o[j] > pk ? o[j] : -o[j] > pk ? -o[j] : pk;
+    }
+    return pk;
 }
 
 int main(void)
@@ -472,6 +499,89 @@ int main(void)
     seq_action(K_SCLEAR);
     CHECK(!seqs.pat[1].lk[1][35] && seqs.pat[0].lk[1][3] == 91u, "CLEAR: the row's locks gone (the copy's kept)");
 
+    {   /* COMP: a sine 6 dB over full scale's -18 dB threshold; LIMIT holds it near the threshold, 4:1 at 1.5 dB over
+         * (a quarter of its 6), 1:1 as it came, MIX 0 as it came; GAIN +6 doubles it; under the threshold, untouched */
+        const int32_t A = 16384, T = 4110;      /* (-6 dBFS in; -18 dBFS: 4110) */
+        int32_t lim = cmp_run(A, 80, CMP_RATIOS - 1u, 0, 127), r4 = cmp_run(A, 80, 4, 0, 127), one = cmp_run(A, 80, 0, 0, 127);
+        int32_t dry = cmp_run(A, 80, 4, 0, 0), up = cmp_run(A, 80, 4, 6, 127), low = cmp_run(2048, 80, 4, 0, 127);
+        CHECK(lim > T * 89 / 100 && lim < T * 112 / 100, "COMP LIMIT: -6 dB in, held at the -18 dB threshold (%d, %d)", lim, T);
+        CHECK(r4 > T * 13 / 10 && r4 < T * 16 / 10, "... 4:1: 12 dB over, 3 dB over it (%d; x1.41: %d)", r4, T * 141 / 100);
+        CHECK(one > A * 98 / 100 && one <= A + 2 && dry > A * 98 / 100 && dry <= A + 2,
+              "... 1:1, MIX 0: as it came (%d, %d of %d)", one, dry, A);
+        CHECK(up > r4 * 195 / 100 && up < r4 * 205 / 100, "... GAIN +6 dB: twice as loud (%d, %d)", up, r4);
+        CHECK(low > 2048 * 98 / 100 && low <= 2048 + 2, "... under the threshold: untouched (%d)", low);
+    }
+    {   /* the safety limiter: 2.5x full scale out of nowhere: no frame past the ceiling, from the first render; under
+         * it, every frame as it was */
+        static int32_t o[2u * 256u];
+        uint32_t k, j, ok = 1, same = 1, ph = 0;
+        lim_ceil = 32767; lim_g = 32768;
+        for (k = 0; k < 40u; k++) {
+            int32_t a = k < 20u ? 81920 : 16000, in[2u * 256u];
+            for (j = 0; j < 256u; j++, ph += 0x02000000u) o[2u * j] = o[2u * j + 1u] = in[2u * j] = in[2u * j + 1u] = (int32_t)(((int64_t)sine_q15(ph) * a) >> 15);
+            lim_render(o, 256u);
+            for (j = 0; j < 512u; j++) {
+                ok &= o[j] <= 32767 && o[j] >= -32767;
+                if (k >= 36u) same &= o[j] == in[j];
+            }
+        }
+        CHECK(ok, "the limiter: 2.5x full scale, never past it");
+        CHECK(same, "... then under it, after its release: every frame as it was");
+        lim_g = 32768;
+    }
+    {   /* USB's pairs (U2, U3): FILT A to OUT and U2, so U2 is OUT frame for frame and U3 silent; then the chorus
+         * into U3 too; nothing pinned: neither live */
+        static int32_t o[2u * 256u];
+        uint32_t j, n, same = 1, u3 = 0, ph = 0;
+        edit = PATCH_INIT;
+        edit.cho_mix = edit.dly_mix = edit.rev_mix = 0; edit.lfo2_dest = DEST_OFF;
+        memset(edit.rt[RT_FILTA], 0, sizeof edit.rt[RT_FILTA]);
+        edit.rt[RT_FILTA][RC_OUT] = edit.rt[RT_FILTA][RC_U2] = 127;
+        engine_set(&edit);
+        for (j = 0; j < 256u; j++, ph += 0x01000000u) { rbus[RB_FA][j] = sine_q15(ph) / 2; o[2u * j] = o[2u * j + 1u] = 0; }
+        engine_stems_start();
+        rt_render(o, 256u, 0, 1u << RB_FA);
+        for (j = 0; j < 256u; j++) {
+            same &= (int16_t)(st_buf[0][j] & 0xFFFFu) == clip15(o[2u * j]) && (int16_t)(st_buf[0][j] >> 16) == clip15(o[2u * j + 1u]);
+            u3 |= st_buf[1][j];
+        }
+        CHECK(st_live == 1u && same && !u3 && st_at == 256u, "USB: FILT A into U2 as into OUT, frame for frame; U3 silent (%u)",
+              (unsigned)st_live);
+        edit.rt[RT_FILTA][RC_CHO] = 127; edit.rt[RT_CHO][RC_OUT] = 0; edit.rt[RT_CHO][RC_U3] = 127; edit.cho_mix = 127;
+        engine_set(&edit);
+        for (n = 0; n < 8u; n++) {
+            for (j = 0; j < 512u; j++) o[j] = 0;
+            engine_stems_start();
+            rt_render(o, 256u, 0, 1u << RB_FA);
+        }
+        for (j = 0, u3 = 0; j < 256u; j++) u3 |= st_buf[1][j];
+        CHECK(st_live == 3u && u3, "... the chorus into U3: both live, U3 sounds (%u)", (unsigned)st_live);
+        edit = PATCH_INIT;
+        engine_set(&edit);
+        engine_stems_start();
+        rt_render(o, 256u, 0, 1u << RB_FA);
+        CHECK(st_live == 0u && st_at == 0u, "... the default sound: nothing pinned there, neither live");
+    }
+    {   /* a drum's PAN: the kick hard left: its left as centred, its right silent; centred: both the same */
+        static int32_t o[2u * 256u];
+        uint32_t j;
+        int32_t l = 0, r = 0, lc = 0, rc = 0;
+        edit = PATCH_INIT;
+        edit.cho_mix = edit.dly_mix = edit.rev_mix = 0; edit.lfo2_dest = DEST_OFF;
+        engine_set(&edit);
+        for (j = 0; j < 256u; j++) { rbus[RB_KICK][j] = 8000; o[2u * j] = o[2u * j + 1u] = 0; }
+        rt_render(o, 256u, 0, 1u << RB_KICK);
+        lc = o[256]; rc = o[257];
+        edit.dr_pan[0] = 0;
+        engine_set(&edit);
+        for (j = 0; j < 512u; j++) o[j] = 0;
+        rt_render(o, 256u, 0, 1u << RB_KICK);
+        l = o[256]; r = o[257];
+        CHECK(lc == rc && lc > 7000 && l == lc && r == 0, "a drum's PAN: centred L = R (%d %d); hard left: L as centred, R none "
+              "(%d %d)", lc, rc, l, r);
+        edit = PATCH_INIT;
+        engine_set(&edit);
+    }
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;
 }

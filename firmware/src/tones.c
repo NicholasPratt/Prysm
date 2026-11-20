@@ -53,7 +53,11 @@ static void tone_get(const patch_t *p, uint32_t part, tone_t *t)   /* part (0 A,
     t->lvl = o ? p->lvl2 : p->lvl1;
     t->semi = o ? p->semi2 : 24u;
     t->fine = o ? p->fine2 : 64u;
-    t->route = p->route[o];
+    {                                           /* (its route: past the filter, the ROUTE screen's pins have it so) */
+        uint32_t c, dir = 0;
+        for (c = RC_CRS; c < RC_U2; c++) dir |= p->rt[o][c] != 0;   /* (USB's pairs: not a route) */
+        t->route = (uint8_t)(!p->rt[o][RC_FLT] && dir ? ROUTE_DIRECT : ROUTE_FILTER);
+    }
     t->trn[0] = p->trn_type[o]; t->trn[1] = p->trn_lvl[o]; t->trn[2] = p->trn_tune[o]; t->trn[3] = p->trn_dec[o];
     for (i = 0; i < PART_N; i++) {
         uint32_t v = o ? p->pb[i] : ((const uint8_t *)p)[PART_OFF[i]];
@@ -70,7 +74,17 @@ static void tone_put(patch_t *p, uint32_t part, const tone_t *t)   /* a tone int
         p->mfine[o][k] = t->mfine[k];
     }
     if (o) { p->lvl2 = t->lvl; p->semi2 = t->semi; p->fine2 = t->fine; } else p->lvl1 = t->lvl;
-    p->route[o] = t->route;
+    {                                           /* its route: the oscillator's pins, if they are not that already */
+        uint32_t c, dir = 0;                    /* (DIRECT: past the filter into the chain, as before the pins) */
+        for (c = RC_CRS; c < RC_U2; c++) dir |= p->rt[o][c] != 0;   /* (USB's pairs: not a route) */
+        if (t->route == ROUTE_DIRECT && p->rt[o][RC_FLT]) {
+            p->rt[o][RC_FLT] = 0;
+            if (!dir) p->rt[o][RC_CRS] = 127;
+        } else if (t->route != ROUTE_DIRECT && !p->rt[o][RC_FLT]) {
+            for (c = RC_CRS; c < RC_U2; c++) p->rt[o][c] = 0;
+            p->rt[o][RC_FLT] = 127;
+        }
+    }
     p->trn_type[o] = t->trn[0]; p->trn_lvl[o] = t->trn[1]; p->trn_tune[o] = t->trn[2]; p->trn_dec[o] = t->trn[3];
     for (i = 0; i < PART_N; i++) {
         if (o) p->pb[i] = t->pf[i];

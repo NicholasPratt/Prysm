@@ -28,9 +28,15 @@
  *  20  + the parts' levels and places (pvol, ppan: as they are)
  *  21  + DUAL's sends (psend: all of it, as before)
  *  22  + the modulators' sync rate (sync_rate: x4; a modulator in SYNC, 1.6's builds since, its PIT's)
- *  23  + the chorus's mode (cho_mode: FREE, as before) */
+ *  23  + the chorus's mode (cho_mode: FREE, as before)
+ *  24  + the ROUTE screen's pins (rt: as the routes and the sends were, rt_from_old; the drums' from the sequencer's
+ *      sends until the sound has its own, RT_OLD)
+ *  25  + the compressor (COMP's row and column in rt, cmp_thr .. cmp_mix: nothing pinned into it, as before; rt
+ *      moved over, rt_from_24)
+ *  26  + USB's pairs (U2, U3: rt's last two columns, nothing pinned) and the drums' places (dr_pan: centred;
+ *      rt_from_25) */
 #define PATCH_SLOTS 8u
-#define PATCH_VERSION 23u
+#define PATCH_VERSION 26u
 #define PATCH_V1_SIZE 55u                       /* format 1's patch_t: everything before lfo_wave */
 #define PATCH_V2_SIZE 63u                       /* format 2's: everything before cho_rate */
 #define PATCH_V3_SIZE 81u                       /* format 3's: everything before menv_a */
@@ -53,6 +59,13 @@
 #define PATCH_V20_SIZE 222u                     /* format 20's: everything before psend */
 #define PATCH_V21_SIZE 226u                     /* format 21's: everything before sync_rate */
 #define PATCH_V22_SIZE 230u                     /* format 22's: everything before cho_mode */
+#define PATCH_V23_SIZE 231u                     /* format 23's: everything before rt */
+#define PATCH_V24_SIZE 329u                     /* format 24's: format 23's, then rt as 14 rows of 7 (no COMP) */
+#define PATCH_V25_SIZE 357u                     /* format 25's: format 23's, rt as 15 rows of 8 (no U2, U3), COMP's */
+#define RT_V25_COLS 8u
+#define RT_V25_CMP 6u                           /* (cmp_thr .. cmp_mix) */
+#define RT_V24_ROWS 14u
+#define RT_V24_COLS 7u
 #define PATCH_OLD_MAX PATCH_V9_SIZE
 #define PATCH_SEQ_AT PATCH_V6_SIZE              /* formats 7 .. 9: the pattern (seq_len, div, gate, pad, note[64], */
 #define PATCH_SEQ_N (PATCH_V7_SIZE - PATCH_V6_SIZE)   /* trig[64], slide[64]) here, the rest after it */
@@ -77,6 +90,56 @@ _Static_assert(__builtin_offsetof(patch_t, pvol) == PATCH_V19_SIZE, "format 19 i
 _Static_assert(__builtin_offsetof(patch_t, psend) == PATCH_V20_SIZE, "format 20 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, sync_rate) == PATCH_V21_SIZE, "format 21 is a prefix of patch_t");
 _Static_assert(__builtin_offsetof(patch_t, cho_mode) == PATCH_V22_SIZE, "format 22 is a prefix of patch_t");
+_Static_assert(__builtin_offsetof(patch_t, rt) == PATCH_V23_SIZE, "format 23 is a prefix of patch_t");
+
+/* (before format 24) the ROUTE screen's pins as the sound was routed: an oscillator or the noise DIRECT past the
+ * filter into the chain (CRUSH first), the rest through it; DUAL with a part's send not all of it: each part's sends
+ * from before the chain, as they were (its filter's, its oscillator's past it; the noise: part A's), the chorus and
+ * the delay into neither; the drums' rows: the sequencer's (RT_OLD) */
+static void rt_from_old(patch_t *p)
+{
+    uint32_t k, c, sn = 0;
+    memcpy(p->rt, PATCH_INIT.rt, sizeof p->rt);
+    for (k = 0; k < NSRC; k++)
+        if (p->route[k] == ROUTE_DIRECT) { p->rt[k][RC_FLT] = 0; p->rt[k][RC_CRS] = 127; }
+    for (k = 0; k < 2u; k++)
+        for (c = 0; c < 2u; c++) sn |= (p->psend[k][c] & 127u) < 127u;
+    if (p->vmode == VM_DUAL && sn) {
+        static const uint8_t ROW[5] = {RT_FILTA, RT_FILTB, RT_OSC1, RT_OSC2, RT_NOISE}, PT[5] = {0, 1, 0, 1, 0};
+        for (k = 0; k < 5u; k++)
+            if (k < 2u || p->route[k - 2u] == ROUTE_DIRECT) {
+                p->rt[ROW[k]][RC_DLY] = p->psend[PT[k]][0] & 127u;
+                p->rt[ROW[k]][RC_REV] = p->psend[PT[k]][1] & 127u;
+            }
+        p->rt[RT_CHO][RC_DLY] = p->rt[RT_CHO][RC_REV] = p->rt[RT_DLY][RC_REV] = 0;
+    }
+    p->rt[RT_KICK][RC_FLT] = RT_OLD;
+}
+
+/* (format 24) its pins, 14 rows of 7 at b: each where it is now, its OUT into OUT; COMP's row out */
+static void rt_from_24(patch_t *p, const uint8_t *b)
+{
+    uint32_t r, c;
+    memset(p->rt, 0, sizeof p->rt);
+    for (r = 0; r < RT_V24_ROWS; r++)
+        for (c = 0; c < RT_V24_COLS; c++)
+            p->rt[r][c + 1u == RT_V24_COLS ? RC_OUT : c] = b[r * RT_V24_COLS + c];
+    p->rt[RT_CMP][RC_OUT] = 127;
+}
+
+/* (format 25) its pins, 15 rows of 8 at b: each where it is (U2, U3: none); then COMP's six */
+static void rt_from_25(patch_t *p, const uint8_t *b)
+{
+    uint32_t r, c;
+    memset(p->rt, 0, sizeof p->rt);
+    for (r = 0; r < RT_ROWS; r++)
+        for (c = 0; c < RT_V25_COLS; c++)
+            p->rt[r][c] = b[r * RT_V25_COLS + c];
+    memcpy(&p->cmp_thr, b + RT_ROWS * RT_V25_COLS, RT_V25_CMP);
+}
+_Static_assert(__builtin_offsetof(patch_t, cmp_mix) + 1u - __builtin_offsetof(patch_t, cmp_thr) == RT_V25_CMP,
+               "format 25's COMP fields, in a row");
+_Static_assert(PATCH_V23_SIZE + RT_ROWS * RT_V25_COLS + RT_V25_CMP == PATCH_V25_SIZE, "format 25's size");
 
 /* patch p from n bytes of format version (a patch file, the plugin's state, a slot): 0 = done */
 static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version);
@@ -93,6 +156,8 @@ static int patch_from(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version
         p->vmode = VM_SINGLE;
         part_fill_b(p);
     }
+    if (version < 24u)
+        rt_from_old(p);
     return 0;
 }
 static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t version)
@@ -103,7 +168,7 @@ static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t ver
                                                  PATCH_V13_SIZE, PATCH_V14_SIZE, PATCH_V15_SIZE, PATCH_V16_SIZE,
                                                  PATCH_V17_SIZE, PATCH_V18_SIZE, PATCH_V19_SIZE,
                                                  PATCH_V20_SIZE, PATCH_V21_SIZE,
-                                                 PATCH_V22_SIZE};
+                                                 PATCH_V22_SIZE, PATCH_V23_SIZE, PATCH_V24_SIZE, PATCH_V25_SIZE};
     /* RATIO -> PITCH (0..48, 24 = in tune) and FINE: 0.5 .. 4 as near as they go, 5 and up as far: +24 */
     static const uint8_t R_SEMI[PR_RATIOS] = {12, 24, 31, 36, 43, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48, 48};
     static const uint8_t R_FINE[PR_RATIOS] = {64, 64, 66, 64, 66, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64};
@@ -116,6 +181,16 @@ static int patch_from_old(patch_t *p, const uint8_t *b, uint32_t n, uint32_t ver
     if (version < 1u || version >= PATCH_VERSION || n != SIZE[version])
         return -1;
     *p = PATCH_INIT;                            /* the new fields: as the default sound has them */
+    if (version == 25u) {                       /* (format 25: its pins a smaller grid; no drums' places) */
+        memcpy(p, b, PATCH_V23_SIZE);
+        rt_from_25(p, b + PATCH_V23_SIZE);
+        return 0;
+    }
+    if (version == 24u) {                       /* (format 24: its pins a smaller grid) */
+        memcpy(p, b, PATCH_V23_SIZE);
+        rt_from_24(p, b + PATCH_V23_SIZE);
+        return 0;
+    }
     if (version >= 10u) {                       /* (format 10 on: each a prefix of the next) */
         memcpy(p, b, n);
         if (version == 10u && p->lfo2_dest >= DEST_V10_N)
@@ -368,6 +443,12 @@ static void patches_load(void)                  /* at boot: the saved bank (conv
     old_size = 0;
     seqs_moved = 0;
     if (store_try(PATCH_VERSION, sizeof(patch_t), SEQS_VERSION, ~0u) == 0 ||
+        store_try(25u, PATCH_V25_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.7's dev: COMP) */
+        store_try(24u, PATCH_V24_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.7's dev: the ROUTE screen) */
+        store_try(23u, PATCH_V23_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.7's dev: the chorus's modes) */
+        store_try(22u, PATCH_V22_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.7's dev: SYNC's rate) */
+        store_try(21u, PATCH_V21_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.6) */
+        store_try(20u, PATCH_V20_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.5) */
         store_try(19u, PATCH_V19_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.5's dev: shared modulators' parts) */
         store_try(18u, PATCH_V18_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.5's dev: two parts) */
         store_try(17u, PATCH_V17_SIZE, SEQS_VERSION, ~0u) == 0 ||   /* (1.5's dev: the transients) */

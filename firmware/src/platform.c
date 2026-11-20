@@ -508,7 +508,7 @@ void fm1_alnk0_irq(void)                       /* via isr_alnk0 (hal/fm1_isr.S) 
             o[i] = v > 32767 ? 32767 : v < -32767 ? -32767 : v;
         }
         for (b = 0; b < HALF_FRAMES; b += 32u)
-            UAC_ONLY(uac_tap(o + 2u * b, 32u));   /* the computer records what the speaker plays */
+            UAC_ONLY(uac_tap(o + 2u * b, 32u, b));   /* the computer records what the speaker plays (and the app's pairs) */
         for (i = 0; i < HALF_WORDS; i++)
             o[i] <<= 7;
         fm1_audio_ack_half();

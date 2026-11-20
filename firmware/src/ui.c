@@ -108,7 +108,9 @@ enum { K_NONE, K_NUM, K_BIP, K_CENT, K_BANK, K_POS, K_RATIO, K_MODE, K_SEMI, K_L
        K_EPART,                                 /* (the SEQ page's POLY row: the part edited, A or B; not the sound) */
        K_MSYNC,                                 /* (a modulator in SYNC: its rate, sync_rate, x 2^(n/48); off: 0, 1) */
        K_CHOMODE,                               /* (the chorus's mode: CHO_NAME) */
-       K_WIDTH };                               /* (a fixed chorus mode's width, on DEPTH's byte: 0 .. 200 %) */
+       K_WIDTH,                                 /* (a fixed chorus mode's width, on DEPTH's byte: 0 .. 200 %) */
+       K_PIN,                                   /* (a ROUTE screen's pin: 0 off, 1 .. 127) */
+       K_CTHR, K_CRATIO, K_CATT, K_CREL, K_CGAIN };   /* (the compressor's: dB, CMP_RATIO_NAME, ms, ms / s, dB) */
 typedef struct { const char *label; uint16_t off; uint8_t max, kind; } prm_t;   /* off: in patch_t (osc pages: in osc[0]) */
 typedef struct { const char *name; prm_t p[4]; uint16_t lit; } row_t;  /* lit: what the graphic lights (LIT_...) */
 typedef struct { const char *name; const row_t *rows; uint8_t n, osc; } page_t;   /* osc: 1, 2, 0 = none; G: gset */
@@ -172,7 +174,7 @@ static const row_t OSC_ROWS[] = {
 };
 static const row_t NOISE_ROWS[] = {             /* (COLOUR: the tone, DIGI's and S&H's rate, CRACKLE's density) */
     {"NOISE", {{"TYPE", PO(noise_type), NOISE_N - 1u, K_NTYPE}, {"COLOUR", PO(noise_col), 127, K_NCOL},
-               {"LEVEL", PO(noise_lvl), 127, K_NUM}, {"ROUTE", PO(route[2]), ROUTE_N - 1u, K_ROUTE}}, LIT_CURVE},
+               {"LEVEL", PO(noise_lvl), 127, K_NUM}, NOPRM}, LIT_CURVE},   /* (where it goes: the ROUTE screen) */
 };
 static const row_t TRANS_ROWS[] = {             /* (an oscillator's attack transient: its own envelope, after the amp) */
     {"OSC 1", {{"TYPE", PO(trn_type[0]), TR_N, K_TTYPE}, {"LEVEL", PO(trn_lvl[0]), 127, K_NUM},
@@ -293,11 +295,14 @@ static const row_t MFX_ROWS[] = {               /* (MOD FX and CRUSH: on the voi
 static const row_t CRUSH_ROWS[] = {
     {"CRUSH", {{"BITS", PO(crush_bits), 127, K_CBITS}, {"RATE", PO(crush_rate), 127, K_CRATE}, NOPRM, NOPRM}, LIT_C},
 };
+static const row_t COMP_ROWS[] = {              /* (the compressor: what the ROUTE screen pins into it) */
+    {"COMP", {{"THRESH", PO(cmp_thr), 127, K_CTHR}, {"RATIO", PO(cmp_ratio), CMP_RATIOS - 1u, K_CRATIO},
+              {"MIX", PO(cmp_mix), 127, K_NUM}, {"GAIN", PO(cmp_gain), 24, K_CGAIN}}, LIT_C},
+    {"C.TIME", {{"ATTACK", PO(cmp_att), 127, K_CATT}, {"RELEASE", PO(cmp_rel), 127, K_CREL}, NOPRM, NOPRM}, LIT_C},
+};
 static const row_t MIX_ROWS[] = {
     {"OSC", {{"OSC1", PO(lvl1), 127, K_NUM}, {"OSC2", PO(lvl2), 127, K_NUM},
              {"SEMI", PO(semi2), 48, K_SEMI}, {"FINE", PO(fine2), 127, K_CENT}}, LIT_ALL},
-    {"ROUTE", {{"OSC1", PO(route[0]), ROUTE_N - 1u, K_ROUTE}, {"OSC2", PO(route[1]), ROUTE_N - 1u, K_ROUTE},
-               {"NOISE", PO(route[2]), ROUTE_N - 1u, K_ROUTE}, {"N.LVL", PO(noise_lvl), 127, K_NUM}}, LIT_RT},
     {"GLIDE", {{"TIME", PO(glide), 127, K_NUM}, {"MODE", PO(glide_mode), GLIDE_N - 1u, K_GLIDEM}, NOPRM, NOPRM}, LIT_ALL},
     {"SPLIT", {{"KEY", PO(split), 127, K_SPLIT}, {"OCT1", PO(split_oct[0]), 4, K_SPOCT},   /* (below it OSC 1, from */
                {"OCT2", PO(split_oct[1]), 4, K_SPOCT}, {"LEARN", 0, 1, K_SLEARN}}, LIT_ALL},   /* it OSC 2) */
@@ -305,12 +310,7 @@ static const row_t MIX_ROWS[] = {
     {"LEVELS", {{"A LVL", PO(pvol[0]), 127, K_NUM}, {"B LVL", PO(pvol[1]), 127, K_NUM},   /* (the parts', past */
                 {"A PAN", PO(ppan[0]), 127, K_PAN}, {"B PAN", PO(ppan[1]), 127, K_PAN}}, LIT_ALL},   /* their amps) */
 };
-#define MR_ROUTE 1u                             /* (MIX's ROUTE row: in DUAL, the parts' sends: SEND_PRM) */
-#define MR_PARTS 4u                             /* (MIX's PARTS and LEVELS rows: the parts' picture) */
-/* DUAL's ROUTE row: each part has its own filter (no routing to choose), so its knobs are the parts' sends into the
- * delay and the reverb instead (the effects' MIX is their return) */
-static const prm_t SEND_PRM[4] = {{"A DLY", PO(psend[0][0]), 127, K_NUM}, {"A REV", PO(psend[0][1]), 127, K_NUM},
-                                  {"B DLY", PO(psend[1][0]), 127, K_NUM}, {"B REV", PO(psend[1][1]), 127, K_NUM}};
+#define MR_PARTS 3u                             /* (MIX's PARTS and LEVELS rows: the parts' picture) */
 /* the KIT row's preset beats: 16 steps a lane (KICK, SNARE, HAT, CLAP), repeated over a longer pattern. A step: . none,
  * x a hit, X an accent (the hat: open), f a flam (the snare's), g a ghost (a soft hit), 2 3 4 6 8 the hat or the
  * snare hit so many times (a roll) */
@@ -354,15 +354,19 @@ static const row_t DRUM_ROWS[] = {               /* (the drums' lanes of the pat
     {"ROLL", {{"STEP", 0, 63, K_DCUR}, {"ROLL", 0, RATCHETS - 1u, K_DROLL},   /* (the hat's or the snare's */
               {"RAMP", SO(dr_ramp), 127, K_DRAMP}, {"DRUM", 0, 1, K_DRLD}}, LIT_CURVE},   /* ratchets) */
     {"KICK", {{"LEVEL", SO(dr_lvl[0]), 127, K_DNUM}, {"TUNE", SO(dr_tune[0]), 48, K_DSEMI},
-              {"DECAY", SO(dr_dec[0]), 127, K_DDEC}, {"FILTER", SO(dr_flt[0]), 127, K_DNUM}}, LIT_C},
+              {"DECAY", SO(dr_dec[0]), 127, K_DDEC},
+              {"PAN", PO(dr_pan[0]), 127, K_PAN}}, LIT_C},
     {"SNARE", {{"LEVEL", SO(dr_lvl[1]), 127, K_DNUM}, {"TUNE", SO(dr_tune[1]), 48, K_DSEMI},
-               {"DECAY", SO(dr_dec[1]), 127, K_DDEC}, {"FILTER", SO(dr_flt[1]), 127, K_DNUM}}, LIT_M1},
+               {"DECAY", SO(dr_dec[1]), 127, K_DDEC},
+              {"PAN", PO(dr_pan[1]), 127, K_PAN}}, LIT_M1},
     {"HAT", {{"LEVEL", SO(dr_lvl[2]), 127, K_DNUM}, {"TUNE", SO(dr_tune[2]), 48, K_DSEMI},
-             {"DECAY", SO(dr_dec[2]), 127, K_DDEC}, {"FILTER", SO(dr_flt[2]), 127, K_DNUM}}, LIT_M2},
+             {"DECAY", SO(dr_dec[2]), 127, K_DDEC},
+              {"PAN", PO(dr_pan[2]), 127, K_PAN}}, LIT_M2},
     {"CLAP", {{"LEVEL", SO(dr_lvl[3]), 127, K_DNUM}, {"TUNE", SO(dr_tune[3]), 48, K_DSEMI},
-              {"DECAY", SO(dr_dec[3]), 127, K_DDEC}, {"FILTER", SO(dr_flt[3]), 127, K_DNUM}}, LIT_C | LIT_M1},
+              {"DECAY", SO(dr_dec[3]), 127, K_DDEC},
+              {"PAN", PO(dr_pan[3]), 127, K_PAN}}, LIT_C | LIT_M1},
     {"BUS", {{"DRIVE", SO(dr_drive), 127, K_DNUM}, {"CRUSH", SO(dr_crush), 127, K_DNUM},
-             {"DELAY", SO(dr_dly), 127, K_DNUM}, {"REVERB", SO(dr_rev), 127, K_DNUM}}, LIT_ALL},
+             NOPRM, NOPRM}, LIT_ALL},           /* (their filter, the effects: the ROUTE screen) */
     {"KIT", {{"KIT", SO(dr_kit), DR_KITS - 1u, K_DKIT}, {"PRESET", 0, DPRE_N - 1u, K_DPRE},   /* (a beat: picked, */
              {"LOAD", 0, 1, K_DLOAD}, {"GHOST", SO(dr_ghost), 127, K_DNUM}}, LIT_ALL},  /* then LOADed; a */
                                                 /* ghost's velocity) */
@@ -375,9 +379,41 @@ static const row_t ARP_ROWS[] = {
     {"TIME", {{"BPM", PO(arp_bpm), 200, K_BPM}, {"GATE", PO(arp_gate), 127, K_GATE},
               {"SWING", PO(arp_swing), 127, K_SWING}, {"LATCH", PO(arp_latch), 1, K_ONOFF}}, LIT_CURVE},
 };
+/* the ROUTE screen's pins as rows of four (the plugin's and the web editor's parameters, LIVE's knobs: on the FM-1
+ * the screen is the grid, rt_draw) */
+#define RP(r, c) {RP_##c, PO(rt[RT_##r][RC_##c]), 127, K_PIN}
+#define RP_FLT "FILTER"
+#define RP_CRS "CRUSH"
+#define RP_MFX "MOD FX"
+#define RP_CHO "CHORUS"
+#define RP_DLY "DELAY"
+#define RP_REV "REVERB"
+#define RP_OUT "OUT"
+#define RP_CMP "COMP"
+#define RT_SRC_ROWS(r, n) {n, {RP(r, FLT), RP(r, CRS), RP(r, MFX), RP(r, CHO)}, LIT_ALL}, \
+                          {n " >", {RP(r, DLY), RP(r, REV), RP(r, CMP), RP(r, OUT)}, LIT_ALL}
+static const row_t ROUTE_ROWS[] = {
+    RT_SRC_ROWS(OSC1, "OSC 1"), RT_SRC_ROWS(OSC2, "OSC 2"), RT_SRC_ROWS(NOISE, "NOISE"),
+    RT_SRC_ROWS(KICK, "KICK"), RT_SRC_ROWS(SNARE, "SNARE"), RT_SRC_ROWS(HAT, "HAT"), RT_SRC_ROWS(CLAP, "CLAP"),
+    {"FILT A", {RP(FILTA, CRS), RP(FILTA, MFX), RP(FILTA, CHO), RP(FILTA, DLY)}, LIT_ALL},
+    {"FILT A >", {RP(FILTA, REV), RP(FILTA, CMP), RP(FILTA, OUT), NOPRM}, LIT_ALL},
+    {"FILT B", {RP(FILTB, CRS), RP(FILTB, MFX), RP(FILTB, CHO), RP(FILTB, DLY)}, LIT_ALL},
+    {"FILT B >", {RP(FILTB, REV), RP(FILTB, CMP), RP(FILTB, OUT), NOPRM}, LIT_ALL},
+    {"CRUSH", {RP(CRUSH, MFX), RP(CRUSH, CHO), RP(CRUSH, DLY), RP(CRUSH, REV)}, LIT_ALL},
+    {"CRUSH >", {RP(CRUSH, CMP), RP(CRUSH, OUT), NOPRM, NOPRM}, LIT_ALL},
+    {"MOD FX", {RP(MFX, CHO), RP(MFX, DLY), RP(MFX, REV), RP(MFX, CMP)}, LIT_ALL},
+    {"MOD FX >", {RP(MFX, OUT), NOPRM, NOPRM, NOPRM}, LIT_ALL},
+    {"CHORUS", {RP(CHO, DLY), RP(CHO, REV), RP(CHO, CMP), RP(CHO, OUT)}, LIT_ALL},
+    {"DELAY", {RP(DLY, REV), RP(DLY, CMP), RP(DLY, OUT), NOPRM}, LIT_ALL},
+    {"REVERB", {RP(REV, CMP), RP(REV, OUT), NOPRM, NOPRM}, LIT_ALL},
+    {"COMP", {RP(CMP, OUT), NOPRM, NOPRM, NOPRM}, LIT_ALL},
+};
+#undef RT_SRC_ROWS
+#undef RP
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
 enum { PG_OSC1, PG_OSC2, PG_TRANS, PG_NOISE, PG_FILTER, PG_AMP, PG_FENV, PG_MENV, PG_MENV2, PG_LFO, PG_LFO2, PG_MATRIX, PG_MIX,
-       PG_ARP, PG_SEQ, PG_DRUM, PG_LOOP, PG_CHO, PG_DLY, PG_REV, PG_MFX, PG_CRUSH, PG_SETUP, PG_N };
+       PG_ARP, PG_SEQ, PG_DRUM, PG_LOOP, PG_CRUSH, PG_MFX, PG_CHO, PG_DLY, PG_REV, PG_COMP, PG_ROUTE, PG_SETUP, PG_N };
+                                                /* (the effects in the ROUTE screen's order: its columns) */
 static const page_t PAGES[PG_N] = {
     {"OSC 1", OSC_ROWS, NROWS(OSC_ROWS), 1}, {"OSC 2", OSC_ROWS, NROWS(OSC_ROWS), 2},
     {"TRANS", TRANS_ROWS, NROWS(TRANS_ROWS), 0},
@@ -390,9 +426,10 @@ static const page_t PAGES[PG_N] = {
     {"MIX", MIX_ROWS, NROWS(MIX_ROWS), 0},
     {"ARP", ARP_ROWS, NROWS(ARP_ROWS), 0}, {"SEQ", SEQ_ROWS, NROWS(SEQ_ROWS), 0},
     {"DRUM", DRUM_ROWS, NROWS(DRUM_ROWS), 0}, {"LOOP", LOOP_ROWS, NROWS(LOOP_ROWS), 0},
+    {"CRUSH", CRUSH_ROWS, NROWS(CRUSH_ROWS), 0}, {"MOD FX", MFX_ROWS, NROWS(MFX_ROWS), 0},
     {"CHORUS", CHO_ROWS, NROWS(CHO_ROWS), 0}, {"DELAY", DLY_ROWS, NROWS(DLY_ROWS), 0},
-    {"REVERB", REV_ROWS, NROWS(REV_ROWS), 0}, {"MOD FX", MFX_ROWS, NROWS(MFX_ROWS), 0},
-    {"CRUSH", CRUSH_ROWS, NROWS(CRUSH_ROWS), 0},
+    {"REVERB", REV_ROWS, NROWS(REV_ROWS), 0}, {"COMP", COMP_ROWS, NROWS(COMP_ROWS), 0},
+    {"ROUTE", ROUTE_ROWS, NROWS(ROUTE_ROWS), 0},   /* (HOME's, after LIVE and the SCOPE: not ALGORITHM's) */
     {"SETUP", SETUP_ROWS, NROWS(SETUP_ROWS), G},
 };
 
@@ -563,7 +600,6 @@ static const prm_t SYNC_PRM[2] = {{"SYNC1", 0, 192, K_MSYNC}, {"SYNC2", 1, 192, 
 static const prm_t *prm_alt(uint32_t pg, uint32_t r, uint32_t i)   /* knob i's other parameter (0: none) */
 {
     const prm_t *p = &PAGES[pg].rows[r].p[i];
-    if (pg == PG_MIX && r == MR_ROUTE) return &SEND_PRM[i & 3u];   /* (DUAL's sends) */
     if (!PAGES[pg].osc || PAGES[pg].osc == G || p->kind != K_RATIO) return 0;
     return p->off == OO(ratio[1]) ? &PITCH_PRM[0] : p->off == OO(ratio[2]) ? &PITCH_PRM[1] : 0;   /* (the carrier: */
 }                                               /*  none) */
@@ -578,8 +614,6 @@ static const prm_t *prm_of(uint32_t pg, uint32_t r, uint32_t i)    /* knob i's p
     const prm_t *a = prm_alt(pg, r, i);
     if (pg == PG_CHO && i == 1u && edit.cho_mode != CHO_FREE)
         return &WIDTH_PRM;
-    if (a && a >= SEND_PRM && a < SEND_PRM + 4)
-        return edit.vmode == VM_DUAL ? a : &PAGES[pg].rows[r].p[i];
     if (a) {                                    /* (MIX, RING: the pitch; SYNC: the rate; FM: the ratio) */
         uint32_t m = edit.osc[PAGES[pg].osc - 1u].mode[a - PITCH_PRM];
         if (m == MODE_SYNC) return &SYNC_PRM[a - PITCH_PRM];
@@ -756,6 +790,18 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     case K_MODE: put(s, MODE_NAME[*v < MODE_N ? *v : 0u]); break;
     case K_CHOMODE: put(s, CHO_NAME[*v < CHO_N_MODES ? *v : 0u]); break;
     case K_WIDTH: put(num(s, ((uint32_t)*v * 200u + 63u) / 127u), "%"); break;
+    case K_PIN: if ((*v & 127u) == 0u || *v > 127u) put(s, "OFF"); else num(s, *v); break;
+    case K_CTHR: put(snum(s, -(int32_t)(((127u - (*v & 127u)) * 48u + 63u) / 127u)), "dB"); break;
+    case K_CRATIO: put(s, CMP_RATIO_NAME[*v < CMP_RATIOS ? *v : 4u]); break;
+    case K_CGAIN: put(num(put(s, "+"), *v <= 24u ? *v : 24u), "dB"); break;
+    case K_CATT: case K_CREL: {                 /* 0.1 .. 9.9 ms, 10 .. 999 ms, 1.0 .. 2.0 s */
+        uint32_t us = p->kind == K_CATT ? cmp_att_us(*v) : cmp_rel_us(*v);
+        char *e;
+        if (us < 9950u) { e = num(s, (us + 50u) / 1000u); e = put(e, "."); put(num(e, (us + 50u) / 100u % 10u), "ms"); }
+        else if (us < 999500u) put(num(s, (us + 500u) / 1000u), "ms");
+        else { e = num(s, (us + 50000u) / 1000000u); e = put(e, "."); put(num(e, (us + 50000u) / 100000u % 10u), "s"); }
+        break;
+    }
     case K_SEMI: case K_MPIT: put(snum(s, (int32_t)*v - 24), "st"); break;
     case K_MSYNC: {                             /* x1.00 .. x9.99, x10.0 .. x16.0 */
         uint32_t r = *v <= 192u ? *v : 96u;    /* (2^(r/48): PR_PITCH16_Q16 a 1/192 octave a step) */
@@ -895,6 +941,41 @@ static void fmt(char *s, const prm_t *p, const uint8_t *v)
     }
     default: num(s, *v);
     }
+}
+
+/* ---- the ROUTE screen's pins, in words: where row r goes (its pins' columns, two then how many more; "-": nowhere) */
+static char *rt_where(char *s, uint32_t r)
+{
+    uint32_t c, n = 0;
+    char *e = s;
+    *s = 0;
+    for (c = 0; c < RT_COLS; c++)
+        if (rt_pin(&edit, r, c)) {
+            if (n < 2u) e = put(n ? put(e, " ") : e, RT_COL_SHORT[c]);
+            n++;
+        }
+    if (!n) e = put(e, "-");
+    else if (n > 2u) e = num(put(e, " +"), n - 2u);
+    return e;
+}
+static const char *rt_row_name(uint32_t r) { return r == RT_FILTA && !ui_two() ? "FILTER" : RT_ROW_NAME[r]; }
+static uint8_t rt_r, rt_c = RC_FLT;             /* (the ROUTE screen's pin chosen) */
+static const char *rt_hdr_text(void)            /* (the header: the pin chosen, its level) */
+{
+    static char t[24];
+    uint32_t v = rt_pin(&edit, rt_r, rt_c);
+    char *e = put(put(put(t, rt_row_name(rt_r)), ">"), RT_COL_SHORT[rt_c]);
+    if (v) num(put(e, " "), v); else put(e, " OFF");
+    return t;
+}
+static void rt_own(void)                        /* the drums' rows the sound's own (an older sound's: as the sequencer */
+{                                               /*  had them, RT_OLD), before one of them is changed */
+    uint8_t t[DRUMS][RT_COLS];
+    uint32_t d, c;
+    if (edit.rt[RT_KICK][RC_FLT] != RT_OLD) return;
+    for (d = 0; d < DRUMS; d++)
+        for (c = 0; c < RT_COLS; c++) t[d][c] = (uint8_t)rt_pin(&edit, RT_KICK + d, c);
+    memcpy(edit.rt[RT_KICK], t, sizeof t);
 }
 
 /* ---- canvas helpers */
@@ -1195,74 +1276,161 @@ static void gfx_lfo(uint32_t lit)              /* the shape: its cycles (more at
     if (l2) cv_part_tag(x0 + 4, 2, edit.l2_part);   /* (LFO 2: its part, if one) */
 }
 
-static void gfx_fx(uint32_t lit)               /* chorus -> delay -> reverb: a box each, a picture of it, its mix */
+/* the effects, in the ROUTE screen's order, as a chain of boxes, three a screen: CRUSH -> MOD FX -> CHORUS, then
+ * DELAY -> REVERB -> COMP (an arrow off the edge: more of the chain on the next / the last); in each box a picture
+ * of it, under it its name and its mix; the page's own box lit */
+#define FXW 66                                  /* (a box: 66 x 96) */
+#define FXH 96
+static void fxb_crush(int32_t x0, int hl)       /* a sine as it comes out (the rate held, the bits) */
 {
-    static const int32_t X[3] = {4, 84, 164};
-    static const char *const NAME[3] = {"CHORUS", "DELAY", "REVERB"};
-    const int32_t W = 72, H = 96;
-    const uint32_t LITS[3] = {LIT_C, LIT_M1, LIT_M2};
-    const uint8_t MIX[3] = {edit.cho_mix, edit.dly_mix, edit.rev_mix};
-    uint32_t k;
-    int32_t i;
+    uint32_t hold = 1u + (edit.crush_rate & 127u) * 31u / 127u, sh = edit.crush_bits & 127u ? 1u + (edit.crush_bits & 127u) * 13u / 127u : 0u;
+    uint32_t hp = (hold + 1u) / 2u;             /* (a pixel two frames: the steps show) */
+    int32_t i, py = 0, held = 0, mask = ~((1 << sh) - 1);
+    uint16_t c = edit.crush_bits || edit.crush_rate ? (hl ? C_BRIGHT : C_MID) : C_FAINT;
+    cv_hdots(x0 + 4, x0 + FXW - 4, FXH / 2, 4);
+    for (i = 0; i < FXW - 8; i++) {
+        int32_t x = sine_q15((uint32_t)((uint64_t)i * 0x100000000ull / (uint64_t)(FXW - 8)));   /* (one cycle) */
+        if (i % (int32_t)(hp ? hp : 1u) == 0) held = x & mask;
+        if (i) cv_line(x0 + 3 + i, py, x0 + 4 + i, FXH / 2 - held * 36 / 32767, c);
+        py = FXH / 2 - held * 36 / 32767;
+    }
+}
+static void fxb_mfx(int32_t x0, int hl)         /* its type; the sweep over two cycles (around MANUAL, by DEPTH); the */
+{                                               /*  phaser's notches, the flanger's comb */
+    uint32_t on = edit.mfx_type && edit.mfx_type < MFX_N && edit.mfx_mix;
+    int32_t i, py = 0, mid = FXH / 2 - 6, a = (int32_t)edit.mfx_depth * 24 / 127, man = ((int32_t)edit.mfx_manual - 64) * 16 / 64;
+    uint16_t c = on ? (hl ? C_BRIGHT : C_MID) : C_FAINT;
+    const char *t = MFX_NAME[edit.mfx_type < MFX_N ? edit.mfx_type : 0u];
+    cv_text(x0 + (FXW - text_w(&FONT_S, t)) / 2, 2, &FONT_S, t, on ? (hl ? C_ACC : C_MID) : C_FAINT);
+    for (i = 0; i < FXW - 8; i++) {
+        int32_t y = mid - man - sine_q15((uint32_t)((uint64_t)i * 0x200000000ull / (uint64_t)(FXW - 8))) * a / 32767;
+        if (i) cv_line(x0 + 3 + i, py, x0 + 4 + i, y, c);
+        py = y;
+    }
+    if (on && edit.mfx_type == MFX_PHASER)
+        for (i = 0; i < 6; i++) cv_rect(x0 + 6 + i * 10, FXH - 14, 2, 8, c);
+    if (on && edit.mfx_type == MFX_FLANGER) {
+        int32_t gap = 3 + (int32_t)edit.mfx_manual * 9 / 127;
+        for (i = 2; i < FXW - 8; i += gap) cv_rect(x0 + 4 + i, FXH - 14, 1, 8, c);
+    }
+}
+static void fxb_cho(int32_t x0, int hl)         /* two lines swept against each other (left, right); a fixed mode: */
+{                                               /*  its triangles, opposed */
+    static const uint8_t FA[CHO_N_MODES] = {0, 36, 36, 8, 6, 10, 16, 24, 6, 10};
+    static const uint8_t FC[CHO_N_MODES] = {0, 1, 2, 4, 1, 1, 1, 2, 1, 1};
+    uint32_t fm = edit.cho_mode < CHO_N_MODES ? edit.cho_mode : 0u;
+    int32_t i, a = fm ? FA[fm] : 3 + (int32_t)edit.cho_depth * 36 / 127, py0 = 0, py1 = 0;
+    uint32_t cyc = fm ? FC[fm] : 1u + (uint32_t)edit.cho_rate * 3u / 127u;
+    uint32_t sh = fm ? LFO_TRI : LFO_SINE, off = fm ? 0x80000000u : 0x40000000u;
+    for (i = 0; i < FXW - 8; i++) {
+        uint32_t ph = (uint32_t)((uint64_t)i * cyc * 0x100000000ull / (uint64_t)(FXW - 8));
+        int32_t y0 = FXH / 2 - lfo_wave(sh, ph, 0) * a / 32767;
+        int32_t y1 = FXH / 2 - lfo_wave(sh, ph + off, 0) * a / 32767;
+        if (i) {
+            cv_line(x0 + 3 + i, py0, x0 + 4 + i, y0, hl ? C_BRIGHT : C_MID);
+            cv_line(x0 + 3 + i, py1, x0 + 4 + i, y1, hl ? C_ACC : C_FAINT);
+        }
+        py0 = y0; py1 = y1;
+    }
+}
+static void fxb_dly(int32_t x0, int hl)         /* the note, then its repeats (time apart, fading by the feedback; */
+{                                               /*  ping-pong: alternately up and down; shift: they move) */
+    int32_t gap = 4 + (int32_t)edit.dly_time * 26 / 127, h = 84, x = x0 + 4, n = 0;
+    int32_t fb = (int32_t)edit.dly_fb * 31000 / 127;
+    while (x < x0 + FXW - 3 && h > 1 && n < 20) {
+        int32_t up = !edit.dly_ping || !(n & 1), s = n ? ((int32_t)edit.dly_shift - 12) * n / 3 : 0, top;
+        int32_t len = h / 2;
+        top = up ? FXH / 2 - len - s : FXH / 2 + 1 - s;
+        if (top < 2) top = 2;
+        if (top + len > FXH - 2) top = FXH - 2 - len;
+        cv_rect(x, top, 3, len, n ? (hl ? C_MID : C_FAINT) : (hl ? C_BRIGHT : C_MID));
+        x += gap;
+        if (n++) h = h * fb / 32767;
+    }
+}
+static void fxb_rev(int32_t x0, int hl)         /* the pre-delay, then the tail (longer with the size) */
+{
+    int32_t i, pre = (int32_t)edit.rev_pre * 14 / 127, len = 8 + (int32_t)edit.rev_size * (FXW - 16 - pre) / 127;
+    int32_t xs = x0 + 4 + pre, px = xs, py = 6;
+    uint16_t c = hl ? C_ACC : C_MID;
+    cv_rect(x0 + 4, FXH - 6, 1, 1, c);
+    cv_line(x0 + 4, FXH - 6, xs, FXH - 6, C_FAINT);
+    cv_line(xs, FXH - 6, xs, 6, c);
+    for (i = 1; i <= len; i++) {                /* an exponential decay, drawn as a line and a fill under it */
+        int32_t y = 6 + (FXH - 12) - (FXH - 12) * (len - i) * (len - i) / (len * len);
+        cv_line(px, py, xs + i, y, c);
+        cv_line(xs + i, y + 1, xs + i, FXH - 6, C_FILL);
+        px = xs + i; py = y;
+    }
+}
+static int32_t cmp_drawn = -1;                  /* (COMP's meter: redrawn while it moves, on its page) */
+static uint32_t cmp_drawn_at;
+static void fxb_comp(int32_t x0, int hl)        /* its curve (in across, out up, -48 .. 0 dB: the knee, RATIO over */
+{                                               /*  THRESH, the make-up); beside it the gain it takes off now (a bar */
+    const int32_t S = FXW - 16, X0 = x0 + 4, Y0 = (FXH - S) / 2 - 6;   /*  down, to -24 dB); nothing pinned in: NO */
+                                                /*  INPUT, under it */
+    int32_t i, py = 0, gr = cmp_gr, thr = -(int32_t)(((127u - (edit.cmp_thr & 127u)) * 48u + 63u) / 127u), h;
+    int32_t slope = CMP_SLOPE[edit.cmp_ratio < CMP_RATIOS ? edit.cmp_ratio : 4u], make = edit.cmp_gain <= 24u ? edit.cmp_gain : 24;
+    uint32_t r, n = 0, on = edit.cmp_mix != 0;
+    uint16_t c = on ? (hl ? C_BRIGHT : C_MID) : C_FAINT;
+    cmp_drawn = gr;
+    cmp_drawn_at = fm1_ms;
+    for (r = 0; r < RT_ROWS; r++) n += rt_ok(r, RC_CMP) && rt_pin(&edit, r, RC_CMP) && (r != RT_FILTB || ui_two());
+    cv_line(X0, Y0 + S, X0 + S, Y0, C_FAINT);   /* (as it came in) */
+    for (i = 0; i <= S; i++) {                  /* (Q8 dB; the knee 6 dB, as fx.c) */
+        int32_t in = -48 * 256 + i * 48 * 256 / S, over = in - thr * 256, g = 0, out, y;
+        if (over >= 768) g = (over * slope) >> 15;
+        else if (over > -768) g = ((((over + 768) >> 2) * ((over + 768) >> 2) / (6 * 256 / 8)) * slope) >> 15;
+        out = in - g + make * 256;
+        y = Y0 + S - (out + 48 * 256) * S / (48 * 256);
+        y = y < Y0 ? Y0 : y > Y0 + S ? Y0 + S : y;
+        if (i) cv_line(X0 + i - 1, py, X0 + i, y, c);
+        py = y;
+    }
+    cv_rect(X0 + (thr + 48) * S / 48, Y0 + S - 2, 1, 5, on ? (hl ? C_ACC : C_MID) : C_FAINT);   /* THRESH */
+    h = gr * 602 / 2560 * S / 240;              /* (tenths of a dB; 24 dB the bar's height) */
+    h = h > S ? S : h < 0 ? 0 : h;
+    cv_frame(x0 + FXW - 9, Y0 - 1, 6, S + 2, C_BOX);
+    if (h) cv_rect(x0 + FXW - 8, Y0, 4, h, on ? C_ACC : C_FAINT);
+    if (!n) {
+        cv_text(x0 + (FXW - text_w(&FONT_S, "NO")) / 2, Y0 + S + 3, &FONT_S, "NO", C_FAINT);
+        cv_text(x0 + (FXW - text_w(&FONT_S, "INPUT")) / 2, Y0 + S + 14, &FONT_S, "INPUT", C_FAINT);
+    }
+}
+static void gfx_fx(uint32_t lit)
+{
+    static const uint8_t PG[6] = {PG_CRUSH, PG_MFX, PG_CHO, PG_DLY, PG_REV, PG_COMP};
+    static const char *const NAME[6] = {"CRUSH", "MOD FX", "CHORUS", "DELAY", "REVERB", "COMP"};
+    static void (*const BOX[6])(int32_t, int) = {fxb_crush, fxb_mfx, fxb_cho, fxb_dly, fxb_rev, fxb_comp};
+    uint32_t k, g = page >= PG_DLY && page <= PG_COMP ? 3u : 0u;   /* (the screen of three: page's) */
+    const int32_t X0 = g ? 18 : 4;              /* (the arrow off the edge: right on the first, in from the left */
+    uint8_t mix[6];                             /*  on the second) */
+    (void)lit;
+    mix[0] = edit.crush_bits > edit.crush_rate ? edit.crush_bits : edit.crush_rate;
+    mix[1] = edit.mfx_type && edit.mfx_type < MFX_N ? edit.mfx_mix : 0u;
+    mix[2] = edit.cho_mix; mix[3] = edit.dly_mix; mix[4] = edit.rev_mix; mix[5] = edit.cmp_mix;
     for (k = 0; k < 3u; k++) {
-        uint16_t edge = lit & LITS[k] ? C_ACC : C_BOX;
-        int32_t x0 = X[k];
-        cv_frame(x0, 0, W, H, edge);
-        cv_text(x0 + (W - text_w(&FONT_S, NAME[k])) / 2, H + 4, &FONT_S, NAME[k], lit & LITS[k] ? C_BRIGHT : C_FAINT);
-        cv_rect(x0, H + 22, W, 1, C_BOX);       /* its mix */
-        cv_rect(x0, H + 21, (int32_t)MIX[k] * W / 127, 3, MIX[k] ? (lit & LITS[k] ? C_BRIGHT : C_MID) : C_FAINT);
+        uint32_t e = g + k;
+        int hl = page == PG[e];
+        int32_t x0 = X0 + (int32_t)k * (FXW + 10);
+        cv_frame(x0, 0, FXW, FXH, hl ? C_ACC : C_BOX);
+        BOX[e](x0, hl);
+        cv_text(x0 + (FXW - text_w(&FONT_S, NAME[e])) / 2, FXH + 4, &FONT_S, NAME[e], hl ? C_BRIGHT : C_FAINT);
+        cv_rect(x0, FXH + 22, FXW, 1, C_BOX);   /* its mix */
+        cv_rect(x0, FXH + 21, (int32_t)mix[e] * FXW / 127, 3, mix[e] ? (hl ? C_BRIGHT : C_MID) : C_FAINT);
         if (k < 2u) {                           /* the arrow on to the next */
-            cv_line(x0 + W + 1, H / 2, X[k + 1u] - 2, H / 2, C_FAINT);
-            cv_line(X[k + 1u] - 2, H / 2, X[k + 1u] - 5, H / 2 - 3, C_FAINT);
-            cv_line(X[k + 1u] - 2, H / 2, X[k + 1u] - 5, H / 2 + 3, C_FAINT);
+            int32_t xa = x0 + FXW + 1, xb = x0 + FXW + 8;
+            cv_line(xa, FXH / 2, xb, FXH / 2, C_FAINT);
+            cv_line(xb, FXH / 2, xb - 3, FXH / 2 - 3, C_FAINT);
+            cv_line(xb, FXH / 2, xb - 3, FXH / 2 + 3, C_FAINT);
         }
     }
-    {                                           /* the chorus: two lines swept against each other (left, right); a */
-        static const uint8_t FA[CHO_N_MODES] = {0, 36, 36, 8, 6, 10, 16, 24, 6, 10};
-        static const uint8_t FC[CHO_N_MODES] = {0, 1, 2, 4, 1, 1, 1, 2, 1, 1};
-        uint32_t fm = edit.cho_mode < CHO_N_MODES ? edit.cho_mode : 0u;   /* fixed mode: its triangles, opposed */
-        int32_t a = fm ? FA[fm] : 3 + (int32_t)edit.cho_depth * 36 / 127, py0 = 0, py1 = 0;
-        uint32_t cyc = fm ? FC[fm] : 1u + (uint32_t)edit.cho_rate * 3u / 127u;
-        uint32_t sh = fm ? LFO_TRI : LFO_SINE, off = fm ? 0x80000000u : 0x40000000u;
-        for (i = 0; i < W - 8; i++) {
-            uint32_t ph = (uint32_t)((uint64_t)i * cyc * 0x100000000ull / (uint64_t)(W - 8));
-            int32_t y0 = H / 2 - lfo_wave(sh, ph, 0) * a / 32767;
-            int32_t y1 = H / 2 - lfo_wave(sh, ph + off, 0) * a / 32767;
-            if (i) {
-                cv_line(X[0] + 3 + i, py0, X[0] + 4 + i, y0, lit & LIT_C ? C_BRIGHT : C_MID);
-                cv_line(X[0] + 3 + i, py1, X[0] + 4 + i, y1, lit & LIT_C ? C_ACC : C_FAINT);
-            }
-            py0 = y0; py1 = y1;
-        }
-    }
-    {                                           /* the delay: the note, then its repeats (time apart, fading by the
-                                                 * feedback; ping-pong: alternately up and down; shift: they move) */
-        int32_t gap = 4 + (int32_t)edit.dly_time * 28 / 127, h = 84, x = X[1] + 4, n = 0;
-        int32_t fb = (int32_t)edit.dly_fb * 31000 / 127;
-        while (x < X[1] + W - 3 && h > 1 && n < 20) {
-            int32_t up = !edit.dly_ping || !(n & 1), s = n ? ((int32_t)edit.dly_shift - 12) * n / 3 : 0, top;
-            int32_t len = h / 2;
-            top = up ? H / 2 - len - s : H / 2 + 1 - s;
-            if (top < 2) top = 2;
-            if (top + len > H - 2) top = H - 2 - len;
-            cv_rect(x, top, 3, len, n ? (lit & LIT_M1 ? C_MID : C_FAINT) : (lit & LIT_M1 ? C_BRIGHT : C_MID));
-            x += gap;
-            if (n++) h = h * fb / 32767;
-        }
-    }
-    {                                           /* the reverb: the pre-delay, then the tail (longer with the size) */
-        int32_t pre = (int32_t)edit.rev_pre * 16 / 127, len = 8 + (int32_t)edit.rev_size * (W - 16 - pre) / 127;
-        int32_t x0 = X[2] + 4 + pre, px = x0, py = 6;
-        uint16_t c = lit & LIT_M2 ? C_ACC : C_MID;
-        cv_rect(X[2] + 4, H - 6, 1, 1, c);
-        cv_line(X[2] + 4, H - 6, x0, H - 6, C_FAINT);
-        cv_line(x0, H - 6, x0, 6, c);
-        for (i = 1; i <= len; i++) {            /* an exponential decay, drawn as a line and a few ticks under it */
-            int32_t y = 6 + (H - 12) - (H - 12) * (len - i) * (len - i) / (len * len);
-            cv_line(px, py, x0 + i, y, c);
-            cv_line(x0 + i, y + 1, x0 + i, H - 6, C_FILL);
-            px = x0 + i; py = y;
-        }
+    {                                           /* the chain goes on: off the right (on to DELAY), in from the left */
+        int32_t xa = g ? 1 : X0 + 3 * FXW + 21, xb = g ? X0 - 2 : 238;   /*  (from CHORUS) */
+        uint16_t c = C_MID;
+        cv_hdots(xa, xb - 3, FXH / 2, 2);
+        cv_line(xb, FXH / 2, xb - 4, FXH / 2 - 4, c);
+        cv_line(xb, FXH / 2, xb - 4, FXH / 2 + 4, c);
     }
 }
 
@@ -1513,36 +1681,20 @@ static void gfx_parts(void)                     /* the two parts side by side: t
     parts_drawn = vm;
 }
 
-static void gfx_mix(uint32_t lit)               /* the three sources' levels, each into the filter (F) or past it (D) */
-{
+static void gfx_mix(uint32_t lit)               /* the three sources' levels, each with where it goes (the ROUTE */
+{                                               /*  screen's pins) */
     static const char *const NAME[NSRC] = {"OSC1", "OSC2", "NOISE"};
     const uint8_t LVL[NSRC] = {edit.lvl1, edit.lvl2, pv->noise_lvl};
-    char s[24], *e;
+    char s[40], *e;
     uint32_t k;
+    (void)lit;
     for (k = 0; k < NSRC; k++) {
-        int32_t y = 4 + (int32_t)k * 24, d = pv->route[k] == ROUTE_DIRECT;
-        uint16_t c = lit & LIT_RT ? C_BRIGHT : C_MID;   /* (the ROUTE row: the routes lit) */
+        int32_t y = 4 + (int32_t)k * 24;
         cv_text(4, y, &FONT_S, NAME[k], LVL[k] ? C_MID : C_FAINT);
-        cv_rect(54, y + 5, 140, 6, C_FILL);
-        cv_rect(54, y + 5, (int32_t)LVL[k] * 140 / 127, 6, LVL[k] ? C_BRIGHT : C_FAINT);
-        if (k < 2u && edit.vmode == VM_DUAL) {  /* DUAL: no routing (each part its own filter): the part's sends */
-            static const char *const SN[2] = {"DLY", "REV"};
-            uint32_t j;
-            cv_rect(54, y + 5, 140, 6, C_BLACK);   /* (the level's bar, shorter: the sends beside it) */
-            cv_rect(54, y + 5, 80, 6, C_FILL);
-            cv_rect(54, y + 5, (int32_t)LVL[k] * 80 / 127, 6, LVL[k] ? C_BRIGHT : C_FAINT);
-            for (j = 0; j < 2u; j++) {
-                int32_t x = 142 + (int32_t)j * 48, sv = edit.psend[k][j] & 127;
-                uint16_t sc = lit & LIT_RT ? C_BRIGHT : C_MID;
-                cv_text(x, y - 2, &FONT_S, SN[j], sv ? sc : C_FAINT);
-                cv_rect(x, y + 12, 44, 3, C_FILL);
-                cv_rect(x, y + 12, sv * 44 / 127, 3, sv ? sc : C_FAINT);
-            }
-            continue;
-        }
-        if (d) cv_rect(200, y, 36, 16, c);      /* DIRECT: inverted, as it skips the filter */
-        else cv_frame(200, y, 36, 16, lit & LIT_RT ? C_BRIGHT : C_BOX);
-        cv_text(200 + (36 - text_w(&FONT_S, d ? "DIR" : "FILT")) / 2, y, &FONT_S, d ? "DIR" : "FILT", d ? C_BLACK : c);
+        cv_rect(54, y + 5, 100, 6, C_FILL);
+        cv_rect(54, y + 5, (int32_t)LVL[k] * 100 / 127, 6, LVL[k] ? C_BRIGHT : C_FAINT);
+        rt_where(s, k);
+        cv_text(236 - text_w(&FONT_S, s), y, &FONT_S, s, LVL[k] ? C_MID : C_FAINT);
     }
     e = put(s, "OSC2 ");
     e = put(snum(e, (int32_t)edit.semi2 - 24), "st ");
@@ -1657,7 +1809,7 @@ static void gfx_noise(uint32_t lit)
         }
     }
     cv_text(4, 0, &FONT_S, NOISE_NAME[ue->n_type], C_FAINT);
-    put(t, pv->route[2] == ROUTE_DIRECT ? "-> DIRECT" : "-> FILTER");
+    rt_where(put(t, "> "), RT_NOISE);
     cv_text(236 - text_w(&FONT_S, t), 0, &FONT_S, t, pv->noise_lvl ? C_MID : C_FAINT);
     cv_hdots(4, 236, 36, 4);
     for (i = 0; i < (int32_t)NZ_WAVE; i++) {
@@ -1729,9 +1881,7 @@ static void gfx_drum(uint32_t lit)
         e = num(put(t, "DRIVE "), seqs.dr_drive);
         num(put(e, "  CRUSH "), seqs.dr_crush);
         cv_text(4, 92, &FONT_S, t, C_MID);
-        e = num(put(t, "SEND: DELAY "), seqs.dr_dly);
-        num(put(e, "  REVERB "), seqs.dr_rev);
-        cv_text(4, 108, &FONT_S, t, seqs.dr_dly || seqs.dr_rev ? C_MID : C_FAINT);
+        cv_text(4, 108, &FONT_S, "WHERE THEY GO: ROUTE (HOME)", C_FAINT);
         (void)lit;
         return;
     }
@@ -1797,53 +1947,6 @@ static void gfx_matrix(uint32_t lit)
         cv_rect(m + 26, y + 19, 1, 7, C_FAINT);
         cv_rect(d < 0 ? m + 26 + d * 28 / 64 : m + 26, y + 21, (d < 0 ? -d : d) * 28 / 64 + 1, 3, on ? c : C_FAINT);
     }
-}
-
-/* MOD FX: the sweep over two of its cycles (the phaser's notches, the flanger's delay: up and down around MANUAL),
- * its mix a bar; CRUSH: a sine as it comes out (its steps: the rate held, the bits) */
-static void gfx_modfx(uint32_t lit)
-{
-    int32_t i, py = 0, mid = 60, a = (int32_t)edit.mfx_depth * 40 / 127, man = ((int32_t)edit.mfx_manual - 64) * 30 / 64;
-    uint32_t on = edit.mfx_type && edit.mfx_type < MFX_N && edit.mfx_mix;
-    uint16_t c = on ? (lit & LIT_C ? C_ACC : C_MID) : C_FAINT;
-    char t[24];
-    cv_text(4, 0, &FONT_S, MFX_NAME[edit.mfx_type < MFX_N ? edit.mfx_type : 0u], on ? C_BRIGHT : C_FAINT);
-    put(num(put(t, "MIX "), edit.mfx_mix * 100u / 127u), "%");
-    cv_text(236 - text_w(&FONT_S, t), 0, &FONT_S, t, on ? C_MID : C_FAINT);
-    cv_hdots(4, 236, mid - man, 4);
-    for (i = 0; i < 232; i++) {                 /* two cycles of the sweep */
-        int32_t y = mid - man - sine_q15((uint32_t)i * (0x100000000ull / 116u)) * a / 32767;
-        if (i) cv_line(4 + i - 1, py, 4 + i, y, c);
-        py = y;
-    }
-    if (on && edit.mfx_type == MFX_PHASER)      /* the phaser: its six notches, where the sweep has them now */
-        for (i = 0; i < 6; i++) cv_rect(20 + i * 36, G_H - 16, 2, 10, c);
-    if (on && edit.mfx_type == MFX_FLANGER) {   /* the flanger: the comb of its delay */
-        int32_t gap = 6 + (int32_t)edit.mfx_manual * 30 / 127;
-        for (i = 6; i < 232; i += gap) cv_rect(4 + i, G_H - 16, 2, 10, c);
-    }
-    put(snum(put(t, "FDBK "), ((int32_t)edit.mfx_fb - 64) * 100 / 63), "%");
-    cv_text(4, G_H - 34, &FONT_S, t, edit.mfx_fb != 64 && on ? C_MID : C_FAINT);
-}
-
-static void gfx_crush(uint32_t lit)
-{
-    uint32_t hold = 1u + (edit.crush_rate & 127u) * 31u / 127u, sh = edit.crush_bits & 127u ? 1u + (edit.crush_bits & 127u) * 13u / 127u : 0u;
-    int32_t i, py = 0, held = 0, mask = ~((1 << sh) - 1), mid = 56;
-    uint16_t c = edit.crush_bits || edit.crush_rate ? (lit & LIT_C ? C_ACC : C_MID) : C_FAINT;
-    char t[32], *e;
-    cv_hdots(4, 236, mid, 4);
-    for (i = 0; i < 232; i++) {                 /* a sine at ~380 Hz (two cycles), one frame a pixel */
-        int32_t x = sine_q15((uint32_t)i * (0x100000000ull / 116u));
-        int32_t y;
-        if (i % (int32_t)hold == 0) held = x & mask;
-        y = mid - held * 44 / 32767;
-        if (i) cv_line(4 + i - 1, py, 4 + i, y, c);
-        py = y;
-    }
-    e = sh ? put(num(t, 16u - sh), " BITS  ") : put(t, "ALL BITS  ");
-    put(num(e, 44100u / hold), "Hz");
-    cv_text(4, G_H - 18, &FONT_S, t, C_MID);
 }
 
 /* the looper: its bars across, the notes played in it (each a dash at its pitch, from its note on to its off), where
@@ -1979,10 +2082,8 @@ static void draw_gfx(void)
     case PG_MENV2: gfx_menv(lit, 1); break;
     case PG_LFO: gfx_lfo(lit); break;
     case PG_LFO2: gfx_lfo(lit | LIT_L2); break;
-    case PG_CHO: case PG_DLY: case PG_REV: gfx_fx(lit); break;
+    case PG_CRUSH: case PG_MFX: case PG_CHO: case PG_DLY: case PG_REV: case PG_COMP: gfx_fx(lit); break;
     case PG_MATRIX: gfx_matrix(lit); break;
-    case PG_MFX: gfx_modfx(lit); break;
-    case PG_CRUSH: gfx_crush(lit); break;
     case PG_LOOP: gfx_loop(lit); break;
     case PG_ARP: gfx_arp(lit); break;
     case PG_SETUP: gfx_setup(); break;
@@ -2067,7 +2168,8 @@ static void draw_hdr(void)
         x = cv_text(x + 10, 1, &FONT_S, "REC", C_BLACK) + 4;
     }
     cv_line(x + 6, 5, x + 9, 9, C_FAINT); cv_line(x + 9, 9, x + 6, 13, C_FAINT);   /* > the row */
-    x = cv_text(x + 15, 1, &FONT_S, page < PG_N ? PAGES[page].rows[row[page]].name : page == PG_LIVE ? LV_NAME[lv_row] :
+    x = cv_text(x + 15, 1, &FONT_S, page == PG_ROUTE ? rt_hdr_text() : page < PG_N ? PAGES[page].rows[row[page]].name :
+                page == PG_LIVE ? LV_NAME[lv_row] :
                 PA_NAME[pa_row], C_MID);
 #ifndef DINGHY_HOST
     cpu = cpu_max * 100u / RENDER_TICKS;        /* the longest render since the last header: the peak (SETUP shows */
@@ -2113,10 +2215,6 @@ static const char *prm_idle(uint32_t pg, const prm_t *p)   /* a parameter that d
         return "SYNCED";                        /* (SYNC's division sets the rate) */
     if (pg == PG_MFX && p->off != PO(mfx_type) && (!edit.mfx_type || edit.mfx_type >= MFX_N))
         return "MOD FX OFF";
-    if (pg == PG_MIX && (p->off == PO(psend[0][0]) || p->off == PO(psend[1][0])) && !edit.dly_mix)
-        return "DELAY OFF";                     /* (its MIX 0: the return shut) */
-    if (pg == PG_MIX && (p->off == PO(psend[0][1]) || p->off == PO(psend[1][1])) && !edit.rev_mix)
-        return "REVERB OFF";
     return 0;
 }
 static void draw_focus(void)                    /* the selected row: four labels, values (large), bars */
@@ -3292,7 +3390,133 @@ static void sc_text(void)                       /* the header: the note, the cyc
     e = put(put(s, "KNOB2: "), SC_STYLE[sc_style]);
     num(put(e, sc_style == SC_MONO ? "  L/R  x" : "  x"), sc_gain);
     draw_text_box(0, SC_Y + SC_H + 12u, 240, &FONT_S, s, C_FAINT, 1);
-    draw_text_box(0, 222, 240, &FONT_S, gset.home ? "KNOB1: CYCLES   HOME: LIVE" : "KNOB1: CYCLES   HOME: BACK", C_FAINT, 1);
+    draw_text_box(0, 222, 240, &FONT_S, gset.home ? "KNOB1: CYCLES   HOME: LIVE" : "KNOB1: CYCLES   HOME: ROUTE", C_FAINT, 1);
+}
+
+/* ---- the ROUTE screen (HOME, after LIVE and the SCOPE): the pin matrix (engine.c: RT_), the sources down the side
+ * (the oscillators and the noise, the drums, the filter's output: each part's, two parts playing; then each effect's
+ * output), the destinations across (the filter, the effects, OUT, then USB's U2 and U3: the recording's channels 3-4,
+ * 5-6; their names on two lines, every other one lower, as ten don't fit side by side); a pin a dot, as big as its
+ * level. KNOB1 (or
+ * SELECT) the row, KNOB2 the column (an effect's row: the columns after it alone), KNOB3 the pin's level, KNOB4 it
+ * all on (127) or off. HOME, ALGORITHM: back */
+#define RT_X0 50                                /* the grid: its left, a column's width, the columns' names' top, */
+#define RT_CW 19                                /*  their height, a row's height (15 rows, 10 columns: 240 x 240) */
+#define RT_Y0 22
+#define RT_HH 25
+#define RT_RH 12
+static int32_t rt_kn_slow;                      /* (KNOB4: one step per two detents) */
+static int rt_shown(uint32_t r) { return r != RT_FILTB || ui_two(); }   /* (one part: one filter) */
+static uint32_t rt_col_ok(uint32_t r, uint32_t c, int32_t d)   /* row r's column nearest c that has a pin, the way */
+{                                               /*  it was moving (d) first */
+    int32_t k, x, w = d < 0 ? -1 : 1;
+    for (k = 0; k < (int32_t)RT_COLS; k++) {
+        x = (int32_t)c + w * k;
+        if (x >= 0 && x < (int32_t)RT_COLS && rt_ok(r, (uint32_t)x)) return (uint32_t)x;
+        x = (int32_t)c - w * k;
+        if (x >= 0 && x < (int32_t)RT_COLS && rt_ok(r, (uint32_t)x)) return (uint32_t)x;
+    }
+    return c;
+}
+static void rt_move_row(int32_t d)
+{
+    int32_t r = rt_r;
+    while (d) {
+        int32_t s = d > 0 ? 1 : -1, n = r + s;
+        while (n >= 0 && n < (int32_t)RT_ROWS && !rt_shown((uint32_t)n)) n += s;
+        if (n < 0 || n >= (int32_t)RT_ROWS) break;
+        r = n;
+        d -= s;
+    }
+    rt_r = (uint8_t)r;
+    rt_c = (uint8_t)rt_col_ok(rt_r, rt_c, 0);
+}
+static int32_t rt_row_y(uint32_t r)             /* row r's top, on the screen */
+{
+    uint32_t k, i = 0;
+    for (k = 0; k < r; k++) i += rt_shown(k);
+    return RT_Y0 + RT_HH + (int32_t)i * RT_RH;
+}
+static void rt_paint(int32_t top, uint32_t h)   /* the grid's rows top .. top + h of the screen */
+{
+    uint32_t r, c;
+    cv_begin(240, h, C_BLACK);
+    for (c = 0; c < RT_COLS; c++) {             /* the destinations (close set: three letters a column; an effect */
+        const char *n = RT_COL_SHORT[c];        /*  that is off, faint: what goes into it comes back as it went in, */
+        int32_t x = RT_X0 + (int32_t)c * RT_CW + (RT_CW - (n[2] ? 18 : 12)) / 2 + 1;   /*  or not at all) */
+        uint32_t on = c == RC_CRS ? edit.crush_bits || edit.crush_rate : c == RC_MFX ? edit.mfx_type && edit.mfx_mix :
+                      c == RC_CHO ? edit.cho_mix : c == RC_DLY ? edit.dly_mix : c == RC_REV ? edit.rev_mix :
+                      c == RC_CMP ? edit.cmp_mix : 1u;
+        char ch[2] = {0, 0};
+        for (; *n; n++, x += 6) {
+            ch[0] = *n;
+            cv_text(x, RT_Y0 - 1 + (int32_t)(c & 1u) * 9 - top, &FONT_S, ch, c == rt_c ? C_BRIGHT : on ? C_MID : C_FAINT);
+        }
+    }
+    cv_rect(RT_X0 + RT_CW - 1, RT_Y0 + RT_HH - top, 1, rt_row_y(RT_ROWS) - RT_Y0 - RT_HH, C_BOX);   /* (the filter */
+    cv_rect(RT_X0 + RC_OUT * RT_CW - 1, RT_Y0 + RT_HH - top, 1, rt_row_y(RT_ROWS) - RT_Y0 - RT_HH, C_BOX);   /*  apart, OUT, */
+    cv_rect(RT_X0 + RC_U2 * RT_CW - 1, RT_Y0 + RT_HH - top, 1, rt_row_y(RT_ROWS) - RT_Y0 - RT_HH, C_FAINT);   /* USB's) */
+    for (r = 0; r < RT_ROWS; r++) {
+        int32_t y = rt_row_y(r) - top, cy = y + RT_RH / 2;
+        uint16_t lc = r == rt_r ? C_BRIGHT : C_MID;
+        if (!rt_shown(r)) continue;
+        if (r == RT_KICK || r == RT_FILTA || r == RT_FX0)   /* (the groups: the voices', the drums, the filter's, */
+            cv_rect(0, y, 240, 1, C_BOX);       /*  the effects') */
+        if (ui_two() && (r == RT_FILTA || r == RT_FILTB) && r != rt_r) lc = r == RT_FILTA ? C_PART_A : C_PART_B;
+        if (r == rt_r) cv_rect(0, y + 1, RT_X0 - 1, RT_RH - 1, C_SEL);
+        cv_text(3, y - 1, &FONT_S, rt_row_name(r), lc);
+        for (c = 0; c < RT_COLS; c++) {
+            int32_t cx = RT_X0 + (int32_t)c * RT_CW + RT_CW / 2;
+            uint32_t v = rt_pin(&edit, r, c);
+            if (!rt_ok(r, c)) continue;
+            if (v) cv_circle(cx, cy, 1 + (int32_t)(v * 4u / 127u), r == rt_r || c == rt_c ? C_BRIGHT : C_MID, 1);
+            else cv_rect(cx, cy, 1, 1, r == rt_r || c == rt_c ? C_MID : C_FAINT);
+            if (r == rt_r && c == rt_c) cv_frame(cx - RT_CW / 2 + 1, y + 1, RT_CW - 2, RT_RH - 1, C_BRIGHT);
+        }
+    }
+    cv_blit(0, (uint32_t)top);
+}
+static void rt_draw(void)                       /* the grid (in two strips: the canvas holds 240 x G_H) */
+{
+    rt_paint((int32_t)G_Y, G_H);
+    rt_paint((int32_t)(G_Y + G_H), 240u - G_Y - G_H);
+}
+static uint32_t rt_input(void)                  /* the knobs; 1: the sound changed */
+{
+    static uint32_t last;
+    int32_t d;
+    uint32_t changed = 0;
+    if ((d = fm1_enc_take(ENC_SELECT)) != 0 || (d = fm1_enc_take(ENC_KNOB1)) != 0) {   /* the row */
+        rt_move_row(d);
+        dirty |= D_HDR | D_GFX;
+    }
+    if ((d = fm1_enc_take(ENC_KNOB1 + 1u)) != 0) {   /* the column */
+        int32_t c = (int32_t)rt_c + d;
+        c = c < 0 ? 0 : c >= (int32_t)RT_COLS ? (int32_t)RT_COLS - 1 : c;
+        rt_c = (uint8_t)rt_col_ok(rt_r, (uint32_t)c, d);
+        dirty |= D_HDR | D_GFX;
+    }
+    {
+        int32_t k3 = fm1_enc_take(ENC_KNOB1 + 2u), k4 = fm1_enc_take(ENC_KNOB1 + 3u);
+        if (k4) {                               /* KNOB4: on or off (one step per two detents) */
+            rt_kn_slow += k4;
+            if (rt_kn_slow >= 2 || rt_kn_slow <= -2) { k3 = rt_kn_slow > 0 ? 127 : -127; rt_kn_slow = 0; }
+        }
+        if (k3 && rt_ok(rt_r, rt_c)) {          /* KNOB3: the level (fast: x 3) */
+            int32_t v;
+            if (RT_DRUM(rt_r)) rt_own();
+            v = (int32_t)rt_pin(&edit, rt_r, rt_c) + (fm1_ms - last < 60u && k3 > -10 && k3 < 10 ? k3 * 3 : k3);
+            last = fm1_ms;
+            v = v < 0 ? 0 : v > 127 ? 127 : v;
+            if (v != (int32_t)edit.rt[rt_r][rt_c]) {
+                ud_mark("ROUTE");
+                edit.rt[rt_r][rt_c] = (uint8_t)v;
+                changed = 1;
+            }
+            dirty |= D_HDR | D_GFX;
+        }
+    }
+    return changed;
 }
 
 /* ---- an action that replaces or clears (PASTE, CLEAR, INIT, a beat LOADed, a part's notes, the loop): turned, it
@@ -3473,16 +3697,22 @@ static int ui_input(uint32_t buttons)
         }
         for (i = 2; i < 4u; i++) (void)fm1_enc_take(ENC_KNOB1 + i);
         (void)fm1_enc_take(ENC_SELECT);
-        if (buttons & (1u << BTN_HOME)) { ui_page(gset.home ? PG_LIVE : sc_back); return (int)changed; }   /* HOME */
-                                                /* again: LIVE (SCOPE first), else back */
+        if (buttons & (1u << BTN_HOME)) { ui_page(gset.home ? PG_LIVE : PG_ROUTE); return (int)changed; }   /* HOME */
+                                                /* again: LIVE (SCOPE first), else ROUTE */
         if (fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
         if (buttons & (1u << BTN_SAVE)) { page = sc_back; ui_page(PG_PATCH); return (int)changed; }
         if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
                          1u << BTN_SEQ)))
             return (int)changed;                /* (else a page button: on to that page, below) */
-    } else if (page == PG_LIVE) {               /* LIVE: HOME the SCOPE (LIVE first), else back; ALGORITHM back */
-        if (buttons & (1u << BTN_HOME)) { ui_page(gset.home ? sc_back : PG_SCOPE); return (int)changed; }
+    } else if (page == PG_LIVE) {               /* LIVE: HOME the SCOPE (LIVE first), else ROUTE; ALGORITHM back */
+        if (buttons & (1u << BTN_HOME)) { ui_page(gset.home ? PG_ROUTE : PG_SCOPE); return (int)changed; }
         if (fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
+    } else if (page == PG_ROUTE) {              /* ROUTE: HOME, ALGORITHM back; SAVE or a page button on */
+        if (buttons & (1u << BTN_HOME) || fm1_enc_take(ENC_ALGORITHM)) { ui_page(sc_back); return (int)changed; }
+        if (buttons & (1u << BTN_SAVE)) { ui_page(PG_PATCH); return (int)changed; }
+        if (!(buttons & (1u << BTN_EDIT | 1u << BTN_FX | 1u << BTN_ENV | 1u << BTN_SEL | 1u << BTN_LFO | 1u << BTN_GLO | 1u << BTN_ARP |
+                         1u << BTN_SEQ)))
+            return (int)(rt_input() | changed);   /* (else a page button: on to that page, below) */
     } else if (buttons & (1u << BTN_HOME) && page != PG_PATCH) {
         ui_page(gset.home ? PG_SCOPE : PG_LIVE);   /* (SETUP's HOME: which comes first) */
         return (int)changed;
@@ -3498,8 +3728,8 @@ static int ui_input(uint32_t buttons)
     }
     if (buttons & (1u << BTN_EDIT))             /* EDIT: OSC 1, OSC 2, NOISE in turn */
         ui_page(page == PG_OSC1 ? PG_OSC2 : page == PG_OSC2 ? PG_TRANS : page == PG_TRANS ? PG_NOISE : PG_OSC1);
-    if (buttons & (1u << BTN_FX))               /* FX: CHORUS, DELAY, REVERB, MOD FX, CRUSH in turn */
-        ui_page(page >= PG_CHO && page < PG_CRUSH ? page + 1u : PG_CHO);
+    if (buttons & (1u << BTN_FX))               /* FX: CRUSH, MOD FX, CHORUS, DELAY, REVERB, COMP in turn (the */
+        ui_page(page >= PG_CRUSH && page < PG_COMP ? page + 1u : PG_CRUSH);   /*  ROUTE screen's order) */
     if (buttons & (1u << BTN_ENV))              /* ENV: AMP, F.ENV, M.ENV 1, M.ENV 2 in turn */
         ui_page(page >= PG_AMP && page < PG_MENV2 ? page + 1u : PG_AMP);
     if (buttons & (1u << BTN_SEL)) {            /* SELECT (the button): FILTER, from every page; on FILTER, two */
@@ -3522,8 +3752,11 @@ static int ui_input(uint32_t buttons)
     if (buttons & (1u << BTN_SEQ)) ui_page(page == PG_SEQ ? PG_DRUM : page == PG_DRUM ? PG_LOOP : PG_SEQ);   /* SEQ: */
                                                 /* SEQ, DRUM, LOOP */
     if (buttons & (1u << BTN_GLO)) ui_page(page == PG_MIX ? PG_SETUP : PG_MIX);
-    if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0)
-        ui_page((uint32_t)(((int32_t)page + d % (int32_t)PG_N + (int32_t)PG_N) % (int32_t)PG_N));
+    if ((d = fm1_enc_take(ENC_ALGORITHM)) != 0) {   /* (the pages but ROUTE: HOME's) */
+        int32_t np = ((int32_t)page + d % (int32_t)PG_N + (int32_t)PG_N) % (int32_t)PG_N;
+        if (np == (int32_t)PG_ROUTE) np = (np + (d > 0 ? 1 : (int32_t)PG_N - 1)) % (int32_t)PG_N;
+        ui_page((uint32_t)np);
+    }
     if (page != PG_LIVE && (d = fm1_enc_take(ENC_SELECT)) != 0) {
         int32_t n = (int32_t)row[page] + d, max = PAGES[page].n - 1;
         row[page] = (uint32_t)(n < 0 ? 0 : n > max ? max : n);
@@ -3877,6 +4110,8 @@ static void ui_draw(void)                       /* from the main loop: what chan
         dirty |= D_GFX;                         /* (the parts': the voices sounding) */
     if (page == PG_DRUM && dr_drawn != seq.steps)
         dirty |= D_GFX;                         /* (and the drums') */
+    if (page == PG_COMP && cmp_gr != cmp_drawn && fm1_ms - cmp_drawn_at >= 60u)   /* (COMP's meter) */
+        dirty |= D_GFX;
     if (page == PG_LOOP && (lp.run || lp_drawn != lp.state) && fm1_ms - lp_drawn_at >= 60u)
         dirty |= lp_drawn != lp.state || lp_play_ui != lp.run ? D_GFX | D_ROWS | D_HDR : D_GFX;   /* (the playhead; */
                                                 /* a new state: PLAY's value, REC in the header) */
@@ -3905,6 +4140,12 @@ static void ui_draw(void)                       /* from the main loop: what chan
         if (dirty & D_GFX) live_draw_gfx();
         if (dirty & (D_LEG | D_ROWS)) draw_focus();
         if (dirty & D_LEG) tabs(LV_NAME, LV_N, lv_row);
+        dirty = 0;
+        return;
+    }
+    if (page == PG_ROUTE) {
+        if (dirty & D_HDR) draw_hdr();
+        if (dirty & (D_GFX | D_ROWS | D_LEG)) rt_draw();
         dirty = 0;
         return;
     }

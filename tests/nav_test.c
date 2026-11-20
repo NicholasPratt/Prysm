@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* The UI's navigation and what the focus row says, through the app's own code (ui.c): HOME (LIVE first, then the
- * SCOPE, then back; SETUP's HOME row the other way round), the SELECT button (FILTER from every page; on FILTER, two
+ * SCOPE, then ROUTE, then back; SETUP's HOME row LIVE and the SCOPE the other way round), the ROUTE screen's knobs, the SELECT button (FILTER from every page; on FILTER, two
  * parts: A and B in turn), the controls that do nothing as the sound is now (dimmed, and why), the envelopes' times
  * (as the engine's tables have them), a knob turned lighting its own cell (not a pop-up over the picture); the OSC
  * pages' rows by operator, the SEQ page's groups, an action that clears asked first, the PATCH screen's questions.
@@ -31,12 +31,14 @@ int main(void)
     ui_init(-1, -1);
     engine_set(&edit);
 
-    /* HOME: LIVE, the SCOPE, back */
+    /* HOME: LIVE, the SCOPE, ROUTE, back */
     ui_page(PG_AMP);
     press(BTN_HOME);
     CHECK(page == PG_LIVE, "HOME on AMP: LIVE");
     press(BTN_HOME);
     CHECK(page == PG_SCOPE, "HOME again: the SCOPE");
+    press(BTN_HOME);
+    CHECK(page == PG_ROUTE, "HOME there: ROUTE");
     press(BTN_HOME);
     CHECK(page == PG_AMP, "HOME there: back to AMP");
     gset.home = 1;
@@ -44,6 +46,8 @@ int main(void)
     CHECK(page == PG_SCOPE, "SETUP's HOME on SCOPE: the SCOPE first");
     press(BTN_HOME);
     CHECK(page == PG_LIVE, "... then LIVE");
+    press(BTN_HOME);
+    CHECK(page == PG_ROUTE, "... then ROUTE");
     press(BTN_HOME);
     CHECK(page == PG_AMP, "... then back to AMP");
     gset.home = 0;
@@ -55,7 +59,16 @@ int main(void)
     CHECK(page == PG_LIVE, "HOME there: back to LIVE");
     press(BTN_HOME);
     press(BTN_HOME);
-    CHECK(page == PG_MIX, "HOME, HOME: the SCOPE, then MIX (where HOME was first pressed)");
+    press(BTN_HOME);
+    CHECK(page == PG_MIX, "HOME x 3: the SCOPE, ROUTE, then MIX (where HOME was first pressed)");
+    {                                           /* ALGORITHM: every page but ROUTE (HOME's) */
+        uint32_t k, seen = 0;
+        ui_page(PG_OSC1);
+        for (k = 0; k < PG_N - 1u; k++) { host_enc[ENC_ALGORITHM] = 1; ui_input(0); seen |= page == PG_ROUTE; }
+        CHECK(!seen && page == PG_OSC1, "ALGORITHM round: ROUTE not in it, every other page (back to OSC 1)");
+        host_enc[ENC_ALGORITHM] = -1; ui_input(0);
+        CHECK(page == PG_SETUP, "... back from OSC 1: SETUP (ROUTE skipped)");
+    }
 
     /* the SELECT button: FILTER from anywhere; on FILTER, the parts in turn */
     edit.vmode = VM_SINGLE;
@@ -219,21 +232,74 @@ int main(void)
     pa_do();
     CHECK(!strcmp(pa_msg, "OVERWRITE SLOT 2? SAVE"), "SAVE over another used slot: %s", pa_msg);
 
-    /* MIX's ROUTE row: the oscillators' routes, but in DUAL (each part its own filter) the parts' sends; a send
-     * dimmed while its effect's MIX is 0 */
-    edit.vmode = VM_SINGLE;
-    CHECK(prm_of(PG_MIX, MR_ROUTE, 0)->kind == K_ROUTE && prm_of(PG_MIX, MR_ROUTE, 3)->off == PO(noise_lvl),
-          "ROUTE, SINGLE: OSC1 .. N.LVL");
-    edit.vmode = VM_SPLIT;
-    CHECK(prm_of(PG_MIX, MR_ROUTE, 1)->kind == K_ROUTE, "ROUTE, SPLIT: the routes");
-    edit.vmode = VM_DUAL;
-    CHECK(prm_of(PG_MIX, MR_ROUTE, 0)->off == PO(psend[0][0]) && prm_of(PG_MIX, MR_ROUTE, 1)->off == PO(psend[0][1]) &&
-          prm_of(PG_MIX, MR_ROUTE, 2)->off == PO(psend[1][0]) && prm_of(PG_MIX, MR_ROUTE, 3)->off == PO(psend[1][1]),
-          "ROUTE, DUAL: A DLY, A REV, B DLY, B REV");
-    edit.dly_mix = 0; edit.rev_mix = 90;
-    CHECK(prm_idle(PG_MIX, &SEND_PRM[2]) && !strcmp(prm_idle(PG_MIX, &SEND_PRM[2]), "DELAY OFF") &&
-          !prm_idle(PG_MIX, &SEND_PRM[1]), "a send idle while its effect is off");
-    edit.vmode = VM_SINGLE;
+    /* the ROUTE screen: KNOB1 the row, KNOB2 the column (an effect's: those after it alone), KNOB3 the level, KNOB4
+     * on / off; a drum's pin, an older sound's: its rows taken from the sequencer's sends first; one part: no FILT B */
+    {
+        edit = PATCH_INIT;
+        edit.vmode = VM_SINGLE;
+        ui_page(PG_ROUTE);
+        rt_r = 0; rt_c = RC_FLT;
+        host_enc[ENC_KNOB1 + 1u] = 12; ui_input(0);
+        CHECK(rt_r == RT_OSC1 && rt_c == RC_U3, "KNOB2: the columns, past OUT to USB's U2, U3 (and no further)");
+        host_enc[ENC_KNOB1 + 1u] = -2; ui_input(0);
+        CHECK(rt_c == RC_OUT, "... back two: OUT (%u)", rt_c);
+        host_enc[ENC_KNOB1 + 2u] = 50; ui_input(0);
+        CHECK(edit.rt[RT_OSC1][RC_OUT] == 50, "KNOB3: OSC 1 > OUT at 50 (%u)", edit.rt[RT_OSC1][RC_OUT]);
+        fm1_ms += 1000;
+        host_enc[ENC_KNOB1 + 3u] = -2; ui_input(0);
+        CHECK(edit.rt[RT_OSC1][RC_OUT] == 0, "KNOB4 back two detents: off");
+        host_enc[ENC_KNOB1 + 3u] = 2; ui_input(0);
+        CHECK(edit.rt[RT_OSC1][RC_OUT] == 127, "... on: 127");
+        host_enc[ENC_KNOB1] = 8; ui_input(0);
+        CHECK(rt_r == RT_CRUSH, "one part: KNOB1 past FILTER to CRUSH, no FILT B (%u)", rt_r);
+        rt_c = RC_FLT; rt_move_row(0);
+        CHECK(rt_c == RC_MFX, "CRUSH's row: its first column MOD FX (%u)", rt_c);
+        host_enc[ENC_KNOB1 + 1u] = -3; ui_input(0);
+        CHECK(rt_c == RC_MFX, "... KNOB2 left: no further (%u)", rt_c);
+        edit.vmode = VM_DUAL;
+        host_enc[ENC_KNOB1] = -1; ui_input(0);
+        CHECK(rt_r == RT_FILTB, "two parts: FILT B above CRUSH");
+        edit.rt[RT_KICK][RC_FLT] = RT_OLD;      /* (an older sound: the drums' from the sequencer) */
+        seqs.dr_flt[1] = 0; seqs.dr_rev = 64;
+        rt_r = RT_SNARE; rt_c = RC_REV;
+        fm1_ms += 1000;                         /* (a slow turn: one step) */
+        CHECK(rt_pin(&edit, RT_SNARE, RC_REV) == 64 && rt_pin(&edit, RT_SNARE, RC_OUT) == 127 &&
+              rt_pin(&edit, RT_SNARE, RC_FLT) == 0, "an older sound: the snare's pins its sends (REV 64, OUT 127)");
+        host_enc[ENC_KNOB1 + 2u] = 1; ui_input(0);
+        CHECK(edit.rt[RT_KICK][RC_FLT] != RT_OLD && edit.rt[RT_SNARE][RC_REV] == 65 && edit.rt[RT_KICK][RC_OUT] == 127,
+              "... a pin turned: the drums' rows the sound's own, from there (65, the kick out)");
+        {
+            char t[24];
+            edit = PATCH_INIT;
+            rt_where(t, RT_OSC1);
+            CHECK(!strcmp(t, "FLT"), "OSC 1 as new: into the filter (%s)", t);
+            edit.rt[RT_OSC1][RC_DLY] = 10; edit.rt[RT_OSC1][RC_REV] = 10; edit.rt[RT_OSC1][RC_OUT] = 10;
+            rt_where(t, RT_OSC1);
+            CHECK(!strcmp(t, "FLT DLY +2"), "... and more: %s", t);
+        }
+        edit = PATCH_INIT;
+        ui_page(PG_AMP);
+    }
+    {                                           /* FX: the effects' pages in the ROUTE screen's order, round */
+        static const uint8_t ORDER[7] = {PG_CRUSH, PG_MFX, PG_CHO, PG_DLY, PG_REV, PG_COMP, PG_CRUSH};
+        uint32_t k, ok;
+        ui_page(PG_AMP);
+        for (k = 0, ok = 1; k < 7u; k++) { press(BTN_FX); ok &= page == ORDER[k]; }
+        CHECK(ok, "FX: CRUSH, MOD FX, CHORUS, DELAY, REVERB, COMP, then CRUSH again");
+        {
+            char t4[4][16];
+            strcpy(t4[0], shown(&COMP_ROWS[0].p[0], &edit.cmp_thr)); strcpy(t4[1], shown(&COMP_ROWS[0].p[1], &edit.cmp_ratio));
+            strcpy(t4[2], shown(&COMP_ROWS[1].p[0], &edit.cmp_att)); strcpy(t4[3], shown(&COMP_ROWS[1].p[1], &edit.cmp_rel));
+            CHECK(!strcmp(t4[0], "-18dB") && !strcmp(t4[1], "4:1") && !strcmp(t4[2], "3.2ms") && !strcmp(t4[3], "144ms"),
+                  "COMP as new: %s %s %s %s", t4[0], t4[1], t4[2], t4[3]);
+        }
+        v = 0; CHECK(!strcmp(shown(&COMP_ROWS[1].p[0], &v), "0.1ms"), "... ATTACK at 0: 0.1 ms (%s)", shown(&COMP_ROWS[1].p[0], &v));
+        CHECK(!strcmp(shown(&COMP_ROWS[1].p[1], &v), "10ms"), "... RELEASE at 0: 10 ms (%s)", shown(&COMP_ROWS[1].p[1], &v));
+        v = 127; CHECK(!strcmp(shown(&COMP_ROWS[1].p[0], &v), "100ms"), "... ATTACK at 127: 100 ms");
+        CHECK(!strcmp(shown(&COMP_ROWS[1].p[1], &v), "2.0s"), "... RELEASE at 127: 2.0 s (%s)", shown(&COMP_ROWS[1].p[1], &v));
+        CHECK(!strcmp(shown(&COMP_ROWS[0].p[0], &v), "0dB"), "... THRESH at 127: 0 dB (%s)", shown(&COMP_ROWS[0].p[0], &v));
+        ui_page(PG_AMP);
+    }
 
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);
     return fails != 0;

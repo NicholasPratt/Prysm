@@ -1,0 +1,42 @@
+# the ROUTE screen (HOME three times: LIVE, the SCOPE, ROUTE): the pins as new; KNOB2 to OUT, KNOB3 OSC 1 straight
+# out at 60; KNOB1 down to the kick, KNOB2 to DLY, KNOB4 on; down to the filter's row; then two parts (MIX's PARTS:
+# DUAL): FILT A and FILT B in their colours; FILT A into COMP; FX six times: the COMP page, a chord through it, its
+# meter (tests/run_ui.sh)
+100 keys 0x80
+200 btn 8
+300 btn 8
+400 btn 8
+500 shot
+600 enc 3 6
+700 enc 4 60
+800 shot
+900 enc 2 3
+1000 enc 3 -2
+1100 enc 5 2
+1200 shot
+1300 enc 2 4
+1400 shot
+1500 btn 7
+1600 enc 0 3
+1700 enc 2 2
+1800 btn 8
+1900 btn 8
+2000 btn 8
+2100 shot
+2200 enc 2 1
+2300 shot
+2400 enc 3 2
+2500 enc 4 127
+2600 shot
+2700 btn 2
+2750 btn 2
+2800 btn 2
+2850 btn 2
+2900 btn 2
+2950 btn 2
+3000 enc 2 -70
+3100 keys 0x4880
+3600 shot
+3700 enc 0 1
+3800 shot
+3900 end

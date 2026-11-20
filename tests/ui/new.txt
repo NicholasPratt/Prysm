@@ -1,4 +1,4 @@
-# the pages and rows of 1.4: MATRIX (LFO three times), MOD FX and CRUSH (FX four, five times), the SEQ page's LOCK row
+# the pages and rows of 1.4: MATRIX (LFO three times), MOD FX (FX twice) and CRUSH (FX five times more, round), the SEQ page's LOCK row
 # (a lane on CUTOFF, two steps locked), the DRUM page's CLAP (its key) and KIT rows, the LOOP page (SEQ three times: a
 # loop recorded from the first note, played, overdubbed), the PATCH screen's UNDO
 # (tests/run_ui.sh)
@@ -15,8 +15,6 @@
 440 shot
 500 btn 2
 520 btn 2
-540 btn 2
-560 btn 2
 600 enc 2 2
 620 enc 4 40
 700 shot
@@ -25,6 +23,10 @@
 820 enc 0 1
 840 enc 3 30
 900 shot
+930 btn 2
+935 btn 2
+940 btn 2
+945 btn 2
 950 btn 2
 1000 enc 2 60
 1020 enc 3 40

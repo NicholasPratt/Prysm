@@ -390,6 +390,95 @@ int main(void)
     }
     CHECK(sizeof bank <= STORE_MAX && sizeof seqs <= STORE_MAX, "the bank (%u bytes) and a sequencer (%u) fit a sector (%u)",
           (unsigned)sizeof bank, (unsigned)sizeof seqs, (unsigned)STORE_MAX);
+    {                                           /* the banks of 1.5 .. 1.7's builds (formats 20 .. 23): loaded, converted */
+        static const uint32_t V[4] = {20, 21, 22, 23}, SZ[4] = {PATCH_V20_SIZE, PATCH_V21_SIZE, PATCH_V22_SIZE, PATCH_V23_SIZE};
+        uint32_t k;
+        for (k = 0; k < 4u; k++) {
+            patch_t c = PATCH_INIT;
+            c.cut = (uint8_t)(40u + k); c.route[1] = ROUTE_DIRECT;
+            memset(old_store, 0, sizeof old_store);   /* (formats 10 on: a prefix of patch_t, in the bank as is) */
+            memcpy(old_store, &V[k], 4);
+            old_store[4u + 5u] = 1;
+            memcpy(old_store + BANK_SIZE(0) + 5u * SZ[k], &c, SZ[k]);
+            store_save(old_store, BANK_SIZE(SZ[k]));
+            memset(&bank, 0, sizeof bank);
+            patches_load();
+            CHECK(patch_get(5, &got) == 0 && got.cut == 40u + k && got.rt[RT_OSC2][RC_FLT] == 0 &&
+                  got.rt[RT_OSC2][RC_CRS] == 127 && got.rt[RT_OSC1][RC_FLT] == 127 && got.rt[RT_KICK][RC_FLT] == RT_OLD,
+                  "a format %u bank loads: its sound, osc 2 DIRECT now past the filter into CRUSH, the drums the sequencer's",
+                  (unsigned)V[k]);
+        }
+    }
+    {                                           /* the drums' pins of an older sound: the sequencer's sends */
+        patch_t c = PATCH_INIT;
+        c.rt[RT_KICK][RC_FLT] = RT_OLD;
+        seqs.dr_flt[0] = 127; seqs.dr_flt[1] = 0; seqs.dr_flt[2] = 32; seqs.dr_dly = 127; seqs.dr_rev = 0;
+        CHECK(rt_pin(&c, RT_KICK, RC_FLT) == 127 && rt_pin(&c, RT_KICK, RC_OUT) == 0 &&
+              rt_pin(&c, RT_SNARE, RC_FLT) == 0 && rt_pin(&c, RT_SNARE, RC_OUT) == 127 && rt_pin(&c, RT_SNARE, RC_DLY) == 127 &&
+              rt_pin(&c, RT_SNARE, RC_REV) == 0 && rt_pin(&c, RT_SNARE, RC_CRS) == 0,
+              "an older sound's drums: all through the filter, or none and all sent (as its FILTER, DELAY)");
+        CHECK(pin_g(rt_pin(&c, RT_HAT, RC_FLT)) > 8192 - 600 && pin_g(rt_pin(&c, RT_HAT, RC_FLT)) < 8192 + 600 &&
+              pin_g(rt_pin(&c, RT_HAT, RC_OUT)) > 24576 - 600 && pin_g(rt_pin(&c, RT_HAT, RC_OUT)) < 24576 + 600,
+              "... FILTER 32: a quarter through the filter, three quarters past it (%d, %d)",
+              (int)pin_g(rt_pin(&c, RT_HAT, RC_FLT)), (int)pin_g(rt_pin(&c, RT_HAT, RC_OUT)));
+        CHECK(!rt_ok(RT_DLY, RC_CHO) && !rt_ok(RT_FILTA, RC_FLT) && rt_ok(RT_CHO, RC_DLY) && rt_ok(RT_REV, RC_OUT) &&
+              !rt_ok(RT_REV, RC_REV), "the pins: an effect into those after it alone, the filter not into itself");
+    }
+    {                                           /* format 24 (the ROUTE screen before COMP): its pins moved over */
+        static uint8_t o24[PATCH_V24_SIZE];
+        patch_t c = PATCH_INIT;
+        uint32_t r, k, ok = 1;
+        c.cut = 33;
+        memcpy(o24, &c, PATCH_V23_SIZE);
+        for (r = 0; r < RT_V24_ROWS; r++)
+            for (k = 0; k < RT_V24_COLS; k++) o24[PATCH_V23_SIZE + r * RT_V24_COLS + k] = (uint8_t)(r * 7u + k + 1u);
+        memset(&got, 0xAA, sizeof got);
+        CHECK(patch_from(&got, o24, PATCH_V24_SIZE, 24) == 0 && got.cut == 33, "a format 24 sound loads");
+        for (r = 0; r < RT_V24_ROWS; r++) {
+            for (k = 0; k + 1u < RT_V24_COLS; k++) ok &= got.rt[r][k] == r * 7u + k + 1u;
+            ok &= got.rt[r][RC_OUT] == r * 7u + 7u && got.rt[r][RC_CMP] == 0;
+        }
+        CHECK(ok && got.rt[RT_CMP][RC_OUT] == 127 && got.cmp_ratio == PATCH_INIT.cmp_ratio && got.cmp_mix == 127,
+              "... each pin where it was, its OUT into OUT, nothing into COMP; COMP out, as new");
+        memset(old_store, 0, sizeof old_store);
+        k = 24; memcpy(old_store, &k, 4);
+        old_store[4u + 3u] = 1;
+        memcpy(old_store + BANK_SIZE(0) + 3u * PATCH_V24_SIZE, o24, PATCH_V24_SIZE);
+        store_save(old_store, BANK_SIZE(PATCH_V24_SIZE));
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(3, &got) == 0 && got.cut == 33 && got.rt[RT_FILTA][RC_OUT] == 7u * 7u + 7u,
+              "... a format 24 bank: loaded, converted");
+        CHECK(got.rt[RT_FILTA][RC_U2] == 0 && got.rt[RT_CMP][RC_U3] == 0 && got.dr_pan[2] == 64,
+              "... nothing into USB's pairs, the drums centred");
+    }
+    {                                           /* format 25 (before USB's pairs, the drums' places): pins, COMP moved */
+        static uint8_t o25[PATCH_V25_SIZE];
+        patch_t c = PATCH_INIT;
+        uint32_t r, k, ok = 1;
+        c.cut = 44;
+        memcpy(o25, &c, PATCH_V23_SIZE);
+        for (r = 0; r < RT_ROWS; r++)
+            for (k = 0; k < RT_V25_COLS; k++) o25[PATCH_V23_SIZE + r * RT_V25_COLS + k] = (uint8_t)(r * 8u + k + 1u);
+        for (k = 0; k < RT_V25_CMP; k++) o25[PATCH_V23_SIZE + RT_ROWS * RT_V25_COLS + k] = (uint8_t)(10u + k);
+        memset(&got, 0xAA, sizeof got);
+        CHECK(patch_from(&got, o25, PATCH_V25_SIZE, 25) == 0 && got.cut == 44, "a format 25 sound loads");
+        for (r = 0; r < RT_ROWS; r++) {
+            for (k = 0; k < RT_V25_COLS; k++) ok &= got.rt[r][k] == r * 8u + k + 1u;
+            ok &= got.rt[r][RC_U2] == 0 && got.rt[r][RC_U3] == 0;
+        }
+        CHECK(ok && got.cmp_thr == 10 && got.cmp_ratio == 11 && got.cmp_mix == 15 && got.dr_pan[0] == 64 &&
+              got.dr_pan[3] == 64, "... each pin where it was, none into U2, U3; COMP's as it was; the drums centred");
+        memset(old_store, 0, sizeof old_store);
+        k = 25; memcpy(old_store, &k, 4);
+        old_store[4u + 5u] = 1;
+        memcpy(old_store + BANK_SIZE(0) + 5u * PATCH_V25_SIZE, o25, PATCH_V25_SIZE);
+        store_save(old_store, BANK_SIZE(PATCH_V25_SIZE));
+        memset(&bank, 0, sizeof bank);
+        patches_load();
+        CHECK(patch_get(5, &got) == 0 && got.cut == 44 && got.rt[RT_FILTA][RC_OUT] == 7u * 8u + 8u && got.cmp_gain == 14,
+              "... a format 25 bank: loaded, converted");
+    }
     printf(fails ? "%d failed\n" : "all passed\n", fails);
     return fails != 0;
 }

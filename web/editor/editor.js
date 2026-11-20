@@ -442,16 +442,13 @@ function drumUI() {
     knob(name + " LEVEL", SQ.drLvl + d, 127, (v) => v);
     knob(name + " TUNE", SQ.drTune + d, 48, (v) => (v > 24 ? "+" : "") + (v - 24) + "st");
     knob(name + " DECAY", SQ.drDec + d, 127, (v) => (v >= 127 ? "FULL" : v));
-    knob(name + " FILTER", SQ.drFlt + d, 127, (v) => v);
   });
   knob("DRIVE", SQ.drDrive, 127, (v) => v);
   knob("CRUSH", SQ.drCrush, 127, (v) => v);
   knob("GHOST", SQ.drGhost, 127, (v) => v);      // (a ghost step's velocity)
-  knob("DELAY SEND", SQ.drDly, 127, (v) => v);
-  knob("REVERB SEND", SQ.drRev, 127, (v) => v);
   knob("KIT", SQ.drKit, SQ.kits - 1, (v) => KITS[v] || "KIT " + (v + 1));
   box.append(el("h3", { textContent: "DRUMS of the pattern edited: click a step for a hit, then an accent (the hat opens), then (the snare) a flam, then none; shift-click: none" }),
-             bar, grid, el("h3", { textContent: "KIT: for every pattern (FILTER: how much goes through the sound's filter, its CUTOFF and RES; the delay and reverb sends: the sound's effects, their MIX the return)" }), kit);
+             bar, grid, el("h3", { textContent: "KIT: for every pattern (where each drum goes, its filter and its effects: the sound's ROUTE page)" }), kit);
   return box;
 }
 function refreshDrum(sq) {                      // the DRUM tab from the patterns

@@ -359,14 +359,13 @@ int main(void)
             for (f = 0; f < 4410u; f += BLK) { memset(buf, 0, sizeof buf); engine_render(buf, BLK); \
                 memcpy((buf_) + 2u * f, buf, sizeof buf); } } while (0)
         TAKE(l0, 1);
-        CHECK(!eg.pbus, "DUAL, levels and places as they are: no bus");
         p.ppan[1] = 127;
         TAKE(l1, 1);
         for (f = 0, el = er = el0 = er0 = 0; f < 4410u; f++) {
             el += (uint64_t)((int64_t)l1[2u * f] * l1[2u * f] >> 16); er += (uint64_t)((int64_t)l1[2u * f + 1u] * l1[2u * f + 1u] >> 16);
             el0 += (uint64_t)((int64_t)l0[2u * f] * l0[2u * f] >> 16); er0 += (uint64_t)((int64_t)l0[2u * f + 1u] * l0[2u * f + 1u] >> 16);
         }
-        CHECK(eg.pbus && el == 0 && er0 > 0 && er > er0 - er0 / 100u && er < er0 + er0 / 100u,
+        CHECK(el == 0 && er0 > 0 && er > er0 - er0 / 100u && er < er0 + er0 / 100u,
               "B hard right: its left silent, its right as it was (within 1 %%: the free LFO)");
         TAKE(l1, 0);
         for (f = 0, ok = 1; f < 4410u; f++) ok &= l1[2u * f] == l1[2u * f + 1u];
@@ -377,7 +376,7 @@ int main(void)
         CHECK(ok, "A's level 0: A silent");
         p.vmode = VM_SINGLE;
         TAKE(l1, 0);
-        CHECK(!eg.pbus && run(BLK * 8u) > 0, "SINGLE: the levels and places not used");
+        CHECK(eg.pg[0][0] == 32768 && eg.pg[0][1] == 32768 && run(BLK * 8u) > 0, "SINGLE: the levels and places not used");
         p.vmode = VM_DUAL; p.pvol[0] = 127; p.ppan[1] = 127;
         start(&p);
         key_part = 1;
@@ -390,8 +389,9 @@ int main(void)
             if (f < 256u) er |= l0[2u * f + 1u] != 0; else ok |= l0[2u * f + 1u] != 0;
         }
         CHECK(!el && er && ok, "a render of 512 frames: both halves through the bus, B still right");
-        /* DUAL's sends (format 21): all of them full, no bus (as before); B's delay and reverb sends 0: B as dry as
-         * with the effects off, A's still wet; SINGLE: the sends not used */
+        /* each part's filter its own row on the ROUTE screen (format 24; DUAL's sends before it): as new, B through
+         * the chain (wet); FILT B straight OUT: B as dry as with the effects off, A still wet; FILT B into the delay
+         * and OUT, the delay not into the reverb: the reverb adds nothing to B */
         {
             static int32_t dry[2u * 4410u];
 #define NRG(b_) ({ uint64_t e_ = 0; uint32_t j_; for (j_ = 0; j_ < 2u * 4410u; j_++) e_ += (uint64_t)((int64_t)(b_)[j_] * (b_)[j_] >> 16); e_; })
@@ -403,30 +403,41 @@ int main(void)
             TAKE(dry, 1);
             p.dly_mix = 127; p.rev_mix = 127; p.dly_time = 2;
             TAKE(l1, 1);
-            CHECK(!eg.pbus && !eg.psnd && !NEAR(NRG(l1), NRG(dry)), "DUAL, the sends full: no bus, B wet");
-            p.psend[1][0] = 0; p.psend[1][1] = 0;
+            CHECK(!NEAR(NRG(l1), NRG(dry)), "DUAL, the pins as new: B wet");
+            p.rt[RT_FILTB][RC_CRS] = 0; p.rt[RT_FILTB][RC_OUT] = 127;
             FLUSH();
             TAKE(l1, 1);
-            CHECK(eg.pbus && eg.psnd && NEAR(NRG(l1), NRG(dry)), "B's sends 0: B dry, as with the effects off");
+            CHECK(NEAR(NRG(l1), NRG(dry)), "FILT B straight out: B dry, as with the effects off");
             p.cho_mix = 0; p.dly_mix = 0; p.rev_mix = 0;
             TAKE(dry, 0);
             p.dly_mix = 127; p.rev_mix = 127;
             TAKE(l1, 0);
-            CHECK(!NEAR(NRG(l1), NRG(dry)), "A's sends full: A still wet");
-            p.psend[1][0] = 127;                /* (B's reverb send alone 0: B gets the delay, not the reverb) */
+            CHECK(!NEAR(NRG(l1), NRG(dry)), "... A's through the chain still: A wet");
+            p.rt[RT_FILTB][RC_DLY] = 127; p.rt[RT_DLY][RC_REV] = 0;   /* (B into the delay, the delay not into the reverb) */
             p.cho_mix = 0; p.dly_mix = 127; p.rev_mix = 0;
             FLUSH();
             TAKE(dry, 1);
             p.rev_mix = 127;
             FLUSH();
             TAKE(l1, 1);
-            CHECK(NEAR(NRG(l1), NRG(dry)), "B's reverb send 0, its delay full: the reverb adds nothing to B");
-            p.vmode = VM_SINGLE;
-            TAKE(l1, 0);
-            CHECK(!eg.psnd && !eg.pbus, "SINGLE: the sends not used");
-            p.vmode = VM_SPLIT;
-            TAKE(l1, 0);
-            CHECK(!eg.psnd, "SPLIT: the sends not used");
+            CHECK(NEAR(NRG(l1), NRG(dry)), "FILT B into the delay and out, the delay not into the reverb: the reverb adds nothing to B");
+            {                                   /* (a format 23 sound: its DUAL sends, as pins) */
+                static uint8_t o23[PATCH_V23_SIZE];
+                p = PATCH_INIT;
+                p.vmode = VM_DUAL; p.psend[1][0] = 0; p.psend[1][1] = 40; p.psend[0][1] = 90;
+                memcpy(o23, &p, sizeof o23);
+                memset(&q, 0xAA, sizeof q);
+                CHECK(patch_from(&q, o23, PATCH_V23_SIZE, 23) == 0 && q.rt[RT_FILTB][RC_DLY] == 0 &&
+                      q.rt[RT_FILTB][RC_REV] == 40 && q.rt[RT_FILTA][RC_DLY] == 127 && q.rt[RT_FILTA][RC_REV] == 90 &&
+                      q.rt[RT_FILTA][RC_CRS] == 127 && q.rt[RT_CHO][RC_DLY] == 0 && q.rt[RT_CHO][RC_REV] == 0 &&
+                      q.rt[RT_DLY][RC_REV] == 0 && q.rt[RT_CHO][RC_OUT] == 127,
+                      "a format 23 DUAL sound: each part's sends its filter's pins, from before the chain, as they were");
+                p.vmode = VM_SPLIT;
+                memcpy(o23, &p, sizeof o23);
+                CHECK(patch_from(&q, o23, PATCH_V23_SIZE, 23) == 0 && q.rt[RT_FILTB][RC_DLY] == 0 &&
+                      q.rt[RT_CHO][RC_DLY] == 127 && q.rt[RT_DLY][RC_REV] == 127,
+                      "... SPLIT: its sends not used then, the chain as new");
+            }
 #undef FLUSH
 #undef NRG
 #undef NEAR

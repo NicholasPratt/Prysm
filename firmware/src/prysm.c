@@ -50,7 +50,12 @@ static void app_audio(int32_t *out, uint32_t n)
     uint32_t t0 = fm1_ticks(), t;
     audio_ticks_at = t0;                        /* (where the audio stream is, for midi_rt) */
     audio_frames_at = engine_frames;
+    {                                           /* the limiter's ceiling: full scale past the MASTER knob */
+        int32_t m = master_q12;
+        lim_ceil = m > 128 ? (int32_t)(32767u * 4096u / (uint32_t)m) : 1 << 20;
+    }
 #endif
+    engine_stems_start();                       /* (USB's pairs 3-4, 5-6: this render's, from its first frame) */
     engine_render(out, n);
     if (scope_on) {
         uint32_t i, w = scope_w;
@@ -233,6 +238,11 @@ static void app_main(void)
     if (gset.clock > 1u) gset.clock = 0;
     if (gset.seq_slot < -1 || gset.seq_slot >= (int8_t)PATCH_SLOTS) gset.seq_slot = gset.slot;   /* (before 1.3: the sound's) */
     engine_init();
+#if !defined(DINGHY_HOST) && FELUCCA_UAC && UA_W > 1u
+    uac_stem[0] = st_buf[0];                    /* (the ROUTE screen's U2, U3: the recording's channels 3-4, 5-6) */
+    uac_stem[1] = st_buf[1];
+    uac_stem_live = &st_live;
+#endif
     engine_sync(gset.clock);
     engine_click(gset.click, gset.click_lvl, 0);
 #ifndef DINGHY_HOST

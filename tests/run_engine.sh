@@ -42,3 +42,5 @@ cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/s
 build/engine/tone_test
 cc -O2 -Wall -Wno-unused-function -DDINGHY_HOST -DAPP_VER="\"dev\"" -Ifirmware/src -Ifirmware/gen -o build/engine/nav_test tests/nav_test.c
 build/engine/nav_test | grep -v ' ms  '
+cc -O1 -Wall -Wno-unused-function -Wno-unused-variable -Wno-int-to-pointer-cast -Ifirmware/hal -o build/engine/uac6_test tests/uac6_test.c
+build/engine/uac6_test

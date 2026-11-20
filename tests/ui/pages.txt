@@ -64,7 +64,10 @@
 2760 enc 2 26
 2765 enc 3 40
 2790 shot
-# the FX pages (CHORUS, DELAY, REVERB): chorus on; delay with ping-pong and a shift; reverb with shimmer; every row
+# the FX pages (FX three times past CRUSH, MOD FX: CHORUS, DELAY, REVERB; the chain drawn three at a time): chorus on; delay with ping-pong and a shift;
+# reverb with shimmer; every row; then COMP
+2792 btn 2
+2796 btn 2
 2800 btn 2
 2850 enc 4 60
 2900 shot
@@ -82,6 +85,8 @@
 3250 enc 0 1
 3260 enc 4 50
 3300 shot
+3350 btn 2
+3380 shot
 3400 btn 4
 3500 shot
 3600 btn 4

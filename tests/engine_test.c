@@ -598,10 +598,11 @@ int main(void)
     }
     {                                           /* the routing: a saw into a nearly closed filter, or DIRECT past it */
         p = saw_through(20, 0); render("route_filter", &p, A4, 1, 900, 1000);
-        p.route[0] = ROUTE_DIRECT; render("route_direct", &p, A4, 1, 900, 1000);
-        p.route[0] = ROUTE_FILTER; p.lvl1 = 0; p.noise_lvl = 127; p.noise_col = 127;   /* the noise: the same */
-        render("route_nfilter", &p, A4, 1, 900, 1000);
-        p.route[2] = ROUTE_DIRECT; render("route_ndirect", &p, A4, 1, 900, 1000);
+        p.rt[RT_OSC1][RC_FLT] = 0; p.rt[RT_OSC1][RC_CRS] = 127;   /* (the ROUTE screen: past the filter, into the */
+        render("route_direct", &p, A4, 1, 900, 1000);             /*  chain) */
+        p.rt[RT_OSC1][RC_FLT] = 127; p.rt[RT_OSC1][RC_CRS] = 0; p.lvl1 = 0; p.noise_lvl = 127; p.noise_col = 127;
+        render("route_nfilter", &p, A4, 1, 900, 1000);            /* (the noise: the same) */
+        p.rt[RT_NOISE][RC_FLT] = 0; p.rt[RT_NOISE][RC_OUT] = 127; render("route_ndirect", &p, A4, 1, 900, 1000);
     }
     {                                           /* the drums: 120 BPM, 1/16, 8 steps: kick on 1 and 5, snare on 3 and
                                                  * 7, the hat on every step (on 4 and 8 accented: open); 2 s, the
@@ -627,9 +628,15 @@ int main(void)
                     drum_put(pt, 2, k, k == 3u || k == 7u ? 2u : 1u);
                 }
             if (variant == 1u) seqs.dr_crush = 127;
-            if (variant == 2u) { seqs.dr_rev = 127; q.rev_mix = 100; q.rev_size = 110; }
+            if (variant == 2u) {                /* (each drum's pin into the reverb) */
+                for (k = 0; k < DRUMS; k++) q.rt[RT_KICK + k][RC_REV] = 127;
+                q.rev_mix = 100; q.rev_size = 110;
+            }
             if (variant == 4u) { seqs.dr_tune[0] = 36; seqs.dr_dec[0] = 40; }   /* the kick up an octave, short */
-            if (variant == 5u) { seqs.dr_flt[1] = seqs.dr_flt[2] = 127; q.cut = 50; q.res = 60; }   /* snare, hat: a low cutoff */
+            if (variant == 5u) {                /* snare, hat: all through a low cutoff, none past it */
+                q.rt[RT_SNARE][RC_FLT] = q.rt[RT_HAT][RC_FLT] = 127; q.rt[RT_SNARE][RC_OUT] = q.rt[RT_HAT][RC_OUT] = 0;
+                q.cut = 50; q.res = 60;
+            }
             engine_click(0, 0, 0);              /* (no metronome) */
             engine_set(&q); engine_sync(0);
             engine_seq_play(variant != 3u);
@@ -698,11 +705,12 @@ int main(void)
         p.hp_cut = 40; p.flt_type = getenv("PRYSM_LP24") ? FLT_LP24 : FLT_COMBP; p.res = 120; p.comb_spread = 100;   /* the high-pass, the comb, spread */
         p.lfo2_dest = DEST_RES; p.lfo2_amt = 127; p.lfo2_rate = 100;   /* LFO 2 on RES: the comb's, each block */
         p.osc[0].mode[1] = MODE_RING; p.osc[1].mode[0] = MODE_MIX;
-        p.noise_lvl = 127; p.noise_type = NOISE_PINK; p.route[1] = ROUTE_DIRECT;   /* the noise, a route past the filter */
+        p.noise_lvl = 127; p.noise_type = NOISE_PINK; p.rt[RT_OSC2][RC_FLT] = 0; p.rt[RT_OSC2][RC_CRS] = 127;   /* the */
+                                                /* noise; osc 2 past the filter */
         memset(voice, 0, sizeof voice);
         engine_init();
-        seqs.dr_drive = 100; seqs.dr_crush = 60; seqs.dr_dly = seqs.dr_rev = 127;   /* the four drums, always, half */
-        seqs.dr_flt[0] = seqs.dr_flt[1] = seqs.dr_flt[2] = seqs.dr_flt[3] = 64;   /* through their filter (both ways) */
+        seqs.dr_drive = 100; seqs.dr_crush = 60;   /* the four drums, always: sent, some through their filter */
+        for (r = 0; r < DRUMS; r++) { p.rt[RT_KICK + r][RC_DLY] = p.rt[RT_KICK + r][RC_REV] = 127; p.rt[RT_KICK + r][RC_FLT] = 64; }
         engine_set(&p);
         engine_note_on(57); engine_note_on(60); engine_note_on(64); engine_note_on(67);
         t0 = clock();

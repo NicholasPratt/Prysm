@@ -96,6 +96,37 @@ static const uint8_t DSYNC_TICKS[DSYNC_N] = {3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 
 /* MOD FX, before the chorus: a phaser (six all-passes, swept) or a flanger (a short line, swept, fed back) */
 enum { MFX_OFF, MFX_PHASER, MFX_FLANGER, MFX_N };
 static const char *const MFX_NAME[MFX_N] = {"OFF", "PHASER", "FLANGER"};
+/* the ROUTE screen (patch format 24, SEQS_VERSION 8): a pin matrix, as the VCS3's. Each row a source: the
+ * oscillators and the noise, the drums, the filter's output (each part's), then each effect's output; each column a
+ * destination: the filter, the effects, the output. A pin is a level (0 none .. 127 all; squared, as the levels): a
+ * source sends that much of itself there, every pin its own. The filter's column takes a source into the voice's
+ * filter (a drum: into the drums' own, on the same knobs); its other pins send it past the filter (still through the
+ * amp). CRUSH, MOD FX, CHORUS and COMP pass on what comes in through themselves, by their MIX (0: as it came);
+ * DELAY and REVERB give their echoes and their tail alone. An effect sends only to those after it (no loops). The
+ * drums' rows are the sound's too (rt). U2, U3: the computer records them over USB (channels 3-4, 5-6), apart from
+ * OUT (the speaker's, channels 1-2) */
+enum { RT_OSC1, RT_OSC2, RT_NOISE, RT_KICK, RT_SNARE, RT_HAT, RT_CLAP, RT_FILTA, RT_FILTB, RT_CRUSH, RT_MFX, RT_CHO,
+       RT_DLY, RT_REV, RT_CMP, RT_ROWS };
+enum { RC_FLT, RC_CRS, RC_MFX, RC_CHO, RC_DLY, RC_REV, RC_CMP, RC_OUT, RC_U2, RC_U3, RT_COLS };
+#define RT_USB(c) ((c) >= RC_U2)                /* (format 26) USB's other two pairs (channels 3-4, 5-6): what is pinned */
+                                                /*  there, as it is there, past the MASTER knob (the master: 1-2) */
+#define RT_DRUM(r) ((r) >= RT_KICK && (r) <= RT_CLAP)
+#define RT_OLD 0xFFu                            /* rt[RT_KICK][RC_FLT]: the drums' rows not the sound's own yet (an older */
+                                                /*  sound): the sequencer's sends and filter as they were (rt_pin) */
+#define RT_FX0 RT_CRUSH                         /* (the effects' rows, in their order: the columns from RC_CRS) */
+static int rt_ok(uint32_t r, uint32_t c)        /* a pin there (an effect: into those after it alone) */
+{
+    if (r >= RT_ROWS || c >= RT_COLS) return 0;
+    if (r < RT_FILTA) return 1;
+    if (r < RT_FX0) return c >= RC_CRS;
+    return c > RC_CRS + (r - RT_FX0);
+}
+static const char *const RT_ROW_NAME[RT_ROWS] = {"OSC 1", "OSC 2", "NOISE", "KICK", "SNARE", "HAT", "CLAP", "FILT A",
+                                                 "FILT B", "CRUSH", "MOD FX", "CHORUS", "DELAY", "REVERB", "COMP"};
+static const char *const RT_COL_NAME[RT_COLS] = {"FILTER", "CRUSH", "MOD FX", "CHORUS", "DELAY", "REVERB", "COMP", "OUT",
+                                                 "USB 3-4", "USB 5-6"};
+static const char *const RT_COL_SHORT[RT_COLS] = {"FLT", "CRS", "MFX", "CHO", "DLY", "REV", "CMP", "OUT", "U2", "U3"};
+static int32_t pin_g(uint32_t v) { v &= 127u; return v >= 127u ? 32768 : (int32_t)PR_CURVE_Q15[v]; }   /* Q15 */
 
 /* two parts (patch format 18): part A is the patch's own fields, part B its own copy (pb) of those PART_OFF lists
  * (the filter, the amp, the filter's envelope, the LFO, mod envelope 1, velocity, glide, the noise); osc 1 is part A's
@@ -232,6 +263,18 @@ typedef struct {
     uint8_t sync_rate[NOSC][2];                 /* (format 22) mod 1, mod 2 in SYNC (RATIO then): the slave's speed, */
                                                 /*  2^(n/48) times its master's: 0..192, x1 .. x16 (96: x4) */
     uint8_t cho_mode;                           /* (format 23) the chorus: CHO_FREE (RATE, DEPTH) .. CHO_DIM4 (fx.c) */
+    uint8_t rt[RT_ROWS][RT_COLS];               /* (format 24; 25: COMP's row and column; 26: U2, U3) the ROUTE */
+                                                /*  screen's pins */
+                                                /*  (rt_pin; route, psend: format 23's, not heard since) */
+    /* (added in patch format 25: the compressor, fx.c; nothing goes into it until it is pinned) */
+    uint8_t cmp_thr;                            /* THRESH: 0 .. 127 = -48 .. 0 dB */
+    uint8_t cmp_ratio;                          /* RATIO: CMP_RATIO_NAME (CMP_RATIOS - 1: LIMIT) */
+    uint8_t cmp_att;                            /* ATTACK: 0.1 .. 100 ms */
+    uint8_t cmp_rel;                            /* RELEASE: 10 ms .. 2 s */
+    uint8_t cmp_gain;                           /* GAIN (make-up): 0 .. 24 dB */
+    uint8_t cmp_mix;                            /* MIX: 0 (dry) .. 127 (all compressed; between: in parallel) */
+    /* (added in patch format 26, with rt's U2 and U3) */
+    uint8_t dr_pan[4];                          /* each drum's place (DRUMS): 0 left .. 64 centre .. 127 right */
 } patch_t;
 /* the fields a part has its own of: part B's in pb, in this order */
 #define PF(f) ((uint8_t)__builtin_offsetof(patch_t, f))
@@ -246,7 +289,7 @@ static const uint8_t PART_OFF[PART_N] = {
     PF(noise_type), PF(noise_col), PF(noise_lvl), PF(route[2]), PF(hp_res)};
 #undef PF
 enum { PB_NOISE_COL = 38 };                     /* (pb's index of noise_col: voice_tune's) */
-_Static_assert(sizeof(patch_t) < 256u, "PART_OFF's offsets are bytes");
+_Static_assert(__builtin_offsetof(patch_t, pb) < 256u, "PART_OFF's offsets are bytes");
 _Static_assert(__builtin_offsetof(patch_t, menv_amt) - __builtin_offsetof(patch_t, menv_a) == 6u &&
                __builtin_offsetof(patch_t, menv2_amt) - __builtin_offsetof(patch_t, menv2_a) == 6u,
                "a mod envelope's a d s r loop dest amt are in a row (engine_set)");
@@ -319,6 +362,7 @@ typedef struct {
     uint8_t dr_crush;                           /* 0 = as stored; up: fewer bits, a lower rate */
     uint8_t dr_dly, dr_rev;                     /* the bus into the delay, the reverb (their MIX: how much comes back) */
     uint8_t dr_flt[DRUMS];                      /* each drum through the sound's filter: 0 = none (dry) .. 127 = all */
+                                                /* (these three: the drums' pins while the sound has none, rt_pin) */
     uint8_t dr_ramp;                            /* a ratchet's hits: 64 = all at the step's level; down: they fade; up: */
                                                 /* they swell into it */
     uint8_t dr_kit;                             /* (SEQS_VERSION 5) the kit's sounds: DR_KITS's (prysm_drums.h) */
@@ -455,6 +499,16 @@ static const patch_t PATCH_INIT = {
     .l2_part = PT_BOTH, .me2_part = PT_BOTH, .mm_part = {PT_BOTH, PT_BOTH, PT_BOTH, PT_BOTH},
     .pvol = {127, 127}, .ppan = {64, 64},
     .psend = {{127, 127}, {127, 127}},
+    .rt = {{127, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {127, 0, 0, 0, 0, 0, 0, 0, 0, 0}, {127, 0, 0, 0, 0, 0, 0, 0, 0, 0},   /* the ROUTE */
+           {0, 0, 0, 0, 0, 0, 0, 127, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 127, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 127, 0, 0},   /* screen: the */
+           {0, 0, 0, 0, 0, 0, 0, 127, 0, 0},          /* sources into the filter, the drums out, the filter into the chain */
+           {0, 127, 0, 0, 0, 0, 0, 0, 0, 0}, {0, 127, 0, 0, 0, 0, 0, 0, 0, 0},   /* as it was before it: CRUSH, MOD FX, */
+           {0, 0, 127, 0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 127, 0, 0, 0, 0, 0, 0},   /* CHORUS, then the delay, the reverb (the */
+           {0, 0, 0, 0, 127, 127, 0, 127, 0, 0}, {0, 0, 0, 0, 0, 127, 0, 127, 0, 0}, {0, 0, 0, 0, 0, 0, 0, 127, 0, 0},   /* delay into */
+           {0, 0, 0, 0, 0, 0, 0, 127, 0, 0}},         /* it too), and out; COMP out, nothing in */
+    .cmp_thr = 80, .cmp_ratio = 4, .cmp_att = 64, .cmp_rel = 64, .cmp_gain = 0, .cmp_mix = 127,   /* (-18 dB, 4:1, */
+                                                /* 3 ms, 140 ms) */
+    .dr_pan = {64, 64, 64, 64},                 /* (the drums: centred) */
 };
 
 static void part_b(patch_t *q, const patch_t *p)   /* q: p as part B has it (B's own fields in A's places) */
@@ -521,7 +575,6 @@ typedef struct {
     uint32_t seq_len_q8, seq_spb, seq_steps;    /* the sequencer: a step (frames Q8), steps a beat, its length */
     int32_t seq_gate;                           /* Q15 */
     volatile uint8_t seq_play;                  /* running (PLAY; the main loop's) */
-    uint8_t route[NSRC];                        /* osc 1, osc 2, the noise: 1 DIRECT (past the filter, to the amp) */
     uint8_t n_type;                             /* the noise: NOISE_WHITE .. NOISE_SH */
     int32_t n_lvl;                              /* its level, Q15 (0: off) */
     int32_t n_g;                                /* WHITE, PINK, BROWN: the tone's one-pole, Q15 (32767: open) */
@@ -537,10 +590,11 @@ typedef struct {
     uint32_t t_dk[NOSC];                        /* DECAY's fade: a block's step (Q16, exponential; 0: none) */
     uint8_t vmode;                              /* VM_SINGLE .. VM_LAYER */
     uint8_t l2_parts, me2_parts, mm_parts[MM_SLOTS];   /* the parts each reaches: bit 0 A's voices, bit 1 B's */
-    uint8_t pbus;                               /* two parts, a level or a place not as it is: B's voices on a bus */
     int32_t pg[2][2];                           /* each part's gains, left and right: Q15 (32768: as it is) */
-    uint8_t psnd;                               /* DUAL, a part's send not all of it: the sends apart (psnd_buf) */
-    int32_t ps[2][2];                           /* each part's sends, [part][delay, reverb]: Q15 (32768: all) */
+    int32_t dpg[4][2];                          /* each drum's (DRUMS), by its PAN: the same balance */
+    int32_t rt_g[RT_ROWS][RT_COLS];             /* the ROUTE screen's pins, Q15 (32768: all; the drums': rt_render's) */
+    int32_t rt_flt[NSRC];                       /* osc 1, osc 2, the noise into the filter: Q15 (0: none) */
+    uint8_t rt_dir[NSRC];                       /* ... and past it, to a pin of their own (their bus: rbus) */
 } eng_t;
 static volatile eng_t eg, eb;                   /* (eg: everything, part A's; eb: part B's own) */
 #define PE(v) (voice[v].part ? &eb : &eg)       /* a voice's part's */
@@ -931,6 +985,21 @@ static uint32_t isqrt32(uint32_t x)             /* floor(sqrt(x)) */
     return r;
 }
 
+static uint32_t pin_of(uint32_t q15)            /* the pin whose level (pin_g) is nearest q15 (0 .. 32768) */
+{
+    uint32_t v = isqrt32(q15 * 16129u >> 15);   /* (127 sqrt(q)) */
+    return v + (v < 127u && pin_g(v + 1u) - (int32_t)q15 < (int32_t)q15 - pin_g(v));
+}
+static uint32_t rt_pin(const patch_t *p, uint32_t r, uint32_t c)   /* row r's pin into column c (0 none .. 127); the */
+{                                               /* drums', an older sound's: the sequencer's sends and filter as they */
+    if (!rt_ok(r, c)) return 0;                 /* were (some through the filter, the rest into the bus, sent) */
+    if (RT_DRUM(r) && p->rt[RT_KICK][RC_FLT] == RT_OLD) {
+        uint32_t fv = seqs.dr_flt[r - RT_KICK] & 127u, f = fv >= 127u ? 32768u : fv * 258u, w = pin_of(32768u - f);
+        return c == RC_FLT ? pin_of(f) : c == RC_OUT ? w : c == RC_DLY ? (seqs.dr_dly & 127u) * w / 127u
+             : c == RC_REV ? (seqs.dr_rev & 127u) * w / 127u : 0u;
+    }
+    return p->rt[r][c] & 127u;
+}
 static int32_t hp_q(uint32_t c)                 /* HPF CUT 1..127 -> quarter semitones: MIDI 12 .. 108 (16 Hz .. 4.2 kHz) */
 {
     return 48 + ((int32_t)(c & 127u) - 1) * 384 / 126;
@@ -1130,6 +1199,22 @@ static int32_t mod_env(env_t *e, uint32_t gate, uint32_t att, uint32_t rel, uint
     return l;
 }
 
+/* the sources' buses (the ROUTE screen's rows), mono, RB_N frames (a render longer: in turns): each part's filter
+ * (its voices, past the amp), each oscillator's and each part's noise past the filter (their pins but FLT's), each
+ * drum, the drums' filter; fx.c's rt_render mixes them by the pins (each part's level and place on its buses) */
+#define RB_N 256u                               /* (the FM-1's half buffer) */
+enum { RB_FA, RB_FB, RB_O1, RB_O2, RB_NA, RB_NB, RB_VOICE, RB_KICK = RB_VOICE, RB_SNARE, RB_HAT, RB_CLAP, RB_DF,
+       RB_BUSES };
+#define RB_VMASK ((1u << RB_VOICE) - 1u)
+static int32_t rbus[RB_BUSES][RB_N];
+static uint32_t rb_used;                        /* (the voices' buses written last render: cleared, whole, before the next) */
+/* USB's other pairs (RC_U2, RC_U3: channels 3-4, 5-6), as rt_render mixes them: each frame L | R << 16 (16 bit, clipped;
+ * not past MASTER, nor the limiter), from frame st_at on (engine_stems_start: 0); st_live: bit k, pair k has something
+ * pinned (else it is silence, its buffer as it was) */
+static uint32_t st_buf[2][RB_N] ENGINE_POOL;
+static uint32_t st_at;
+static volatile uint32_t st_live;
+static void engine_stems_start(void) { st_at = 0; }
 #include "fx.c"                                 /* the effects: chorus, delay, reverb */
 
 static uint32_t part_of(uint32_t note)          /* the split's side a note is on: 0 below (osc 1), 1 from it (osc 2) */
@@ -1403,7 +1488,8 @@ static struct {
 #define FLAM_VEL 64u                            /* the second's velocity */
 static volatile uint8_t dr_midi[DR_FLAM_S + 1u];   /* a sound's hit from MIDI or the DRUM page's keys (its velocity; the */
                                                 /* main loop's: engine_drum), played at the next render's start */
-static struct { int32_t held, left; } crush;    /* CRUSH: the value held, the frames it is still held for */
+static struct { int32_t held, left; } crush[DRUMS + 1u];   /* CRUSH, each drum's bus and the filter's: the value */
+                                                /* held, the frames it is still held for */
 static struct { int32_t ic1, ic2, ic3, ic4, cs; } dflt;   /* the drums' filter: its state, its cutoff (glided, Q8) */
 #define DFLT_MAX 131071                         /* (its output kept where the bus's gain cannot overflow) */
 
@@ -1511,7 +1597,7 @@ static void drum_step(const pattern_t *p, uint32_t k, uint32_t bi, uint32_t len)
         }
 }
 
-static void drums_filter(int32_t *bus, const int32_t *fb, uint32_t n)   /* fb through the drums' filter, into bus */
+static void drums_filter(int32_t *fb, uint32_t n)   /* fb through the drums' filter, in place */
 {
     int32_t f[3], f2[3], k = eg.f_k < K_SELF ? K_SELF : eg.f_k, lp24 = eg.flt_type == FLT_LP24;
     int32_t ic1 = dflt.ic1, ic2 = dflt.ic2, ic3 = dflt.ic3, ic4 = dflt.ic4, v1, v2, v3, s;
@@ -1534,19 +1620,21 @@ static void drums_filter(int32_t *bus, const int32_t *fb, uint32_t n)   /* fb th
         v2 = ic2 + (int32_t)(((int64_t)f[1] * ic1 + (int64_t)f[2] * v3) >> 28);
         ic1 = 2 * v1 - ic1;
         ic2 = 2 * v2 - ic2;
-        bus[i] += v2 > DFLT_MAX ? DFLT_MAX : v2 < -DFLT_MAX ? -DFLT_MAX : v2;
+        fb[i] = v2 > DFLT_MAX ? DFLT_MAX : v2 < -DFLT_MAX ? -DFLT_MAX : v2;
     }
     if (ic1 > -4 && ic1 < 4 && ic2 > -4 && ic2 < 4 && ic3 > -4 && ic3 < 4 && ic4 > -4 && ic4 < 4)
         ic1 = ic2 = ic3 = ic4 = 0;              /* (rung out: idle) */
     dflt.ic1 = ic1; dflt.ic2 = ic2; dflt.ic3 = ic3; dflt.ic4 = ic4;
 }
 
-static int drv_run(uint32_t d, int32_t *bus, int32_t *fb, uint32_t from, uint32_t to)   /* voice d into bus over */
-{                                               /* frames from .. to (from its start, if later); 1: some went to fb */
-    const void *sm = drv[d].d;
+static uint32_t drv_run(uint32_t d, uint32_t from, uint32_t to)   /* voice d onto its drum's bus over frames from .. */
+{                                               /* to (from its start, if later), its FLT pin's share into the filter's */
+    const void *sm = drv[d].d;                  /* too; the buses it played on (bits) */
     uint32_t pos = drv[d].pos_q16, inc = drv[d].inc_q16, end = drv[d].n << 16, wide = drv[d].wide, i;
-    int32_t amp = drv[d].amp, dk = drv[d].dk, x;
-    int32_t fs = (int32_t)(seqs.dr_flt[d < DRUMS ? d : 1u] & 127u) * 258;   /* (Q15; the flam's: the snare's) */
+    uint32_t dd = d < DRUMS ? d : 1u;           /* (the flam's: the snare's) */
+    int32_t amp = drv[d].amp, dk = drv[d].dk, x, *bus = rbus[RB_KICK + dd], *fb = rbus[RB_DF];
+    int32_t fs = pin_g(rt_pin(&patch, RT_KICK + dd, RC_FLT)), dry = 0;
+    for (i = RC_CRS; i < RT_COLS; i++) dry |= rt_pin(&patch, RT_KICK + dd, i) != 0;
     if (!sm || drv[d].at >= (int32_t)to) return 0;   /* (silent; starts later) */
     i = drv[d].at > (int32_t)from ? (uint32_t)drv[d].at : from;
     drv[d].at = -1;
@@ -1554,11 +1642,7 @@ static int drv_run(uint32_t d, int32_t *bus, int32_t *fb, uint32_t from, uint32_
         if (pos >= end || amp < 8) { sm = 0; break; }
         x = wide ? ((int32_t)((const int16_t *)sm)[pos >> 16] * amp) >> 15   /* (Q15) */
                  : ((int32_t)((const int8_t *)sm)[pos >> 16] * amp) >> 7;     /* (x 256 / 32768: Q15) */
-        if (fs) {                               /* (FILTER: that much through it, the rest dry) */
-            int32_t w = (x * fs) >> 15;
-            fb[i] += w;
-            x -= w;
-        }
+        if (fs) fb[i] += fs == 32768 ? x : (x * fs) >> 15;
         bus[i] += x;
         pos += inc;
         if (dk && (i & (BLK - 1u)) == BLK - 1u)
@@ -1567,25 +1651,24 @@ static int drv_run(uint32_t d, int32_t *bus, int32_t *fb, uint32_t from, uint32_
     drv[d].d = sm;
     drv[d].pos_q16 = pos;
     drv[d].amp = amp;
-    return fs != 0;
+    return (dry ? 1u << (RB_KICK + dd) : 0u) | (fs ? 1u << RB_DF : 0u);
 }
 
-static int drums_render(int32_t *bus, uint32_t n)   /* the drums into bus (n frames, mono); 0: nothing played */
-{
-    static int32_t fb[MAXBLK * BLK];            /* what goes through the filter */
-    uint32_t d, e, i, t = 0, any = dq_n != 0, wet = dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4;   /* (its tail rings on) */
-    for (d = 0; d <= DR_FLAM_S; d++)            /* (MIDI, the keys: from the top of this render) */
+static uint32_t drums_render(uint32_t n)        /* the drums onto their buses (rbus RB_KICK .. RB_DF: n frames); */
+{                                               /* the buses played (bits; 0: nothing) */
+    uint32_t d, e, i, b, t = 0, any = dq_n != 0, used = 0, wet = dflt.ic1 || dflt.ic2 || dflt.ic3 || dflt.ic4;   /* (its */
+    for (d = 0; d <= DR_FLAM_S; d++)            /* (MIDI, the keys: from the top of this render) */   /* tail rings on) */
         if (dr_midi[d]) { if (d == DR_FLAM_S) drum_flam(dr_midi[d], 0); else drum_hit(d, dr_midi[d], 0); dr_midi[d] = 0; }
     for (d = 0; d < DRUMS + 1u; d++)
         any |= drv[d].d != 0 && drv[d].at < (int32_t)n;
-    if (any) {
-        memset(bus, 0, n * sizeof bus[0]);
-        memset(fb, 0, n * sizeof fb[0]);
-    }
+    if (!any && !wet)
+        return 0;
+    for (b = RB_KICK; b <= RB_DF; b++)
+        memset(rbus[b], 0, n * sizeof rbus[b][0]);
     for (e = 0; any && e <= dq_n; e++) {        /* up to each queued hit, then from it */
         uint32_t to = e < dq_n && dq[e].at < n ? dq[e].at : n;
         if (to > t) {
-            for (d = 0; d < DRUMS + 1u; d++) wet |= (uint32_t)drv_run(d, bus, fb, t, to);
+            for (d = 0; d < DRUMS + 1u; d++) used |= drv_run(d, t, to);
             t = to;
         }
         if (e < dq_n) {
@@ -1596,32 +1679,33 @@ static int drums_render(int32_t *bus, uint32_t n)   /* the drums into bus (n fra
     dq_n = 0;
     for (d = 0; d < DRUMS + 1u; d++)            /* (a later render's) */
         if (drv[d].d && drv[d].at >= (int32_t)n) drv[d].at -= (int32_t)n;
-    if (wet) {
-        if (!any) { memset(bus, 0, n * sizeof bus[0]); memset(fb, 0, n * sizeof fb[0]); }
-        drums_filter(bus, fb, n);
-        any = 1;
+    if (wet || used >> RB_DF & 1u) {
+        drums_filter(rbus[RB_DF], n);
+        used |= 1u << RB_DF;
     }
-    if (!any)
-        return 0;
-    {
+    {                                           /* each bus: DRIVE, then CRUSH (each its own) */
         int32_t drive = drive_of(seqs.dr_drive), c = seqs.dr_crush & 127u;
         int32_t hold = 1 + c * 15 / 127, sh = 3 + c * 8 / 127, mask = ~((1 << sh) - 1);   /* (12 .. 4 bits of Q15) */
-        for (i = 0; i < n; i++) {
-            int32_t x = (bus[i] * DRUM_GAIN) >> 15;
-            if (drive)
-                x = saturate((x * drive) >> 12);
-            if (c) {
-                if (crush.left <= 0) {          /* (rounded: no offset) */
-                    crush.held = (x + (1 << (sh - 1))) & mask;
-                    crush.left = hold;
+        for (b = RB_KICK; b <= RB_DF; b++) {
+            int32_t *bus = rbus[b];
+            if (!(used >> b & 1u)) continue;
+            for (i = 0; i < n; i++) {
+                int32_t x = (bus[i] * DRUM_GAIN) >> 15;
+                if (drive)
+                    x = saturate((x * drive) >> 12);
+                if (c) {
+                    if (crush[b - RB_KICK].left <= 0) {   /* (rounded: no offset) */
+                        crush[b - RB_KICK].held = (x + (1 << (sh - 1))) & mask;
+                        crush[b - RB_KICK].left = hold;
+                    }
+                    crush[b - RB_KICK].left--;
+                    x = crush[b - RB_KICK].held;
                 }
-                crush.left--;
-                x = crush.held;
+                bus[i] = x;
             }
-            bus[i] = x;
         }
     }
-    return 1;
+    return used;
 }
 
 static void seq_lanes_off(int32_t *v, uint32_t *hold, uint32_t bi, uint32_t held)   /* the lanes' notes end (block */
@@ -2175,8 +2259,7 @@ typedef struct { int32_t cut, fk, c_fb, c_in, drive, f_env; uint32_t res, drv; }
 /* the high-pass on voice v's block (x: past the low-pass), then DIRECT, the amp, into out (its own function: the
  * render's filter loop keeps its registers). A zero-delay-feedback SVF (Simper), g its cutoff: what is left of the
  * input past the band (times its damping) and the low; at k 2 (HP RES 0) two one-poles' 12 dB/oct, no peak */
-static __attribute__((noinline)) void hp_block(uint32_t v, int32_t g, int32_t *x, const int32_t *dir, int32_t a,
-                                               int32_t da, int32_t *out)
+static __attribute__((noinline)) void hp_block(uint32_t v, int32_t g, int32_t *x, int32_t a, int32_t da, int32_t *out)
 {
     int32_t f[3], ic1 = voice[v].hp1, ic2 = voice[v].hp2, k = voice[v].hp_ks, peak = k < PR_RES_K[0];
     uint32_t i;
@@ -2189,11 +2272,8 @@ static __attribute__((noinline)) void hp_block(uint32_t v, int32_t g, int32_t *x
         ic2 = 2 * v2 - ic2;
         s -= (int32_t)(((int64_t)k * v1) >> 24) + v2;
         s = peak ? saturate(s) : clip15(s);     /* (the peak rounds off loud, not clips) */
-        if (dir)                                /* DIRECT: what went past the filter, back in */
-            s = clip15(s + dir[i]);
         s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
-        out[2u * i] += s;
-        out[2u * i + 1u] += s;
+        out[i] += s;                            /* (its part's filter's bus: mono) */
     }
     voice[v].hp1 = ic1;
     voice[v].hp2 = ic2;
@@ -2258,8 +2338,7 @@ static __attribute__((noinline)) void trn_block(uint32_t v, uint32_t o, int32_t 
         b = TR_MU[(uint8_t)s->d[k + 1u]];
         x = a + (((b - a) * (int32_t)((ph & 0xFFFFu) >> 1)) >> 15);
         x = (((x * g) >> 15) * VOICE_GAIN) >> 15;
-        out[2u * i] += x;
-        out[2u * i + 1u] += x;
+        out[i] += x;                            /* (a source's bus: mono) */
         ph += inc;
     }
     voice[v].t_ph[o] = ph;
@@ -2282,9 +2361,52 @@ static __attribute__((noinline)) void layer_follow(void)   /* LAYER: each odd vo
     }
 }
 
-#define PBUS_N 256u                             /* (the FM-1's half buffer) */
-static int32_t pbus[2u * PBUS_N];               /* part B's voices, when its level or place (or A's) is its own */
-static int32_t psnd_buf[3u * PBUS_N];           /* DUAL's sends (eg.psnd): a frame's delay input L R, the reverb's (L+R) */
+/* ---- the safety limiter, last, always: what would go past lim_ceil (the output's full scale: the app sets it from
+ * the MASTER knob, so the speaker and USB never clip) is turned down instead, with no delay: a render is all there
+ * before it goes out, so it looks ahead within it. A block of LIM_B frames at a time: its gain a line from where the
+ * last ended to where the loudest frame of it and of the next both fit, and back up after them (LIM_REL a block);
+ * a line between two gains that fit a block never puts a frame of it over. The first block of a render (it could
+ * not be seen from the one before) starts at its own if it must: a step, only ever down and only when it would have
+ * clipped. Below the ceiling it is the sound, untouched */
+#define LIM_B 32u
+#define LIM_REL 512                             /* the gain back up, Q15 a block (full in ~80 ms) */
+static volatile int32_t lim_ceil = 32767;       /* (the app's: 32767 at MASTER full; more below it) */
+static int32_t lim_g = 32768;                   /* (Q15) */
+static void lim_render(int32_t *out, uint32_t n)
+{
+    int32_t ceil = lim_ceil < 32767 ? 32767 : lim_ceil > (1 << 20) ? 1 << 20 : lim_ceil;
+    int32_t t[RB_N / LIM_B + 1u];
+    uint32_t nb = (n + LIM_B - 1u) / LIM_B, j, i, all = 1;
+    for (j = 0; j < nb; j++) {                  /* each block's own: the gain it takes to fit */
+        int32_t pk = 0;
+        uint32_t e = (j + 1u) * LIM_B < n ? (j + 1u) * LIM_B : n;
+        for (i = j * LIM_B; i < e; i++) {
+            int32_t l = out[2u * i], r = out[2u * i + 1u];
+            l = l < 0 ? -l : l; r = r < 0 ? -r : r;
+            if (l > pk) pk = l;
+            if (r > pk) pk = r;
+        }
+        t[j] = pk > ceil ? (ceil << 11) / ((pk >> 4) + 1) : 32768;   /* (rounded down: never over) */
+        all &= t[j] == 32768;
+    }
+    if (all && lim_g == 32768) return;          /* (nothing near the ceiling: as it is) */
+    for (j = 0; j < nb; j++) {
+        uint32_t i0 = j * LIM_B, m = i0 + LIM_B < n ? LIM_B : n - i0;
+        int32_t e = t[j], dg, g;
+        if (j + 1u < nb && t[j + 1u] < e) e = t[j + 1u];
+        if (lim_g > t[j]) lim_g = t[j];         /* (a render's first block, louder than the last saw coming) */
+        if (e > lim_g + LIM_REL) e = lim_g + LIM_REL;
+        dg = (e - lim_g) / (int32_t)m;
+        if (dg < 0 && dg * (int32_t)m > e - lim_g) dg--;   /* (down: never short of the line's end) */
+        for (i = i0, g = lim_g; i < i0 + m; i++) {
+            g += dg;
+            out[2u * i] = (int32_t)(((int64_t)out[2u * i] * g) >> 15);
+            out[2u * i + 1u] = (int32_t)(((int64_t)out[2u * i + 1u] * g) >> 15);
+        }
+        lim_g = e > g && e - g < (int32_t)m ? e : g;   /* (the last of a rise: all the way, not stuck under) */
+    }
+}
+
 static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the caller) */
 {
     uint32_t v, o, k, b, i, nb = n / BLK;
@@ -2296,11 +2418,14 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
     uint32_t l2inc = eg.l2_inc;
     if (!engine_up)                             /* (zeroed voices: itrig 0 would start note 0 on every one, held) */
         return;
-    if (eg.pbus && n > PBUS_N) {                /* (part B's bus: PBUS_N frames at a time) */
-        engine_render(out, PBUS_N);
-        engine_render(out + 2u * PBUS_N, n - PBUS_N);
+    if (n > RB_N) {                             /* (the sources' buses: RB_N frames at a time) */
+        engine_render(out, RB_N);
+        engine_render(out + 2u * RB_N, n - RB_N);
         return;
     }
+    for (b = 0; b < RB_VOICE; b++)              /* (the voices' buses: the drums' are drums_render's) */
+        if (rb_used >> b & 1u) memset(rbus[b], 0, sizeof rbus[b]);
+    rb_used = 0;
     {                                           /* the tempo: a tick of the arp's (or MIDI's) clock */
         uint32_t t = eg.arp_midi && mc_bpm10 && mc.period_q8 ? mc.period_q8 : eg.tick_q8;
         fx_tick_q8 = t > 1000000u ? 1000000u : t;   /* (under ~28 BPM: as slow as that) */
@@ -2382,13 +2507,15 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                 if (voice[v].glide_q8 > -64 && voice[v].glide_q8 < 64) voice[v].glide_q8 = 0;
             }
             const volatile eng_t *pe = PE(v);   /* (its part's filter, envelopes, LFO: SINGLE always A's) */
-            int32_t *vo = (eg.pbus && voice[v].part ? pbus : out) + 2u * b;   /* (this block's: part B's bus, or out) */
+            uint32_t pt = voice[v].part ? 1u : 0u;
+            int32_t *vo = rbus[RB_FA + pt] + b;  /* (this block's: its part's filter's bus) */
+            rb_used |= 1u << (RB_FA + pt);
             uint32_t lm = voice[v].lk_m;        /* (the step's locks: these knobs the note's own) */
             int32_t a_to = env_step(&voice[v].amp, gate, pe->a_att, lm >> LK_ADEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_ADEC]] : pe->a_dec,
                                     pe->a_sus, lm >> LK_AREL & 1u ? PR_ENV_EXP[voice[v].lk[LK_AREL]] : pe->a_rel) >> 9;
             uint32_t hold = gate || (eg.vca && voice[v].drone);   /* (a drone: its other envelopes held, as if down) */
-            int32_t a, da, l, acc[BLK], dir[BLK], *dst;   /* (into the filter; DIRECT: past it, to the amp) */
-            uint32_t direct = 0;
+            int32_t a, da, l, acc[BLK], dir[NSRC][BLK];   /* (into the filter; past it, each to its own bus) */
+            uint32_t direct = 0;                /* (bit k: source k has some past it, in dir[k]) */
             lfo_mod_t m;
             /* the mod envelope first (it may move the LFO's rate and depth) */
             /* LFO 2 this block: x2 its value times its amount (Q15), pz2 that over a knob's range */
@@ -2458,7 +2585,7 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
             a = voice[v].amp_q15;
             da = (a_to - a) >> BLK_SHIFT;
             for (i = 0; i < BLK; i++)
-                acc[i] = dir[i] = 0;
+                acc[i] = 0;
             for (o = 0; o < NOSC; o++) {
                 src_t t[NOP];
                 uint32_t p0 = voice[v].ph[o][0], p1 = voice[v].ph[o][1], p2 = voice[v].ph[o][2];
@@ -2503,8 +2630,8 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                 d2 = (e2_to - e2) >> BLK_SHIFT;
                 voice[v].mod_q15[o][0] = e1_to;
                 voice[v].mod_q15[o][1] = e2_to;
-                dst = eg.route[o] ? dir : acc;
-                direct |= eg.route[o] && lvl;
+                if (!eg.rt_flt[o] && !eg.rt_dir[o])
+                    lvl = 0;                    /* (no pin: not heard) */
                 if (!lvl) {                     /* not heard: keep the phases going, skip the work */
                     voice[v].ph[o][0] = p0 + i0 * BLK;
                     voice[v].ph[o][1] = p1 + i1 * BLK;
@@ -2527,15 +2654,28 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                 }
                 {                               /* (mod 2 silent: two operators) */
                     const uint32_t inc[NOP] = {i0, i1, i2};
-                    osc_block(dst, t, voice[v].ph[o], inc, m1, m2, lvl, e1, d1, e2, d2, !e2 && !e2_to);
+                    int32_t gf = eg.rt_flt[o];  /* (into the filter alone: there at once, by its pin) */
+                    if (eg.rt_dir[o]) memset(dir[o], 0, sizeof dir[o]);
+                    osc_block(eg.rt_dir[o] ? dir[o] : acc, t, voice[v].ph[o], inc, m1, m2,
+                              eg.rt_dir[o] || gf == 32768 ? lvl : (int32_t)(((int64_t)lvl * gf) >> 15), e1, d1, e2, d2,
+                              !e2 && !e2_to);
+                    if (eg.rt_dir[o]) {         /* (and past it: the filter's share of it) */
+                        direct |= 1u << o;
+                        if (gf) for (i = 0; i < BLK; i++) acc[i] += gf == 32768 ? dir[o][i] : (dir[o][i] * gf) >> 15;
+                    }
                 }
             }
-            if (pe->n_lvl && !(live_mute >> LM_NOISE & 1u)) {   /* the noise (its clock follows the note: pitch, glide, */
-                                                /* bend) */
+            if (pe->n_lvl && !(live_mute >> LM_NOISE & 1u) && (eg.rt_flt[2] || eg.rt_dir[2])) {   /* the noise (its */
+                                                /* clock follows the note: pitch, glide, bend) */
                 uint32_t ni = NOISE_RATED(pe->n_type) ? rate_moved(voice[v].n_inc, m.pitch16[0] + (voice[v].glide_q8 >> 8)) : 0u;
-                noise_block(pe, &voice[v].ns, pe->route[2] ? dir : acc, pe->n_lvl, pe->n_type == NOISE_DIGI ? (uint32_t)(((uint64_t)ni * 93u) >> 16)
+                int32_t gf = eg.rt_flt[2], nl = eg.rt_dir[2] || gf == 32768 ? pe->n_lvl : (pe->n_lvl * gf) >> 15;
+                if (eg.rt_dir[2]) memset(dir[2], 0, sizeof dir[2]);
+                noise_block(pe, &voice[v].ns, eg.rt_dir[2] ? dir[2] : acc, nl, pe->n_type == NOISE_DIGI ? (uint32_t)(((uint64_t)ni * 93u) >> 16)
                                                                                : (uint32_t)(((uint64_t)ni * 16u) >> 16));
-                direct |= pe->route[2];
+                if (eg.rt_dir[2]) {
+                    direct |= 4u;
+                    if (gf) for (i = 0; i < BLK; i++) acc[i] += gf == 32768 ? dir[2][i] : (dir[2][i] * gf) >> 15;
+                }
             }
             {                                   /* drive, the filter, the high-pass, the amp: the voice into both channels */
                 int32_t fe = env_step(&voice[v].flt, hold, pe->f_att, lm >> LK_FDEC & 1u ? PR_ENV_EXP[voice[v].lk[LK_FDEC]]
@@ -2705,13 +2845,8 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                         acc[i] = s;
                         continue;
                     }
-                    if (direct) {               /* DIRECT: what went past the filter, back in */
-                        s += dir[i];
-                        s = clip15(s);
-                    }
                     s = (((s * a) >> 15) * VOICE_GAIN) >> 15;
-                    vo[2u * i] += s;
-                    vo[2u * i + 1u] += s;
+                    vo[i] += s;
                 }
                 voice[v].ic1 = comb ? 0 : ic1;
                 voice[v].f_pk = pk;
@@ -2719,7 +2854,7 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                 voice[v].ic3 = lp24 ? ic3 : 0;
                 voice[v].ic4 = lp24 ? ic4 : 0;
                 if (hg)
-                    hp_block(v, hg, acc, direct ? dir : 0, a0, da, vo);
+                    hp_block(v, hg, acc, a0, da, vo);
                 else
                     voice[v].hp1 = voice[v].hp2 = 0;
                 voice[v].clp = clp;
@@ -2729,31 +2864,27 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
                 }
                 voice[v].cw = (uint16_t)cw;
             }
-            for (o = 0; o < NOSC; o++)          /* the transients: past the filter and the amp, on their own */
-                if (voice[v].t_g[o]) {
+            for (k = 0; k < NSRC; k++)          /* past the filter: through the amp, onto the source's own bus */
+                if (direct >> k & 1u) {
+                    int32_t *db = rbus[k < NOSC ? RB_O1 + k : RB_NA + pt] + b, aa = voice[v].amp_q15;
+                    rb_used |= 1u << (k < NOSC ? RB_O1 + k : RB_NA + pt);
+                    for (i = 0; i < BLK; i++, aa += da)
+                        db[i] += (((clip15(dir[k][i]) * aa) >> 15) * VOICE_GAIN) >> 15;
+                }
+            for (o = 0; o < NOSC; o++)          /* the transients: past the filter and the amp, on their own (an */
+                if (voice[v].t_g[o]) {          /*  oscillator into the filter: the filter's bus; else its own) */
                     if (!eg.t_type[o])          /* (its TYPE turned OFF while it played: done) */
                         voice[v].t_g[o] = 0;
-                    else if (voice[v].omask >> o & 1u && !(live_mute >> (LM_OSC1 + o) & 1u))
-                        trn_block(v, o, vo, (int32_t)(voice[v].note + voice[v].shift - 60) * 16 +
+                    else if (voice[v].omask >> o & 1u && !(live_mute >> (LM_OSC1 + o) & 1u)) {
+                        rb_used |= 1u << (eg.rt_flt[o] || !eg.rt_dir[o] ? RB_FA + pt : RB_O1 + o);
+                        trn_block(v, o, eg.rt_flt[o] || !eg.rt_dir[o] ? vo : rbus[RB_O1 + o] + b,
+                                  (int32_t)(voice[v].note + voice[v].shift - 60) * 16 +
                                                           m.pitch16[o] + (voice[v].glide_q8 >> 8));
+                    }
                 }
             voice[v].amp_q15 = a_to;
         }
     }
-    if (eg.pbus)                                /* the parts' levels and places: A's in out (only it, yet), B's bus */
-        for (i = 0; i < n; i++) {
-            int32_t a = out[2u * i], bb = pbus[2u * i];   /* (mono: left and right the same) */
-            int32_t al = (int32_t)(((int64_t)a * eg.pg[0][0]) >> 15), ar = (int32_t)(((int64_t)a * eg.pg[0][1]) >> 15);
-            int32_t bl = (int32_t)(((int64_t)bb * eg.pg[1][0]) >> 15), br = (int32_t)(((int64_t)bb * eg.pg[1][1]) >> 15);
-            out[2u * i] = al + bl;
-            out[2u * i + 1u] = ar + br;
-            if (eg.psnd) {                      /* (DUAL's sends: each part's share into the delay, the reverb) */
-                psnd_buf[3u * i] = (int32_t)(((int64_t)al * eg.ps[0][0] + (int64_t)bl * eg.ps[1][0]) >> 15);
-                psnd_buf[3u * i + 1u] = (int32_t)(((int64_t)ar * eg.ps[0][0] + (int64_t)br * eg.ps[1][0]) >> 15);
-                psnd_buf[3u * i + 2u] = (int32_t)(((int64_t)(al + ar) * eg.ps[0][1] + (int64_t)(bl + br) * eg.ps[1][1]) >> 15);
-            }
-            pbus[2u * i] = pbus[2u * i + 1u] = 0;
-        }
     {                                           /* the free-running LFO follows the newest note's mod envelope */
         uint32_t newest = NV, best = 0;
         for (v = 0; v < NV; v++)
@@ -2762,18 +2893,10 @@ static void engine_render(int32_t *out, uint32_t n)   /* (out: zeroed by the cal
         if (!eg.dly_mod) dly_mpz = 0;           /* ... and the delay's time (none sounding: as the last one left it) */
         else if (newest < NV) dly_mpz = voice[newest].dly_pz;
     }
-    {                                           /* the drums: some into the effects, then all of it dry */
-        static int32_t bus[MAXBLK * BLK];
-        int dr = drums_render(bus, n <= MAXBLK * BLK ? n : MAXBLK * BLK);
-        modfx_render(out, n);                   /* CRUSH, MOD FX: the voices' alone */
-        fx_render(out, n, g2, dr ? bus : 0, eg.pbus && eg.psnd ? psnd_buf : 0);   /* the effects, over all the voices */
-        if (dr)
-            for (i = 0; i < n && i < MAXBLK * BLK; i++) {
-                out[2u * i] += bus[i];
-                out[2u * i + 1u] += bus[i];
-            }
-    }
+    rt_render(out, n, g2, rb_used | drums_render(n));   /* the drums; then the sources and the effects as the */
+                                                /* ROUTE screen pins them, into out */
     click_render(out, n);                       /* the metronome, dry */
+    lim_render(out, n);                         /* the safety limiter: nothing past the ceiling */
     engine_frames += n;
 }
 
@@ -2928,8 +3051,6 @@ static void derive_part(volatile eng_t *e, const patch_t *p, uint32_t part)
     e->vel_cut = (int32_t)(p->vel_cut & 127u) * 144 / 127;
     e->glide_k = p->glide ? PR_ENV_EXP[p->glide & 127u] : 0u;
     e->glide_legato = p->glide_mode == GLIDE_LEGATO;
-    for (k = 0; k < NSRC; k++)                  /* the routing; the noise */
-        e->route[k] = p->route[k] == ROUTE_DIRECT;
     e->n_type = p->noise_type < NOISE_N ? p->noise_type : NOISE_WHITE;
     e->n_g = 300 + (int32_t)((PR_CURVE_Q15[p->noise_col & 127u] * (32767 - 300)) >> 15);   /* ~70 Hz .. open */
     e->n_thr = (2u + (uint32_t)PR_CURVE_Q15[p->noise_col & 127u] * 2000u / 32767u) * 97391u;   /* 2 .. 2000 a second */
@@ -2959,32 +3080,30 @@ static void engine_set(const patch_t *p)        /* a new patch (or one parameter
                 engine_tables(o, k);
     }
     eg.vmode = patch.vmode < VM_N ? patch.vmode : VM_SINGLE;
-    {                                           /* the parts' levels and places: a balance (centre: both as they are) */
-        uint32_t pt, on = 0;
+    {                                           /* the parts' levels and places: a balance (centre: both as they are; */
+        uint32_t pt, r, c;                      /*  SINGLE: neither) */
         for (pt = 0; pt < 2u; pt++) {
             uint32_t vol = patch.pvol[pt] & 127u, pan = patch.ppan[pt] & 127u;
             int32_t g = vol >= 127u ? 32768 : (int32_t)PR_CURVE_Q15[vol];
             int32_t l = pan <= 64u ? 32768 : (int32_t)((127u - pan) * 32768u / 63u);
-            int32_t r = pan >= 64u ? 32768 : (int32_t)(pan * 32768u / 64u);
+            int32_t rr = pan >= 64u ? 32768 : (int32_t)(pan * 32768u / 64u);
+            if (eg.vmode == VM_SINGLE) g = l = rr = 32768;
             eg.pg[pt][0] = (int32_t)(((int64_t)g * l) >> 15);
-            eg.pg[pt][1] = (int32_t)(((int64_t)g * r) >> 15);
-            on |= vol < 127u || pan != 64u;
+            eg.pg[pt][1] = (int32_t)(((int64_t)g * rr) >> 15);
         }
-        {                                       /* DUAL: each part's own sends into the delay and the reverb */
-            uint32_t c, sn = 0;
-            for (pt = 0; pt < 2u; pt++)
-                for (c = 0; c < 2u; c++) {
-                    uint32_t v = patch.psend[pt][c] & 127u;
-                    eg.ps[pt][c] = v >= 127u ? 32768 : (int32_t)PR_CURVE_Q15[v];
-                    sn |= v < 127u;
-                }
-            eg.psnd = (uint8_t)(sn && eg.vmode == VM_DUAL);
-            on |= eg.psnd;
+        for (pt = 0; pt < DRUMS; pt++) {        /* (the drums' places: the same balance; their levels: the kit's) */
+            uint32_t pan = patch.dr_pan[pt] & 127u;
+            eg.dpg[pt][0] = pan <= 64u ? 32768 : (int32_t)((127u - pan) * 32768u / 63u);
+            eg.dpg[pt][1] = pan >= 64u ? 32768 : (int32_t)(pan * 32768u / 64u);
         }
-        if (!on || eg.vmode == VM_SINGLE) eg.pbus = 0;
-        else if (!eg.pbus) {                    /* (the bus clean before it is used) */
-            memset(pbus, 0, sizeof pbus);
-            eg.pbus = 1;
+        for (r = 0; r < RT_ROWS; r++)           /* the ROUTE screen's pins */
+            for (c = 0; c < RT_COLS; c++)
+                eg.rt_g[r][c] = pin_g(rt_pin(&patch, r, c));
+        for (r = 0; r < NSRC; r++) {            /* (the oscillators', the noise's: into the filter; past it) */
+            uint32_t dir = 0;
+            for (c = RC_CRS; c < RT_COLS; c++) dir |= eg.rt_g[r][c] != 0;
+            eg.rt_flt[r] = eg.rt_g[r][RC_FLT];
+            eg.rt_dir[r] = (uint8_t)dir;
         }
     }
     eg.l2_parts = parts_of(patch.l2_part);
