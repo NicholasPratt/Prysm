@@ -36,26 +36,26 @@ rolls a sound, a nudge or a new one.
 | **Tones** | a part's sound on its own (its oscillator, transient, filter, envelopes, LFO, noise), loaded into part A or B: 96 factory tones in 12 groups (basses, keys, pads, leads, bells, plucks, orchestral, FX, synths, percussion, voices, atmospheres) and 64 user tones, named, in flash |
 | **Transients** | per oscillator, a short sampled attack laid in front of it (24: hammer, pluck, pick, mallet, kalimba, bell, glass, metal, chiff, breath, bow, brass, slap, knock, click, zap, vox ...): its level, tune and decay; past the filter, so it sounds over slow pads |
 | **Noise** | in every voice: WHITE, PINK, BROWN (a tone each), DIGI (a short-loop shift register, pitched to the key), S&H (random steps at 16 x the note), CRACKLE (density); its level, its route |
-| **Routing** | osc 1, osc 2 and the noise each through the filter or DIRECT (past it, to the amp) |
+| **Routing** | the ROUTE screen (HOME three times): a pin matrix, each pin a level. From osc 1, osc 2, the noise, each drum, the filter (each part's) and each effect; to the filter, any effect after it, OUT, or USB's U2 / U3 (stems). As new, the classic chain |
 | **Filter** | state-variable low-pass, 12 or 24 dB/oct (zero-delay feedback), or a Blofeld-style comb (COMB+ / COMB-: the cutoff its frequency, resonance its feedback, plus damping and spread); self-oscillation at the top of RES (a steady, keytracked sine at any cutoff); drive, keytrack, its own ADSR; a 12 dB/oct high-pass (no resonance) |
 | **Amp** | ADSR; VCA OPEN (a bias: an instant drone, each voice on its last note) |
 | **LFO** | sine, triangle, saw up / down, square, S&H; 0.05 .. 40 Hz; delay; retrig or free-running; two destinations (pitch, wave positions, mod amounts, the modulators' pitch (together or mod 1 / mod 2 alone), cutoff, amp, mix) |
 | **LFO 2** | one for all the voices; the same shapes; free (0.05 .. 40 Hz) or in time (4/1 .. 1/32, triplets); any LFO destination, or resonance, drive, high-pass, comb damping, filter envelope amount, levels, osc 2 detune, the mod envelope's amount, the LFO's shape (morphed), the effects' mixes, delay time and feedback, reverb size |
 | **Mod envelopes** | two, each an ADSR with LOOP (attack-decay until release) and its own destination and amount; into the LFO's rate, depth or shape (a morph through its waves), or any LFO destination |
 | **Mod matrix** | four more routes: LFO, LFO 2, the mod envelopes, velocity, key, the mod wheel or a random value per note onto any LFO destination, an amount either way |
-| **Effects** | bit-crusher (bits and rate); phaser or flanger (manual, feedback either way); stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer |
+| **Effects** | bit-crusher (bits and rate); phaser or flanger (manual, feedback either way); stereo chorus; delay up to 735 ms with ping-pong, tone, wow and per-repeat pitch shift; Dattorro plate reverb with pre-delay, damping, modulation and shimmer; a compressor (threshold, ratio up to a limiter, attack, release, make-up, parallel mix); each fed and chained on the ROUTE screen; a safety limiter on the output |
 | **Velocity** | from MIDI, to level, cutoff and modulation (the FM-1's keys play at full velocity) |
 | **Glide** | portamento, always or legato |
 | **Arpeggiator** | UP, DOWN, UPDN, RAND, ORDER; 1/4 .. 1/32 with triplets; 1 .. 4 octaves; gate (to tied), swing, latch; 40 .. 240 BPM or the MIDI clock (START / STOP / CONTINUE); sample-accurate |
 | **Sequencer** | polyphonic: chords of up to 4 notes a step; 4 patterns of up to 64 steps, 303-style: notes, rests, accents, slides (legato glide), ties; a song of up to 16 entries, each a pattern played 1 .. 16 times; row copy / paste; step entry from the keys (chords: keys held together) or real-time recording (quantized to the step, velocity, held notes tied, overdub); step locks (two lanes a pattern, any knob, a value per step); a metronome (always, or only while recording) and a bar's count-in; its own or the MIDI clock; each patch slot has its own (patterns, song, kit); with the split on, two parts (one each side, by pitch) to mute or clear apart |
-| **Drums** | kick, snare, hat (an accent opens it), clap, made from scratch in three kits: LO-FI (8-bit samples at 11 .. 22 kHz, played back unsmoothed), TR (clean, bright), BOOM (deep); a lane in each of the 4 patterns, entered on the keys as on a TR (white keys the steps, their LEDs the lane), accents, a snare flam, hat rolls (2 .. 8 hits a step, fading or swelling); level, tune (+-24 st), decay and a send through the sound's filter each; the bus: drive, crush (bits and rate), sends into the delay and the reverb; MIDI channel 10 (General MIDI notes) |
+| **Drums** | kick, snare, hat (an accent opens it), clap, made from scratch in three kits: LO-FI (8-bit samples at 11 .. 22 kHz, played back unsmoothed), TR (clean, bright), BOOM (deep); a lane in each of the 4 patterns, entered on the keys as on a TR (white keys the steps, their LEDs the lane), accents, a snare flam, hat rolls (2 .. 8 hits a step, fading or swelling); level, tune (+-24 st), decay and pan each, and their own pins on the ROUTE screen (the filter, any effect, OUT, USB); the bus: drive and crush (bits and rate); MIDI channel 10 (General MIDI notes) |
 | **Split** | per patch: OSC 1 below a key, OSC 2 from it, an octave each side (a bass under a lead), the 4 voices shared; the key set with a knob or LEARN |
 | **LIVE** | HOME twice: patterns (the black keys) and patches (the white keys) change on the next bar line; mutes (the top white keys) for the kick, snare, hats, clap, each oscillator and the noise, and one to unmute all; four knobs, each any parameter you choose; a transport line: playing or stopped, the tempo, what changes next |
 | **Looper** | records the notes you play (not the audio) over 1, 2, 4 or 8 bars, in time with the sequencer; overdub, quantize to 1/16 or 1/8; up to 512 notes |
 | **Oscilloscope** | on HOME: locked to the newest note, auto-zoom; three styles: PRISM (the wave split into a spectrum, fading trails), ORBIT (the wave against itself a quarter cycle later: a sine a circle, FM a knot), MONO (left and right) |
 | **Patches** | 8 slots, saved in flash (power-cut safe), the last one back at power-on; UNDO (and redo) of the last change; RANDOM: a roll of the whole sound or a section (osc, filter, envelopes, modulation, effects), by an amount (5 % a nudge, 100 % a new sound), in ranges that sound; [two-part demo sounds](patches/) to load in the editor |
 | **Editor** | [in the browser](https://nicholaspratt.github.io/Prysm/editor/): the firmware itself running in the page (screen, knobs, keys, sound), every parameter, patch files; in sync with a connected FM-1 both ways |
-| **USB** | class-compliant stereo audio input ("Prysm FM-1", 44.1 / 48 kHz, works on macOS 14) and MIDI in / out, with channel select and clock; MIDI in and clock on the TRS jack too |
+| **USB** | class-compliant 6-channel audio input ("Prysm FM-1", 44.1 / 48 kHz: the master, plus two stereo stems chosen on the ROUTE screen) and MIDI in / out, with channel select and clock; MIDI in and clock on the TRS jack too |
 
 Everything runs in fixed point on the FM-1's JieLi AC791N (no FPU); the header shows how much of the audio budget
 the sound takes.
@@ -91,7 +91,7 @@ envelopes, the LFO, the effects chain.
 
 ```sh
 pip3 install mido python-rtmidi
-python3 tools/fm1_install.py prysm-1.6.fwsc       # asks before it writes; restarts into Prysm
+python3 tools/fm1_install.py prysm-1.7.fwsc       # asks before it writes; restarts into Prysm
 python3 tools/fm1_install.py --info               # what the connected FM-1 runs
 ```
 
@@ -160,9 +160,9 @@ The toolchain is JieLi's (Linux; on a Mac it runs in Docker). [SETUP-MACOS.md](S
 tools/setup_macos.sh                 # once: colima + docker, the JieLi toolchain, the AC79 SDK, a Python venv
 export PATH="$PWD/.venv/bin:$PATH"
 ./build.sh                           # build/prysm.fwsc (identity FM-1_980)
-./build.sh --release 1.6             # build/prysm-1.6.fwsc (identity FM-1_989, as every release from 0.9 on; "1.6" on the splash)
-tools/make_site.py build/prysm-1.6.fwsc 1.6   # site/: the web installer and the manual (GitHub Pages)
-APP_VER=1.6 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
+./build.sh --release 1.7             # build/prysm-1.7.fwsc (identity FM-1_989, as every release from 0.9 on; "1.7" on the splash)
+tools/make_site.py build/prysm-1.7.fwsc 1.7   # site/: the web installer and the manual (GitHub Pages)
+APP_VER=1.7 emu/build.sh             # site/editor/: Prysm in a browser, and the editor (needs emscripten: emsdk)
 ```
 
 ### Tests (on the computer, no FM-1 needed)
