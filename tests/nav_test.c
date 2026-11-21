@@ -232,6 +232,20 @@ int main(void)
     pa_do();
     CHECK(!strcmp(pa_msg, "OVERWRITE SLOT 2? SAVE"), "SAVE over another used slot: %s", pa_msg);
 
+    {   /* every pin the grid has is a parameter too (the editor's, the plugin's, LIVE's knobs): ROUTE_ROWS has each */
+        uint32_t r, c, i, k, all = 1, miss_r = 0, miss_c = 0;
+        for (r = 0; r < RT_ROWS; r++)
+            for (c = 0; c < RT_COLS; c++) {
+                uint32_t off = (uint32_t)__builtin_offsetof(patch_t, rt[r][c]), found = 0;
+                if (!rt_ok(r, c)) continue;
+                for (i = 0; i < NROWS(ROUTE_ROWS); i++)
+                    for (k = 0; k < 4u; k++)
+                        found |= ROUTE_ROWS[i].p[k].kind == K_PIN && ROUTE_ROWS[i].p[k].off == off;
+                if (!found && all) { all = 0; miss_r = r; miss_c = c; }
+            }
+        CHECK(all, "ROUTE: every pin the grid has is a parameter, U2 and U3 too%s%s%s", all ? "" : " (missing: ",
+              all ? "" : RT_ROW_NAME[miss_r], all ? "" : RT_COL_SHORT[miss_c]);
+    }
     /* the ROUTE screen: KNOB1 the row, KNOB2 the column (an effect's: those after it alone), KNOB3 the level, KNOB4
      * on / off; a drum's pin, an older sound's: its rows taken from the sequencer's sends first; one part: no FILT B */
     {

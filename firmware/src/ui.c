@@ -390,25 +390,29 @@ static const row_t ARP_ROWS[] = {
 #define RP_REV "REVERB"
 #define RP_OUT "OUT"
 #define RP_CMP "COMP"
+#define RP_U2 "U2"
+#define RP_U3 "U3"
+#define RT_USB_ROW(r, n) {n " USB", {RP(r, U2), RP(r, U3), NOPRM, NOPRM}, LIT_ALL}   /* (USB's pairs, 3-4 and 5-6) */
 #define RT_SRC_ROWS(r, n) {n, {RP(r, FLT), RP(r, CRS), RP(r, MFX), RP(r, CHO)}, LIT_ALL}, \
-                          {n " >", {RP(r, DLY), RP(r, REV), RP(r, CMP), RP(r, OUT)}, LIT_ALL}
+                          {n " >", {RP(r, DLY), RP(r, REV), RP(r, CMP), RP(r, OUT)}, LIT_ALL}, RT_USB_ROW(r, n)
 static const row_t ROUTE_ROWS[] = {
     RT_SRC_ROWS(OSC1, "OSC 1"), RT_SRC_ROWS(OSC2, "OSC 2"), RT_SRC_ROWS(NOISE, "NOISE"),
     RT_SRC_ROWS(KICK, "KICK"), RT_SRC_ROWS(SNARE, "SNARE"), RT_SRC_ROWS(HAT, "HAT"), RT_SRC_ROWS(CLAP, "CLAP"),
     {"FILT A", {RP(FILTA, CRS), RP(FILTA, MFX), RP(FILTA, CHO), RP(FILTA, DLY)}, LIT_ALL},
-    {"FILT A >", {RP(FILTA, REV), RP(FILTA, CMP), RP(FILTA, OUT), NOPRM}, LIT_ALL},
+    {"FILT A >", {RP(FILTA, REV), RP(FILTA, CMP), RP(FILTA, OUT), NOPRM}, LIT_ALL}, RT_USB_ROW(FILTA, "FILT A"),
     {"FILT B", {RP(FILTB, CRS), RP(FILTB, MFX), RP(FILTB, CHO), RP(FILTB, DLY)}, LIT_ALL},
-    {"FILT B >", {RP(FILTB, REV), RP(FILTB, CMP), RP(FILTB, OUT), NOPRM}, LIT_ALL},
+    {"FILT B >", {RP(FILTB, REV), RP(FILTB, CMP), RP(FILTB, OUT), NOPRM}, LIT_ALL}, RT_USB_ROW(FILTB, "FILT B"),
     {"CRUSH", {RP(CRUSH, MFX), RP(CRUSH, CHO), RP(CRUSH, DLY), RP(CRUSH, REV)}, LIT_ALL},
-    {"CRUSH >", {RP(CRUSH, CMP), RP(CRUSH, OUT), NOPRM, NOPRM}, LIT_ALL},
+    {"CRUSH >", {RP(CRUSH, CMP), RP(CRUSH, OUT), RP(CRUSH, U2), RP(CRUSH, U3)}, LIT_ALL},
     {"MOD FX", {RP(MFX, CHO), RP(MFX, DLY), RP(MFX, REV), RP(MFX, CMP)}, LIT_ALL},
-    {"MOD FX >", {RP(MFX, OUT), NOPRM, NOPRM, NOPRM}, LIT_ALL},
-    {"CHORUS", {RP(CHO, DLY), RP(CHO, REV), RP(CHO, CMP), RP(CHO, OUT)}, LIT_ALL},
-    {"DELAY", {RP(DLY, REV), RP(DLY, CMP), RP(DLY, OUT), NOPRM}, LIT_ALL},
-    {"REVERB", {RP(REV, CMP), RP(REV, OUT), NOPRM, NOPRM}, LIT_ALL},
-    {"COMP", {RP(CMP, OUT), NOPRM, NOPRM, NOPRM}, LIT_ALL},
+    {"MOD FX >", {RP(MFX, OUT), RP(MFX, U2), RP(MFX, U3), NOPRM}, LIT_ALL},
+    {"CHORUS", {RP(CHO, DLY), RP(CHO, REV), RP(CHO, CMP), RP(CHO, OUT)}, LIT_ALL}, RT_USB_ROW(CHO, "CHORUS"),
+    {"DELAY", {RP(DLY, REV), RP(DLY, CMP), RP(DLY, OUT), NOPRM}, LIT_ALL}, RT_USB_ROW(DLY, "DELAY"),
+    {"REVERB", {RP(REV, CMP), RP(REV, OUT), RP(REV, U2), RP(REV, U3)}, LIT_ALL},
+    {"COMP", {RP(CMP, OUT), RP(CMP, U2), RP(CMP, U3), NOPRM}, LIT_ALL},
 };
 #undef RT_SRC_ROWS
+#undef RT_USB_ROW
 #undef RP
 #define NROWS(a) ((uint8_t)(sizeof a / sizeof a[0]))
 enum { PG_OSC1, PG_OSC2, PG_TRANS, PG_NOISE, PG_FILTER, PG_AMP, PG_FENV, PG_MENV, PG_MENV2, PG_LFO, PG_LFO2, PG_MATRIX, PG_MIX,
