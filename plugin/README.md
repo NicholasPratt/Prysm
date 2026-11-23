@@ -36,16 +36,31 @@ silent and says so in its window. Run more of them each in a process of its own 
 ```sh
 emu/build.sh                                          # site/editor/: the editor page the plugin carries (needs emscripten)
 cmake -B build/plugin -S plugin -DCMAKE_BUILD_TYPE=Release
-cmake --build build/plugin --config Release           # build/plugin/Prysm.clap
+cmake --build build/plugin --config Release           # build/plugin/Prysm.clap and build/plugin/PrysmPatch.vst3
 ```
 
 Windows: build with clang (`-T ClangCL`), as the firmware is written for GCC and clang. Linux: install `libgtk-3-dev
-libwebkit2gtk-4.1-dev libasound2-dev libx11-dev` first. The dependencies (the CLAP SDK, RtMidi, CHOC) are fetched by CMake.
+libwebkit2gtk-4.1-dev libasound2-dev libx11-dev` first. The dependencies (the CLAP SDK, VST3 pluginterfaces, RtMidi, CHOC) are fetched by CMake.
 `.github/workflows/plugin.yml` builds all three on every change and attaches them to each release.
 
 | | |
 | --- | --- |
 | `core/` | the firmware as a library: `firmware/src/prysm.c` built as `tests/host.c` runs it, without its main loop |
-| `src/plugin.cpp` | the plugin: parameters, notes, the DAW's tempo as the engine's MIDI clock, 44.1 kHz to the DAW's rate, the window |
+| `src/plugin.cpp` | the CLAP plugin: parameters, notes, the DAW's tempo as the engine's MIDI clock, 44.1 kHz to the DAW's rate, the window |
+| `src/vst3.cpp` | `PrysmPatch.vst3`: a lightweight VST3 patch manager with **Patch Get** and **Patch Send** buttons (manual transfer, saved with the DAW project) |
 | `src/fm1link.cpp` | the FM-1 over USB-MIDI (RtMidi), with the editor's SysEx (`firmware/src/editor.c`) |
 | `src/mirror.h` | each watcher of the sound (the window, the FM-1) told only of changes it did not make |
+
+## Prysm Patch (VST3)
+
+`PrysmPatch.vst3` is a lightweight VST3 patch recall utility for DAWs:
+
+- **Patch Get**: pulls the current sound (`patch_t`) and sequencer patterns / drum kit (`seqs_t`) from a connected FM-1 into the plugin.
+- **Saved with DAW project**: the pulled sound and patterns are stored inside the DAW project file (compatible with Prysm's `"PRYS"` v2 state format and format conversions).
+- **Patch Send**: sends the project's stored sound and patterns back to the connected FM-1 on demand when clicked (never automatically on project load).
+
+| System | VST3 folder |
+| --- | --- |
+| macOS | `~/Library/Audio/Plug-Ins/VST3/PrysmPatch.vst3` |
+| Windows | `C:\Program Files\Common Files\VST3\PrysmPatch.vst3` |
+| Linux | `~/.vst3/PrysmPatch.vst3` |

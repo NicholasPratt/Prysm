@@ -28,6 +28,11 @@ int prysm_load(const uint8_t *p, uint32_t n, uint32_t version)
     engine_set(&edit);
     return 0;
 }
+int prysm_patch_convert(uint8_t *out, const uint8_t *p, uint32_t n, uint32_t version)
+{
+    return patch_from((patch_t *)out, p, n, version);
+}
+const uint8_t *prysm_patch_init(void) { return (const uint8_t *)&PATCH_INIT; }
 
 void prysm_note(uint32_t note, uint32_t vel)
 {
@@ -77,6 +82,11 @@ int prysm_seqs_load(const uint8_t *p, uint32_t n, uint32_t version)
     engine_set(&edit);
     return 0;
 }
+int prysm_seqs_convert(uint8_t *out, const uint8_t *p, uint32_t n, uint32_t version)
+{
+    return !seqs_size(version) || n != seqs_size(version) ? -1 : seqs_conv((seqs_t *)out, p, version);
+}
+void prysm_seqs_blank(uint8_t *out) { seqs_blank((seqs_t *)out); }
 const char *prysm_seq_layout(void) { return prm_seq_layout(); }
 
 uint32_t prysm_nparams(void) { return prm_n(); }

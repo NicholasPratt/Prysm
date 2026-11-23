@@ -13,6 +13,8 @@ set(ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
 include(FetchContent)
 FetchContent_Declare(clap GIT_REPOSITORY https://github.com/free-audio/clap.git GIT_TAG 1.2.10 GIT_SHALLOW ON
                      SOURCE_SUBDIR none)
+FetchContent_Declare(vst3_pluginterfaces GIT_REPOSITORY https://github.com/steinbergmedia/vst3_pluginterfaces.git
+                     GIT_TAG v3.7.9_build_61 GIT_SHALLOW ON SOURCE_SUBDIR none)
 FetchContent_Declare(choc GIT_REPOSITORY https://github.com/Tracktion/choc.git
                      GIT_TAG c0d3a1ba52af7b2a877675495973391808a7a768 SOURCE_SUBDIR none)
 set(RTMIDI_BUILD_TESTING OFF CACHE BOOL "" FORCE)
@@ -20,7 +22,7 @@ set(RTMIDI_API_JACK OFF CACHE BOOL "" FORCE)
 set(RTMIDI_BUILD_STATIC_LIBS ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(rtmidi GIT_REPOSITORY https://github.com/thestk/rtmidi.git GIT_TAG 6.0.0 GIT_SHALLOW ON)
-FetchContent_MakeAvailable(clap choc rtmidi)
+FetchContent_MakeAvailable(clap vst3_pluginterfaces choc rtmidi)
 
 # the firmware, as a library (plugin/core)
 add_library(prysm_core STATIC core/core.c)
@@ -62,4 +64,35 @@ else()
     pkg_check_modules(webkit2 REQUIRED IMPORTED_TARGET webkit2gtk-4.1)
     pkg_check_modules(x11 REQUIRED IMPORTED_TARGET x11)
     target_link_libraries(Prysm PRIVATE PkgConfig::gtk3 PkgConfig::webkit2 PkgConfig::x11)
+endif()
+
+# PrysmPatch.vst3: lightweight VST3 patch manager (Patch Get & Patch Send buttons, saved with DAW project)
+set(VST3_PLUG_PARENT ${CMAKE_CURRENT_BINARY_DIR}/vst3_inc)
+file(MAKE_DIRECTORY ${VST3_PLUG_PARENT})
+file(CREATE_LINK ${vst3_pluginterfaces_SOURCE_DIR} ${VST3_PLUG_PARENT}/pluginterfaces SYMBOLIC)
+
+add_library(PrysmPatch MODULE
+    src/vst3.cpp
+    ${vst3_pluginterfaces_SOURCE_DIR}/base/conststringtable.cpp
+    ${vst3_pluginterfaces_SOURCE_DIR}/base/funknown.cpp
+    ${vst3_pluginterfaces_SOURCE_DIR}/base/ustring.cpp)
+target_include_directories(PrysmPatch PRIVATE src ${VST3_PLUG_PARENT} ${vst3_pluginterfaces_SOURCE_DIR}/base ${choc_SOURCE_DIR})
+target_compile_definitions(PrysmPatch PRIVATE PRYSM_PLUGIN_VERSION="${PROJECT_VERSION}" RELEASE=1)
+target_link_libraries(PrysmPatch PRIVATE prysm_core rtmidi)
+set_target_properties(PrysmPatch PROPERTIES CXX_VISIBILITY_PRESET hidden PREFIX "")
+
+if(APPLE)
+    set_target_properties(PrysmPatch PROPERTIES BUNDLE TRUE BUNDLE_EXTENSION vst3
+        MACOSX_BUNDLE_GUI_IDENTIFIER com.nicholaspratt.prysm.patch MACOSX_BUNDLE_BUNDLE_NAME "Prysm Patch"
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION} MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION})
+    target_link_libraries(PrysmPatch PRIVATE "-framework WebKit" "-framework Cocoa" "-framework CoreMIDI"
+                          "-framework CoreAudio" "-framework CoreFoundation")
+elseif(WIN32)
+    set_target_properties(PrysmPatch PROPERTIES SUFFIX ".vst3")
+    target_compile_definitions(PrysmPatch PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(PrysmPatch PRIVATE winmm ole32)
+else()
+    set_target_properties(PrysmPatch PROPERTIES SUFFIX ".so"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/PrysmPatch.vst3/Contents/${CMAKE_SYSTEM_PROCESSOR}-linux")
+    target_link_libraries(PrysmPatch PRIVATE PkgConfig::gtk3 PkgConfig::webkit2 PkgConfig::x11)
 endif()

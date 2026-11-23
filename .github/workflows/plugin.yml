@@ -45,10 +45,20 @@ jobs:
           if [ "${{ runner.os }}" = macOS ]; then
             codesign --force --deep -s - build/plugin/Prysm.clap
             ditto -c -k --keepParent build/plugin/Prysm.clap out/Prysm-clap-${{ matrix.name }}.zip
+            codesign --force --deep -s - build/plugin/PrysmPatch.vst3
+            ditto -c -k --keepParent build/plugin/PrysmPatch.vst3 out/PrysmPatch-vst3-${{ matrix.name }}.zip
           else
             f=$(find build/plugin -name Prysm.clap -type f | head -1)
             cp "$f" out/Prysm.clap
             (cd out && cmake -E tar cf Prysm-clap-${{ matrix.name }}.zip --format=zip Prysm.clap && rm Prysm.clap)
+            if [ "${{ runner.os }}" = Windows ]; then
+              v=$(find build/plugin -name PrysmPatch.vst3 -type f | head -1)
+              cp "$v" out/PrysmPatch.vst3
+              (cd out && cmake -E tar cf PrysmPatch-vst3-${{ matrix.name }}.zip --format=zip PrysmPatch.vst3 && rm PrysmPatch.vst3)
+            else
+              cp -r build/plugin/PrysmPatch.vst3 out/PrysmPatch.vst3
+              (cd out && cmake -E tar cf PrysmPatch-vst3-${{ matrix.name }}.zip --format=zip PrysmPatch.vst3 && rm -rf PrysmPatch.vst3)
+            fi
           fi
       - uses: actions/upload-artifact@v4
         with:

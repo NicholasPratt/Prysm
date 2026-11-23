@@ -21,6 +21,8 @@ uint32_t prysm_patch_version(void);
 const uint8_t *prysm_patch(void);               /* the current sound (patch_t), prysm_patch_size() bytes */
 void prysm_set(uint32_t off, uint32_t v);       /* patch byte off = v, as its knob would set it (clamped) */
 int prysm_load(const uint8_t *p, uint32_t n, uint32_t version);   /* a whole sound (an older format: converted) */
+int prysm_patch_convert(uint8_t *out, const uint8_t *p, uint32_t n, uint32_t version);
+const uint8_t *prysm_patch_init(void);
 void prysm_note(uint32_t note, uint32_t vel);   /* vel 0: off; through the arpeggiator when it is on */
 void prysm_bend(uint32_t v14, uint32_t range);  /* 0 .. 16383, 8192 none; +- range semitones */
 int prysm_drum(uint32_t note, uint32_t vel);    /* channel 10's: a drum (General MIDI's notes), 1; else 0 (vel 0: off) */
@@ -35,6 +37,8 @@ uint32_t prysm_seqs_size(void);
 uint32_t prysm_seqs_version(void);
 int prysm_seq_set(uint32_t off, uint32_t v);    /* a byte of them, checked; 1: set */
 int prysm_seqs_load(const uint8_t *p, uint32_t n, uint32_t version);
+int prysm_seqs_convert(uint8_t *out, const uint8_t *p, uint32_t n, uint32_t version);
+void prysm_seqs_blank(uint8_t *out);
 const char *prysm_seq_layout(void);             /* where each field is (emu/params.c) */
 
 uint32_t prysm_nparams(void);
