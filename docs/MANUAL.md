@@ -618,7 +618,7 @@ A polyphonic step sequencer, 303-style: notes and **chords** of up to four notes
 many times. Enter steps one at a time, or **record in real time** as it plays. It plays alongside the keys (and
 the arpeggiator), at the ARP page's tempo and swing, on its own clock or the MIDI clock. Each patch slot has a
 sequencer of its own (the patterns, the song, the drum kit): LOAD brings it in with the sound. To try other sounds
-over the same song, load them with SOUND instead (see [Patches](#patches)).
+over the same song, browse the tones (see [Tones](#tones)): each is heard as it is picked.
 
 The picture is the pattern being edited: 64 squares, 16 a row. An empty square is a rest, a grey one a note, a white
 one an accent; a little bar joins a sliding step to the next; a tie is a bar carrying the note before it on; past the
@@ -747,7 +747,7 @@ sounds were made from scratch (no recordings) in the style of the classic drum m
 | **BOOM** | 16 bits, deep: a long, low kick, a fat snare, a wide clap |
 
 The kit (which one, the levels, tuning, decay, the bus) is one for every pattern, and, like the patterns, part of the
-slot's sequencer: LOAD brings it in, SOUND leaves the beat going. Kits of your own can be built into the firmware
+slot's sequencer: LOAD brings it in. Kits of your own can be built into the firmware
 from WAV files (`tools/gen_drums.py --kit NAME=DIR`, then build): only use sounds you have the rights to.
 
 The picture is the 16 steps the cursor is in, a lane a drum: a hit grey, an accent white, a flam white and grey, a
@@ -890,11 +890,11 @@ picture shows the MIDI setup, the battery and the **CPU** (its peak, a bar).
 Press **SAVE** for the PATCH screen. The eight slots are drawn as tiles: the slot's number and a picture of its
 osc 1 wave (or EMPTY). The selected slot has a double edge; a dot marks the slot the current sound came from. Under
 them: what SAVE will do, then what happened (framed when it asks you to press SAVE again); along the bottom, the
-tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM, TONE.
+tabs SAVE, LOAD, INIT, UNDO, RANDOM, TONE.
 
 | Control | Does |
 | --- | --- |
-| **SELECT** | SAVE, LOAD, SOUND, INIT, UNDO, RANDOM or TONE |
+| **SELECT** | SAVE, LOAD, INIT, UNDO, RANDOM or TONE |
 | **KNOB1** | the slot (TONE: the tone) |
 | **KNOB2**, **KNOB3** | RANDOM: AMOUNT, and what it changes. TONE: KNOB2 LOAD or STORE |
 | **SAVE** | does it |
@@ -902,18 +902,17 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM, TONE.
 
 - **SAVE** writes the current sound and the sequencer playing (with any changes not yet saved) to the slot, and only
   to it: saved to another slot, the slot the sequencer came from keeps what it last saved. Over a slot holding another sound it asks
-  first (**OVERWRITE SLOT 3? SAVE**): press SAVE again. It asks too when the slot's sound came in by SOUND
-  (**REPLACE SEQ OF 3? SAVE**): its own sequencer would make way for the one playing.
+  first (**OVERWRITE SLOT 3? SAVE**): press SAVE again.
 - **LOAD** brings the slot's sound back, and its sequencer. While the sequencer plays, the new one takes over where
   the next pattern would start (the sound changes at once), from the top of its pattern or song; stopped, at once.
   A slot whose sound came in from the editor alone has no sequencer yet: LOAD keeps the one playing, and it becomes
   that slot's. LOAD does not save the sequencer it replaces: pattern changes it has not saved yet (they save a few
   seconds after a change, once nothing plays) are let go.
-- **SOUND** brings the slot's sound back alone: the sequencer plays on, still saving into the slot it came from.
-- **INIT** loads the default sound (the sequencer plays on). If you have unsaved changes, LOAD, SOUND and INIT ask
+- **INIT** loads the default sound (the sequencer plays on): OSC 1's carrier alone, a sine, with OSC 2 at 0, every
+  modulator's amount at 0 and no filter envelope, a blank to build from. If you have unsaved changes, LOAD and INIT ask
   first, saying what would happen (**DISCARD EDITS? SAVE: LOAD 4**): press SAVE again, or HOME to keep them.
 - **UNDO** takes the last change back: the sound and the sequencer as they were before it. A change is a knob turned
-  after a pause (2 seconds: a sweep of turns is one change), or an action: a PASTE, a CLEAR, a LOAD, SOUND or INIT.
+  after a pause (2 seconds: a sweep of turns is one change), or an action: a PASTE, a CLEAR, a LOAD or INIT.
   The screen says what it will undo; press **SAVE**. Press SAVE again to redo. It is one step: the change before that
   is gone. It does not undo a save (the slot keeps what was saved), and the looper is apart from it.
 - **RANDOM** rolls the sound: each **SAVE** a new roll. **KNOB2** is the AMOUNT, 5 .. 100 % (100: NEW SOUND): a
@@ -923,7 +922,8 @@ tabs SAVE, LOAD, SOUND, INIT, UNDO, RANDOM, TONE.
   ranges that sound (a pitch LFO a vibrato, short attacks more often than long), and the sound is kept audible. The
   arp, glide, velocity, the split, the VCA and the routing are never touched. Rolls in a row are **one UNDO**: UNDO
   brings back the sound before the first. Like it: SAVE it to a slot.
-- **TONE** is the tone library (below): **KNOB1** picks a tone, **KNOB2** LOAD or STORE, **SAVE** does it.
+- **TONE** is the tone library (below): **KNOB1** picks a tone, **KNOB2** LOAD or STORE, **SAVE** does it. On LOAD,
+  the tone picked is heard at once in the part being edited: play the keys as you turn KNOB1.
 
 ### Tones
 
@@ -941,8 +941,12 @@ part's colour, two parts playing). There are 160:
   sea ...). They are fixed.
 - **64 user tones**, after them, EMPTY until you store one.
 
-**LOAD** puts the tone into the part being edited (SELECT picks A or B: see Parts), and leaves the rest of the sound
-as it was. The screen says where it went: DX BELL INTO B. It is one **UNDO** step. With one part playing (SINGLE), the
+**Preview:** on LOAD, turning **KNOB1** puts each tone into the part being edited as you reach it, so you hear it
+while you play (or the sequencer does). Nothing is kept until you press SAVE: leave the TONE tab (another tab, STORE,
+HOME or a page button) and the sound is back as it was, with no UNDO step and no **\***.
+
+**LOAD** (SAVE) keeps the tone in the part being edited (SELECT picks A or B: see Parts), and leaves the rest of the
+sound as it was. The screen says where it went: DX BELL INTO B. It is one **UNDO** step. With one part playing (SINGLE), the
 tone goes into A, osc 1, and osc 2's level goes down to 0, so you hear the tone as it was made: turn OSC 2's level
 back up to layer it. A tone sounds the same in A as in B: its modulation of its own oscillator (WAVE1, MOD1 ...) is
 osc 2's in part B.

@@ -316,12 +316,19 @@ static const tone_rom_t TONE_ROM[TONE_ROM_N] = {
 };
 #undef TONE
 
+static void tone_base(patch_t *p)                /* what a factory tone's changes are made on: the default sound as it */
+{                                               /* was before 1.8 (OSC 1's mod 1 at 70, the filter envelope at 88) */
+    *p = PATCH_INIT;
+    p->osc[0].amt[0] = 70;
+    p->fenv = 88;
+}
+
 static void tone_rom(uint32_t i, tone_t *t)     /* factory tone i (0 .. TONE_ROM_N - 1) */
 {
     static patch_t p;                           /* (static: off the main loop's stack) */
     uint32_t k;
     const uint8_t *kv = TONE_ROM[i % TONE_ROM_N].kv;
-    p = PATCH_INIT;
+    tone_base(&p);
     for (; kv[0] != TE; kv += 2)
         ((uint8_t *)&p)[kv[0]] = kv[1];
     tone_get(&p, 0, t);

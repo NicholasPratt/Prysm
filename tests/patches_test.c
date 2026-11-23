@@ -73,6 +73,9 @@ int main(void)
     patch_t a = PATCH_INIT, b = PATCH_INIT, got;
     uint32_t s;
     printf("patch bank checks\n");
+    CHECK(PATCH_INIT.lvl1 && !PATCH_INIT.lvl2 && !PATCH_INIT.osc[0].amt[0] && !PATCH_INIT.osc[0].amt[1] &&
+          !PATCH_INIT.osc[1].amt[0] && !PATCH_INIT.osc[1].amt[1] && PATCH_INIT.fenv == 64 &&
+          PATCH_INIT.pb[2] == 64, "a new sound: OSC 1's carrier alone (OSC 2 at 0, every mod amount 0), no filter envelope");
     a.osc[0].bank[0] = 3; a.osc[1].pos[2] = 99; a.cut = 12; a.fine2 = 77;   /* two sounds, saved by format 1 */
     b.osc[0].amt[1] = 120; b.amp_r = 5; b.semi2 = 31;
     memset(&v1, 0, sizeof v1);

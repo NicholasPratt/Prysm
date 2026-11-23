@@ -456,14 +456,14 @@ static uint32_t drum_vel(uint32_t h)
 static const patch_t PATCH_INIT = {
     .osc = {
         {.bank = {0, 0, 0}, .pos = {0, 0, 0}, .ratio = {1, 3, 1}, .fine = 64, .mode = {MODE_FM, MODE_FM},
-         .att = {0, 0}, .rel = {60, 60}, .amt = {70, 0}, .level = 127},
+         .att = {0, 0}, .rel = {60, 60}, .amt = {0, 0}, .level = 127},   /* (a new sound: OSC 1's carrier alone) */
         {.bank = {0, 0, 0}, .pos = {73, 0, 0}, .ratio = {1, 1, 1}, .fine = 64, .mode = {MODE_FM, MODE_FM},
          .att = {0, 0}, .rel = {60, 60}, .amt = {0, 0}, .level = 127},
     },
-    .cut = 92, .res = 40, .fenv = 88, .key = 64, .drive = 0,
+    .cut = 92, .res = 40, .fenv = 64, .key = 64,   /* (FENV: none) */ .drive = 0,
     .flt_a = 0, .flt_d = 75, .flt_s = 50, .flt_r = 65,
     .amp_a = 8, .amp_d = 70, .amp_s = 100, .amp_r = 60,
-    .lvl1 = 110, .lvl2 = 70, .semi2 = 24, .fine2 = 70,
+    .lvl1 = 110, .lvl2 = 0, .semi2 = 24, .fine2 = 70,
     .lfo_wave = LFO_SINE, .lfo_rate = 87, .lfo_delay = 0, .lfo_retrig = 1,   /* 5 Hz; no destination amount yet */
     .lfo_dest = {DEST_PITCH, DEST_CUTOFF}, .lfo_amt = {64, 64},
     .cho_rate = 40, .cho_depth = 60, .cho_mix = 0,             /* the effects: all there, all off (mix 0) */
@@ -493,7 +493,7 @@ static const patch_t PATCH_INIT = {
     .dly_sync = 0, .mm_time = {70, 70, 70, 70},
     .trn_type = {0, 0}, .trn_lvl = {100, 100}, .trn_tune = {24, 24}, .trn_dec = {127, 127},
     .vmode = VM_SINGLE,                         /* part B: as part A (tests/part_test.c checks it) */
-    .pb = {92, 40, 88, 64, 0, 0, 75, 50, 65, 8, 70, 100, 60, LFO_SINE, 87, 0, 1, DEST_PITCH, DEST_CUTOFF, 64, 64,
+    .pb = {92, 40, 64, 64, 0, 0, 75, 50, 65, 8, 70, 100, 60, LFO_SINE, 87, 0, 1, DEST_PITCH, DEST_CUTOFF, 64, 64,
            60, 70, 0, 60, 0, DEST_LFORATE, 64, 80, 40, 50, 0, GLIDE_ALWAYS, 0, FLT_LP12, 30, 0,
            NOISE_WHITE, 100, 0, ROUTE_FILTER, 0},
     .l2_part = PT_BOTH, .me2_part = PT_BOTH, .mm_part = {PT_BOTH, PT_BOTH, PT_BOTH, PT_BOTH},

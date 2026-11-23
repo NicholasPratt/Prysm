@@ -21,7 +21,7 @@
  *                    KNOB1 .. KNOB4 the parameters chosen for them: SELECT to ASSIGN, a knob turned its parameter);
  *                    HOME again: the oscilloscope (KNOB1: how many cycles, KNOB2: PRISM / X-Y / MONO); HOME there,
  *                    ALGORITHM or a page button: back. (SETUP's HOME row: the oscilloscope first, then LIVE)
- *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / SOUND / INIT, KNOB1 = the slot, SAVE again = do it
+ *   SAVE             the PATCH screen: 8 slots; SELECT = SAVE / LOAD / INIT ..., KNOB1 = the slot, SAVE again = do it
  *                    (twice over a used slot or unsaved changes); HOME or a page = back
  *
  * The screen, top to bottom: the header (the page and the row; the page number and the CPU), the page's graphic
@@ -441,7 +441,9 @@ static patch_t edit;                            /* the sound being edited (engin
 static patch_t clean;                           /* the sound as last loaded or saved: edit differs = unsaved changes */
 static int32_t cur_slot = -1;                   /* the slot it came from or went to (-1: none) */
 static uint8_t slot_moved;                      /* cur_slot changed: the app keeps it for the next power-on */
-static int modified(void) { return memcmp(&edit, &clean, sizeof edit) != 0; }
+static patch_t pv_keep;                         /* TONE's preview: the sound under it (pv_on: a tone heard in its place) */
+static uint32_t pv_on;
+static int modified(void) { return memcmp(pv_on ? &pv_keep : &edit, &clean, sizeof edit) != 0; }
 /* UNDO (the PATCH screen): the sound and the sequencer playing as they were before the last change: a knob turned
  * after a pause (UD_PAUSE_MS), or an action (a paste, a clear, a load). UNDO swaps them with how they are now, so
  * UNDO again is a redo */
@@ -2122,8 +2124,8 @@ static void draw_pop(void)                      /* (into the picture's canvas) *
 }
 
 #define PG_PATCH PG_N                           /* (the PATCH screen: not in ALGORITHM's round, only SAVE leads here) */
-enum { PA_SAVE, PA_LOAD, PA_SOUND, PA_INIT, PA_UNDO, PA_RANDOM, PA_TONE, PA_N };   /* (LOAD: the sound and its */
-static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "SOUND", "INIT", "UNDO", "RANDOM", "TONE"};   /* sequencer; SOUND: alone) */
+enum { PA_SAVE, PA_LOAD, PA_INIT, PA_UNDO, PA_RANDOM, PA_TONE, PA_N };   /* (LOAD: the sound and its sequencer) */
+static const char *const PA_NAME[PA_N] = {"SAVE", "LOAD", "INIT", "UNDO", "RANDOM", "TONE"};
 /* TONE (tones.c): KNOB1 the tone (the factory's 96, then the user's 64), KNOB2 LOAD (into the part edited) or STORE
  * (the part edited, into a user tone); SAVE does it */
 enum { TA_LOAD, TA_STORE, TA_N };
@@ -2472,14 +2474,14 @@ static void pa_draw_text(void)                  /* the header, what SAVE will do
     draw_hdr();
     cv_begin(240, FOC_H, C_BLACK);
     e = pa_row == PA_SAVE ? put(s, "SAVE TO SLOT ") : pa_row == PA_LOAD ? put(s, "LOAD SLOT ") :
-        pa_row == PA_SOUND ? put(s, "SOUND OF SLOT ") : pa_row == PA_INIT ? put(s, "LOAD THE DEFAULT SOUND") :
+        pa_row == PA_INIT ? put(s, "LOAD THE DEFAULT SOUND") :
         pa_row == PA_TONE ? pa_tone_line(s) :
         pa_row == PA_RANDOM ? (pa_rnd_pct >= 100u ? put(put(s, "NEW SOUND: "), RS_NAME[pa_rnd_sec]) :
                                put(num(put(put(put(s, "RANDOM "), RS_NAME[pa_rnd_sec]), " BY "), pa_rnd_pct), "%")) :
         !ud_ok ? put(s, "NOTHING TO UNDO") : put(put(s, ud_undone ? "REDO: " : "UNDO: "), ud_what);
     if (pa_row < PA_INIT) {
         e = put(e, n);
-        if ((pa_row == PA_LOAD || pa_row == PA_SOUND) && !bank.used[pa_slot]) put(e, " (EMPTY)");
+        if (pa_row == PA_LOAD && !bank.used[pa_slot]) put(e, " (EMPTY)");
         if (pa_row == PA_SAVE && bank.used[pa_slot]) put(e, " (USED)");
     }
     cv_text((240 - text_w(&FONT_S, s)) / 2, 0, &FONT_S, s, C_MID);
@@ -3113,6 +3115,7 @@ static int pa_tone_do(void)                     /* TONE's SAVE: a tone into the 
         return 0;
     }
     if (tone_at(pa_tone, &t) != 0) { pa_say("EMPTY TONE", 0); return 0; }
+    if (pv_on) { edit = pv_keep; pv_on = 0; }   /* (the preview kept: UNDO goes back to the sound before it) */
     ud_take("TONE");
     tone_put(&edit, part, &t);
     if (!ui_two()) edit.lvl2 = 0;               /* (one part: osc 2 quiet, the tone as it was made; turn it back up) */
@@ -3160,7 +3163,7 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
         pa_say("SAVED TO ", pa_slot + 1u);
         return 0;
     }
-    if ((pa_row == PA_LOAD || pa_row == PA_SOUND) && patch_get(pa_slot, &p) != 0) {
+    if (pa_row == PA_LOAD && patch_get(pa_slot, &p) != 0) {
         put(num(put(pa_msgbuf, "SLOT "), pa_slot + 1u), " IS EMPTY");
         pa_msg = pa_msgbuf;
         return 0;
@@ -3168,20 +3171,16 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
     if (modified() && !pa_armed) {              /* LOAD / INIT over unsaved changes: ask once more, saying what goes */
         pa_armed = 1;
         if (pa_row == PA_INIT) pa_say("DISCARD EDITS? SAVE: INIT", 0);
-        else pa_say(pa_row == PA_LOAD ? "DISCARD EDITS? SAVE: LOAD " : "DISCARD EDITS? SAVE: SOUND ", pa_slot + 1u);
+        else pa_say("DISCARD EDITS? SAVE: LOAD ", pa_slot + 1u);
         return 0;
     }
     pa_armed = 0;
-    ud_take(pa_row == PA_LOAD ? "LOAD" : pa_row == PA_SOUND ? "SOUND" : "INIT");
+    ud_take(pa_row == PA_LOAD ? "LOAD" : "INIT");
     if (pa_row == PA_LOAD) {
         edit = p;
         cur_slot = (int32_t)pa_slot;
         seqs_switch(pa_slot);
         pa_say("LOADED ", pa_slot + 1u);
-    } else if (pa_row == PA_SOUND) {            /* (the sequencer plays on: try sounds over it) */
-        edit = p;
-        cur_slot = (int32_t)pa_slot;
-        pa_say("SOUND LOADED FROM ", pa_slot + 1u);
     } else {
         edit = PATCH_INIT;
         cur_slot = -1;
@@ -3189,6 +3188,29 @@ static int pa_do(void)                          /* the SAVE button on the PATCH 
     }
     clean = edit;
     slot_moved = 1;
+    return 1;
+}
+
+static uint32_t pv_show(void)                   /* TONE, KNOB1: the tone picked heard in the part edited, as LOAD would
+                                                 * put it (an empty one: the sound as it was); 1 = the sound changed */
+{
+    static tone_t t;
+    uint32_t part = ui_two() && ui_b() ? 1u : 0u;
+    if (!pv_on) { pv_keep = edit; pv_on = 1; }
+    edit = pv_keep;
+    if (tone_at(pa_tone, &t) == 0) {
+        tone_put(&edit, part, &t);
+        if (!ui_two()) edit.lvl2 = 0;
+    }
+    return 1;
+}
+
+static uint32_t pv_end(void)                    /* out of TONE's LOAD (another row, STORE, another page): the sound
+                                                 * back as it was; 1 = the sound changed */
+{
+    if (!pv_on || (page == PG_PATCH && pa_row == PA_TONE && pa_tact == TA_LOAD)) return 0;
+    edit = pv_keep;
+    pv_on = 0;
     return 1;
 }
 
@@ -3209,7 +3231,10 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
                                                        (pa_row == PA_TONE && (i == 1u || pa_tact == TA_STORE)))) {
             uint32_t tn = TONE_ROM_N + TONE_USER_N;
             if (pa_row == PA_TONE) {            /* (KNOB3, KNOB4 on STORE: the name) */
-                if (i == 0) pa_tone = (uint32_t)(((int32_t)pa_tone + d % (int32_t)tn + (int32_t)tn) % (int32_t)tn);
+                if (i == 0) {
+                    pa_tone = (uint32_t)(((int32_t)pa_tone + d % (int32_t)tn + (int32_t)tn) % (int32_t)tn);
+                    if (pa_tact == TA_LOAD) changed |= pv_show();
+                }
                 else if (i == 1u) pa_tact = d > 0 ? TA_STORE : TA_LOAD;
                 else if (pa_tone >= TONE_ROM_N) pa_tname_turn(i, d);
                 pa_tname_init();
@@ -3227,7 +3252,7 @@ static int pa_input(uint32_t buttons)           /* the PATCH screen's encoders a
         }
     (void)fm1_enc_take(ENC_PRESETS);
     if (buttons & (1u << BTN_SAVE)) {
-        changed = (uint32_t)pa_do();
+        changed |= (uint32_t)pa_do();
         dirty |= D_ALL;
     }
     return (int)changed;
@@ -3619,7 +3644,7 @@ static void ui_page(uint32_t pg)
 }
 
 /* ---- input: the encoders and the page buttons; 1 if the sound changed */
-static int ui_input(uint32_t buttons)
+static int ui_input_(uint32_t buttons)
 {
     static uint32_t last_turn[4];
     static int32_t slow[4];
@@ -3910,6 +3935,12 @@ static int ui_input(uint32_t buttons)
         dirty |= D_HDR | D_GFX | D_ROWS;        /* (the header: the unsaved-changes mark) */
     }
     return (int)changed;
+}
+
+static int ui_input(uint32_t buttons)           /* the buttons and encoders; 1 = the sound changed */
+{
+    int changed = ui_input_(buttons);
+    return (int)pv_end() | changed;             /* (TONE's preview: left, the sound back) */
 }
 
 /* ---- REC. Stopped, on the SEQ page: step entry. A key writes its note at the cursor (a rest or a tie becomes a note;

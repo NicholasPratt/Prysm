@@ -62,10 +62,10 @@ int main(void)
 
     for (i = 0, ok = 1; i < TONE_ROM_N; i++) {  /* each its changes, all kept */
         const uint8_t *kv = TONE_ROM[i].kv;
-        p = PATCH_INIT;
+        tone_base(&p);
         for (; kv[0] != TE; kv += 2) ((uint8_t *)&p)[kv[0]] = kv[1];
         tone_rom(i, &t);
-        q = PATCH_INIT;
+        tone_base(&q);
         tone_put(&q, 0, &t);
         for (j = 0; j < PART_N; j++) q.pb[j] = p.pb[j];   /* (part B: PATCH_INIT's, as p's) */
         if (memcmp(&p, &q, sizeof p)) {
@@ -156,6 +156,58 @@ int main(void)
     ui_view();
     pa_do();
     CHECK(edit.lvl2 == 0 && edit.osc[0].ratio[1] == t.osc.ratio[1], "SINGLE: into A, osc 2's level down");
+    {                                           /* the preview: KNOB1 on LOAD heard at once, let go on leaving */
+        static patch_t keep, was, base;
+        uint32_t ch;
+        keep = edit;
+        base = edit = PATCH_INIT;
+        clean = edit;
+        pa_row = PA_TONE; pa_tact = TA_LOAD; pa_tone = 31;
+        ud_ok = 0;
+        host_enc[ENC_KNOB1] = 1;
+        ch = (uint32_t)ui_input(0);
+        tone_get(&edit, 0, &t2);
+        tone_rom(32, &t);
+        memcpy(t2.name, t.name, TONE_NAME);
+        CHECK(ch && pa_tone == 32 && !memcmp(&t, &t2, sizeof t) && !modified() && !ud_ok,
+              "TONE, KNOB1: the tone heard at once (DX BELL in A), no * and no UNDO step");
+        was = edit;
+        host_enc[ENC_KNOB1] = 1;
+        (void)ui_input(0);
+        tone_rom(33, &t);
+        tone_get(&edit, 0, &t2);
+        memcpy(t2.name, t.name, TONE_NAME);
+        {
+            static patch_t want;
+            want = base;
+            tone_put(&want, 0, &t);
+            want.lvl2 = 0;
+            CHECK(!memcmp(&t, &t2, sizeof t) && !memcmp(&edit, &want, sizeof want),
+                  "... the next: it alone, put on the sound from before, not on the one before it");
+        }
+        host_enc[ENC_SELECT] = -1;              /* (to RANDOM: the preview let go) */
+        ch = (uint32_t)ui_input(0);
+        CHECK(ch && !memcmp(&edit, &base, sizeof base) && !pv_on && pa_row == PA_RANDOM,
+              "another tab: the sound back as it was");
+        host_enc[ENC_SELECT] = 1;
+        (void)ui_input(0);
+        host_enc[ENC_KNOB1] = -1;
+        (void)ui_input(0);
+        CHECK(!memcmp(&edit, &was, sizeof was), "back on TONE, KNOB1: DX BELL again");
+        ch = (uint32_t)ui_input(1u << BTN_SAVE);
+        CHECK(ch && !memcmp(&edit, &was, sizeof was) && !pv_on && modified() && !strcmp(pa_msg, "DX BELL INTO A"),
+              "SAVE (LOAD): kept, and now a change (*)");
+        pa_row = PA_UNDO;
+        pa_do();
+        CHECK(!memcmp(&edit, &base, sizeof base), "UNDO: the sound from before the preview");
+        pa_row = PA_TONE; pa_tact = TA_LOAD;
+        host_enc[ENC_KNOB1] = 1;
+        (void)ui_input(0);
+        (void)ui_input(1u << BTN_HOME);
+        CHECK(page != PG_PATCH && !memcmp(&edit, &base, sizeof base) && !pv_on, "HOME out of the PATCH screen: back too");
+        edit = keep;
+        page = PG_PATCH; pa_row = PA_TONE; pa_tact = TA_LOAD;
+    }
     edit.cut = 17;
     pa_tact = TA_STORE;
     pa_tone = 5;

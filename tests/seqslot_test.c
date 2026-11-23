@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Each slot's own sequencer on a computer, through the app's own code (patches.c, ui.c) and the engine: the upgrade
- * from one sequencer (each used slot gets a copy), LOAD bringing a slot's in, SOUND leaving the one playing, SAVE
+ * from one sequencer (each used slot gets a copy), LOAD bringing a slot's in, SAVE
  * writing both (and asking before it replaces a slot's sequencer), LOAD while playing (taken over where the next
  * pattern starts), a slot without one taking the one playing, the power-on, and the store's own kept as it was.
  *   tests/run_engine.sh runs it */
@@ -61,10 +61,8 @@ int main(void)
     seqs_poll();
     CHECK(first_note() == 72 && seq_owner == 0, "LOAD 1: back to its own (72)");
 
-    press(PA_SOUND, 2);
-    CHECK(first_note() == 72 && seq_owner == 0 && cur_slot == 2, "SOUND 3: its sound, slot 1's sequencer plays on");
     press(PA_SAVE, 2);
-    CHECK(pa_armed && area_note(2) == 60, "SAVE to 3 (its sound came alone): asks first, nothing written");
+    CHECK(pa_armed && area_note(2) == 60, "SAVE to 3 (another slot's): asks first, nothing written");
     press(PA_SAVE, 2);
     CHECK(area_note(2) == 72 && seq_owner == 2 && cur_slot == 2, "SAVE again: slot 3 gets the sound and this sequencer");
 

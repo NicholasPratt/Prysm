@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #define main prysm_host_main
 #include "prysm.c"
+#include "old_init.h"                          /* (PATCH_INIT: the sound before 1.8, to play) */
 #undef main
 
 static int fails;
