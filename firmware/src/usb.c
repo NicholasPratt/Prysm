@@ -72,28 +72,30 @@ static struct {
 #if FELUCCA_UAC
 /* USB audio input. The I2S clock is not locked to USB (about 44,117.6 Hz against the host's 44,100):
  * the endpoint is asynchronous, so each 1 ms packet carries what the ring holds, 44 or 45 frames
- * (the 44.1 pattern) and one more or one fewer while the ring's fill drifts out of its band.
- * The render writes HALF_FRAMES (128) frames every 2.9 ms; the fill measured when a render starts is
- * the low point of that saw tooth, and is kept in UA_LO..UA_HI. A frame waits in the ring for that fill
- * plus its place in the render: 80..256 frames, ~3.8 ms on average (256-frame halves and a 96..160
- * band: ~5.8 ms). Measured under load (65 % CPU): a 64..112 band started renders at
- * 48..119 with no glitch; one render was once seen 29 frames under the floor: a packet (46) must
- * still be in hand then. */
-#define UA_N 512u                /* ring, frames (UA_W words each: 16-bit L | R << 16); a power of two */
-#define UA_PRIME 104u            /* silence ahead of the first rendered frame */
-#define UA_LO 80u                /* a render may start late: keep a packet and more in hand */
-#define UA_HI 128u
+ * (the 44.1 pattern) and now and then one more or one fewer, to hold the ring's fill (uac_packet).
+ * The ring is written once a render, after it (platform.c: the taps follow app_audio): HALF_FRAMES (256) frames
+ * every 5.8 ms, all at once, while the host takes a packet each ms all through the render. So the fill measured
+ * when a render starts (the low point of the saw tooth) must outlast the whole render, however long it takes (up
+ * to its 5.8 ms), and a packet more: UA_LO..UA_HI is set from that, a render and a packet and a margin. (It was
+ * 80..128, set for spread taps and 128-frame halves: a render over ~40 % of its time ran the ring dry, the last
+ * frame repeated, a click a render; three notes did it.) A frame waits ~7.5 ms (48 kHz: ~7.8). */
+#define UA_N 1024u               /* ring, frames (UA_W words each: 16-bit L | R << 16); a power of two */
+#define UA_MAXF44 46u            /* frames in the largest packet at 44.1 kHz: 45 + 1 */
+#define UA_MARGIN 32u
+#define UA_PRIME (HALF_FRAMES + UA_MAXF44 + UA_MARGIN)   /* silence ahead of the first rendered frame: the target */
+#define UA_LO (UA_PRIME - 26u)
+#define UA_HI (UA_PRIME + 26u)
 #define UAC_RATE 44100u
 #if FELUCCA_UAC_48K
-/* 48 kHz: the same times in 48 kHz frames (x 160 / 147); a render of HALF_FRAMES gives 139..140 frames */
-#define UA_PRIME48 113u
-#define UA_LO48 87u
-#define UA_HI48 139u
+/* 48 kHz: a render of HALF_FRAMES gives 278..279 frames, a packet up to 49 */
 #define UA_REND48 ((HALF_FRAMES * 160u + 146u) / 147u)
 #define UA_MAXF 49u              /* frames in the largest packet: 48 + 1 */
-_Static_assert(UA_HI48 + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, a render and a packet (48 kHz)");
+#define UA_PRIME48 (UA_REND48 + UA_MAXF + UA_MARGIN)
+#define UA_LO48 (UA_PRIME48 - 26u)
+#define UA_HI48 (UA_PRIME48 + 26u)
+_Static_assert(UA_HI48 + 40u + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, its guard, a render and a packet (48 kHz)");
 #else
-#define UA_MAXF 46u              /* frames in the largest packet */
+#define UA_MAXF UA_MAXF44        /* frames in the largest packet */
 #endif
 #if UA_W > 1u                    /* (as ChoralRoot's six channels: room for the packet bit-stuffed, 7 / 6) */
 #define UAC_MAXP (FELUCCA_UAC_48K ? 688u : 640u)
@@ -101,7 +103,7 @@ _Static_assert(UA_HI48 + UA_REND48 + UA_MAXF < UA_N, "the ring holds the band, a
 #define UAC_MAXP (UA_MAXF * 4u)
 #endif
 _Static_assert(UA_MAXF * UA_W * 4u <= UAC_MAXP && UAC_MAXP <= 1023u, "a packet fits its endpoint, full speed");
-_Static_assert(UA_HI + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, a render and a packet");
+_Static_assert(UA_HI + 40u + HALF_FRAMES + UA_MAXF < UA_N, "the ring holds the band, its guard, a render and a packet");
 #ifdef __ELF__
 #define UA_POOL __attribute__((section(".pool")))   /* (the big zeroed RAM: the CPU's alone; a Mac's Mach-O has none) */
 #else
@@ -128,6 +130,8 @@ static struct {
     uint8_t fu_mute;             /* feature unit 3, master: stored for the host (the stream is not scaled) */
     int16_t fu_vol;              /* 1/256 dB, -60..0 */
     volatile uint32_t fill_min;  /* ring fill when the last render started */
+    volatile int32_t fill_q8;    /* fill_min low-passed over renders (Q8 frames): the packets' and renders' beat out */
+    int32_t trim;                /* the rate trim's frame accumulator (Q8): a +-1 packet each time it passes a frame */
     uint32_t acc;                /* 44.1 frames per ms: 0.1 frame steps */
     uint32_t last[UA_W];         /* the last frame sent, repeated on an underrun */
     uint32_t starts, pkts, frames;               /* frames in packets sent from the ring */
@@ -1176,12 +1180,15 @@ static __attribute__((noinline)) void uac_render_start(void)   /* audio ISR, bef
         RING_PUBLISH();
         ua_w = r + prime;
         uac.fill_min = prime;
+        uac.fill_q8 = (int32_t)(prime << 8);
+        uac.trim = 0;
         RING_PUBLISH();
         uac.go = 1;
         return;
     }
     fill = ua_w - ua_r;
     uac.fill_min = fill;
+    uac.fill_q8 += ((int32_t)(fill << 8) - uac.fill_q8) / 16;   /* ~16 renders (93 ms) */
     if (fill < uac.fill_lo)
         uac.fill_lo = fill;
     if (fill > uac.fill_hi)
@@ -1327,12 +1334,26 @@ static uint32_t uac_packet(uint32_t *d)
             d[i] = 0;
         return n;
     }
-    if (uac.fill_min > hi) {
-        n++;
-        uac.adj_up++;
-    } else if (uac.fill_min < lo) {
-        n--;
-        uac.adj_down++;
+    /* hold the ring's fill: a rate trim proportional to the smoothed fill's distance from the band's middle,
+     * paid out as single frames, so the host sees evenly spaced +-1 packets (the I2S clock is ~400 ppm fast: one
+     * longer packet in ~50). (It was the raw fill_min against the band: every packet until the next render one
+     * frame longer, bursts of 6 at a +1.25 % rate, which the host's rate tracking turned into jitter.) The raw
+     * fill_min still guards the ring's ends. */
+    {
+        int32_t e = uac.fill_q8 - (int32_t)(((lo + hi) / 2u) << 8);
+        e = e > (64 << 8) ? (64 << 8) : e < -(64 << 8) ? -(64 << 8) : e;
+        uac.trim += e / 512;                            /* 10 frames over: 0.02 frames a packet (~400 ppm) */
+        if (uac.fill_min > hi + 40u || uac.trim >= 256) {
+            n++;
+            uac.adj_up++;
+            if (uac.trim >= 256)
+                uac.trim -= 256;
+        } else if (uac.fill_min + 24u < lo || uac.trim <= -256) {
+            n--;
+            uac.adj_down++;
+            if (uac.trim <= -256)
+                uac.trim += 256;
+        }
     }
     r = ua_r;
     fill = ua_w - r;
