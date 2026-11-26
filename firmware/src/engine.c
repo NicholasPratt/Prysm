@@ -455,7 +455,7 @@ static uint32_t drum_vel(uint32_t h)
 
 static const patch_t PATCH_INIT = {
     .osc = {
-        {.bank = {0, 0, 0}, .pos = {0, 0, 0}, .ratio = {1, 3, 1}, .fine = 64, .mode = {MODE_FM, MODE_FM},
+        {.bank = {0, 0, 0}, .pos = {73, 0, 0}, .ratio = {1, 3, 1}, .fine = 64, .mode = {MODE_FM, MODE_FM},
          .att = {0, 0}, .rel = {60, 60}, .amt = {0, 0}, .level = 127},   /* (a new sound: OSC 1's carrier alone) */
         {.bank = {0, 0, 0}, .pos = {73, 0, 0}, .ratio = {1, 1, 1}, .fine = 64, .mode = {MODE_FM, MODE_FM},
          .att = {0, 0}, .rel = {60, 60}, .amt = {0, 0}, .level = 127},

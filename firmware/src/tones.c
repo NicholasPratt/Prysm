@@ -319,6 +319,7 @@ static const tone_rom_t TONE_ROM[TONE_ROM_N] = {
 static void tone_base(patch_t *p)                /* what a factory tone's changes are made on: the default sound as it */
 {                                               /* was before 1.8 (OSC 1's mod 1 at 70, the filter envelope at 88) */
     *p = PATCH_INIT;
+    p->osc[0].pos[0] = 0;   /* factory tones start from the sine carrier */
     p->osc[0].amt[0] = 70;
     p->fenv = 88;
 }

@@ -908,7 +908,7 @@ tabs SAVE, LOAD, INIT, UNDO, RANDOM, TONE.
   A slot whose sound came in from the editor alone has no sequencer yet: LOAD keeps the one playing, and it becomes
   that slot's. LOAD does not save the sequencer it replaces: pattern changes it has not saved yet (they save a few
   seconds after a change, once nothing plays) are let go.
-- **INIT** loads the default sound (the sequencer plays on): OSC 1's carrier alone, a sine, with OSC 2 at 0, every
+- **INIT** loads the default sound (the sequencer plays on): OSC 1's carrier alone, a sawtooth, with OSC 2 at 0, every
   modulator's amount at 0 and no filter envelope, a blank to build from. If you have unsaved changes, LOAD and INIT ask
   first, saying what would happen (**DISCARD EDITS? SAVE: LOAD 4**): press SAVE again, or HOME to keep them.
 - **UNDO** takes the last change back: the sound and the sequencer as they were before it. A change is a knob turned

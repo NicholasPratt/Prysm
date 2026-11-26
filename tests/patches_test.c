@@ -73,6 +73,7 @@ int main(void)
     patch_t a = PATCH_INIT, b = PATCH_INIT, got;
     uint32_t s;
     printf("patch bank checks\n");
+    CHECK(PATCH_INIT.osc[0].bank[0] == 0 && PATCH_INIT.osc[0].pos[0] == 73, "INIT carrier: BASIC sawtooth");
     CHECK(PATCH_INIT.lvl1 && !PATCH_INIT.lvl2 && !PATCH_INIT.osc[0].amt[0] && !PATCH_INIT.osc[0].amt[1] &&
           !PATCH_INIT.osc[1].amt[0] && !PATCH_INIT.osc[1].amt[1] && PATCH_INIT.fenv == 64 &&
           PATCH_INIT.pb[2] == 64, "a new sound: OSC 1's carrier alone (OSC 2 at 0, every mod amount 0), no filter envelope");

@@ -7,6 +7,7 @@ static const patch_t *old_init(void)
     static patch_t p;
     uint32_t i;
     p = PATCH_INIT;
+    p.osc[0].pos[0] = 0;
     p.osc[0].amt[0] = 70; p.lvl2 = 70; p.fenv = 88;
     for (i = 0; i < PART_N; i++)
         if (PART_OFF[i] == __builtin_offsetof(patch_t, fenv)) p.pb[i] = 88;
